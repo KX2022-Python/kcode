@@ -9,10 +9,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-pub const DEFAULT_ANTHROPIC_VERSION: &str = "2023-06-01";
-pub const DEFAULT_APP_NAME: &str = "claude-code";
+pub const DEFAULT_API_VERSION: &str = "2023-06-01";
+pub const DEFAULT_APP_NAME: &str = "kcode";
 pub const DEFAULT_RUNTIME: &str = "rust";
-pub const DEFAULT_AGENTIC_BETA: &str = "claude-code-20250219";
+pub const DEFAULT_AGENTIC_BETA: &str = "kcode-20250219";
 pub const DEFAULT_PROMPT_CACHING_SCOPE_BETA: &str = "prompt-caching-scope-2026-01-05";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,8 +51,8 @@ impl Default for ClientIdentity {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AnthropicRequestProfile {
-    pub anthropic_version: String,
+pub struct KcodeRequestProfile {
+    pub api_version: String,
     pub client_identity: ClientIdentity,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub betas: Vec<String>,
@@ -60,11 +60,11 @@ pub struct AnthropicRequestProfile {
     pub extra_body: Map<String, Value>,
 }
 
-impl AnthropicRequestProfile {
+impl KcodeRequestProfile {
     #[must_use]
     pub fn new(client_identity: ClientIdentity) -> Self {
         Self {
-            anthropic_version: DEFAULT_ANTHROPIC_VERSION.to_string(),
+            api_version: DEFAULT_API_VERSION.to_string(),
             client_identity,
             betas: vec![
                 DEFAULT_AGENTIC_BETA.to_string(),
@@ -93,13 +93,13 @@ impl AnthropicRequestProfile {
     pub fn header_pairs(&self) -> Vec<(String, String)> {
         let mut headers = vec![
             (
-                "anthropic-version".to_string(),
-                self.anthropic_version.clone(),
+                "x-kcode-api-version".to_string(),
+                self.api_version.clone(),
             ),
             ("user-agent".to_string(), self.client_identity.user_agent()),
         ];
         if !self.betas.is_empty() {
-            headers.push(("anthropic-beta".to_string(), self.betas.join(",")));
+            headers.push(("x-kcode-beta".to_string(), self.betas.join(",")));
         }
         headers
     }
@@ -125,7 +125,7 @@ impl AnthropicRequestProfile {
     }
 }
 
-impl Default for AnthropicRequestProfile {
+impl Default for KcodeRequestProfile {
     fn default() -> Self {
         Self::new(ClientIdentity::default())
     }
@@ -433,8 +433,8 @@ mod tests {
 
     #[test]
     fn request_profile_emits_headers_and_merges_body() {
-        let profile = AnthropicRequestProfile::new(
-            ClientIdentity::new("claude-code", "1.2.3").with_runtime("rust-cli"),
+        let profile = KcodeRequestProfile::new(
+            ClientIdentity::new("kcode", "1.2.3").with_runtime("rust-cli"),
         )
         .with_beta("tools-2026-04-01")
         .with_extra_body("metadata", serde_json::json!({"source": "test"}));
@@ -443,13 +443,13 @@ mod tests {
             profile.header_pairs(),
             vec![
                 (
-                    "anthropic-version".to_string(),
-                    DEFAULT_ANTHROPIC_VERSION.to_string()
+                    "x-kcode-api-version".to_string(),
+                    DEFAULT_API_VERSION.to_string()
                 ),
-                ("user-agent".to_string(), "claude-code/1.2.3".to_string()),
+                ("user-agent".to_string(), "kcode/1.2.3".to_string()),
                 (
-                    "anthropic-beta".to_string(),
-                    "claude-code-20250219,prompt-caching-scope-2026-01-05,tools-2026-04-01"
+                    "x-kcode-beta".to_string(),
+                    "kcode-20250219,prompt-caching-scope-2026-01-05,tools-2026-04-01"
                         .to_string(),
                 ),
             ]
@@ -465,7 +465,7 @@ mod tests {
         assert_eq!(
             body["betas"],
             serde_json::json!([
-                "claude-code-20250219",
+                "kcode-20250219",
                 "prompt-caching-scope-2026-01-05",
                 "tools-2026-04-01"
             ])

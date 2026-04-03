@@ -6,7 +6,7 @@ members = [
     "crates/commands",
     "crates/plugins",
     "crates/runtime",
-    "crates/rusty-claude-cli",
+    "crates/kcode-cli",
     "crates/telemetry",
     "crates/tools",
 ]

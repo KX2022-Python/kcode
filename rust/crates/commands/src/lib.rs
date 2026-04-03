@@ -283,20 +283,6 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
         resume_supported: false,
     },
     SlashCommandSpec {
-        name: "ultraplan",
-        aliases: &[],
-        summary: "Run a deep planning prompt with multi-step reasoning",
-        argument_hint: Some("[task]"),
-        resume_supported: false,
-    },
-    SlashCommandSpec {
-        name: "teleport",
-        aliases: &[],
-        summary: "Jump to a file or symbol by searching the workspace",
-        argument_hint: Some("<symbol-or-path>"),
-        resume_supported: false,
-    },
-    SlashCommandSpec {
         name: "debug-tool-call",
         aliases: &[],
         summary: "Replay the last tool call with debug details",
@@ -713,12 +699,6 @@ pub enum SlashCommand {
     Issue {
         context: Option<String>,
     },
-    Ultraplan {
-        task: Option<String>,
-    },
-    Teleport {
-        target: Option<String>,
-    },
     DebugToolCall,
     Model {
         model: Option<String>,
@@ -911,10 +891,6 @@ pub fn validate_slash_command_input(
         }
         "pr" => SlashCommand::Pr { context: remainder },
         "issue" => SlashCommand::Issue { context: remainder },
-        "ultraplan" => SlashCommand::Ultraplan { task: remainder },
-        "teleport" => SlashCommand::Teleport {
-            target: Some(require_remainder(command, remainder, "<symbol-or-path>")?),
-        },
         "debug-tool-call" => {
             validate_no_args(command, &args)?;
             SlashCommand::DebugToolCall
@@ -1731,9 +1707,9 @@ fn slash_command_category(name: &str) -> &'static str {
         | "export" | "plugin" | "branch" | "add-dir" | "files" | "hooks" | "release-notes" => {
             "Workspace & git"
         }
-        "agents" | "skills" | "teleport" | "debug-tool-call" | "mcp" | "context" | "tasks"
+        "agents" | "skills" | "debug-tool-call" | "mcp" | "context" | "tasks"
         | "doctor" | "ide" | "desktop" => "Discovery & debugging",
-        "bughunter" | "ultraplan" | "review" | "security-review" | "advisor" | "insights" => {
+        "bughunter" | "review" | "security-review" | "advisor" | "insights" => {
             "Analysis & automation"
         }
         "theme" | "vim" | "voice" | "color" | "effort" | "fast" | "brief" | "output-style"
@@ -3205,8 +3181,6 @@ pub fn handle_slash_command(
         | SlashCommand::Commit
         | SlashCommand::Pr { .. }
         | SlashCommand::Issue { .. }
-        | SlashCommand::Ultraplan { .. }
-        | SlashCommand::Teleport { .. }
         | SlashCommand::DebugToolCall
         | SlashCommand::Sandbox
         | SlashCommand::Model { .. }
@@ -3388,18 +3362,6 @@ mod tests {
             }))
         );
         assert_eq!(
-            SlashCommand::parse("/ultraplan ship both features"),
-            Ok(Some(SlashCommand::Ultraplan {
-                task: Some("ship both features".to_string())
-            }))
-        );
-        assert_eq!(
-            SlashCommand::parse("/teleport conversation.rs"),
-            Ok(Some(SlashCommand::Teleport {
-                target: Some("conversation.rs".to_string())
-            }))
-        );
-        assert_eq!(
             SlashCommand::parse("/debug-tool-call"),
             Ok(Some(SlashCommand::DebugToolCall))
         );
@@ -3423,18 +3385,6 @@ mod tests {
             SlashCommand::parse("/issue flaky test"),
             Ok(Some(SlashCommand::Issue {
                 context: Some("flaky test".to_string())
-            }))
-        );
-        assert_eq!(
-            SlashCommand::parse("/ultraplan ship both features"),
-            Ok(Some(SlashCommand::Ultraplan {
-                task: Some("ship both features".to_string())
-            }))
-        );
-        assert_eq!(
-            SlashCommand::parse("/teleport conversation.rs"),
-            Ok(Some(SlashCommand::Teleport {
-                target: Some("conversation.rs".to_string())
             }))
         );
         assert_eq!(
@@ -3595,15 +3545,9 @@ mod tests {
 
     #[test]
     fn rejects_missing_required_arguments() {
-        // given
-        let input = "/teleport";
-
-        // when
+        let input = "/resume";
         let error = parse_error_message(input);
-
-        // then
-        assert!(error.contains("Usage: /teleport <symbol-or-path>"));
-        assert!(error.contains("  Category         Discovery & debugging"));
+        assert!(error.contains("/resume"));
     }
 
     #[test]
@@ -3685,7 +3629,7 @@ mod tests {
         assert!(help.contains("/sandbox"));
         assert!(help.contains("/agents [list|help]"));
         assert!(help.contains("/skills [list|install <path>|help]"));
-        assert_eq!(slash_command_specs().len(), 67);
+        assert_eq!(slash_command_specs().len(), 65);
         assert_eq!(resume_supported_slash_commands().len(), 16);
     }
 
@@ -3844,12 +3788,6 @@ mod tests {
         assert!(handle_slash_command("/pr", &session, CompactionConfig::default()).is_none());
         assert!(handle_slash_command("/issue", &session, CompactionConfig::default()).is_none());
         assert!(
-            handle_slash_command("/ultraplan", &session, CompactionConfig::default()).is_none()
-        );
-        assert!(
-            handle_slash_command("/teleport foo", &session, CompactionConfig::default()).is_none()
-        );
-        assert!(
             handle_slash_command("/debug-tool-call", &session, CompactionConfig::default())
                 .is_none()
         );
@@ -3859,12 +3797,6 @@ mod tests {
         assert!(handle_slash_command("/commit", &session, CompactionConfig::default()).is_none());
         assert!(handle_slash_command("/pr", &session, CompactionConfig::default()).is_none());
         assert!(handle_slash_command("/issue", &session, CompactionConfig::default()).is_none());
-        assert!(
-            handle_slash_command("/ultraplan", &session, CompactionConfig::default()).is_none()
-        );
-        assert!(
-            handle_slash_command("/teleport foo", &session, CompactionConfig::default()).is_none()
-        );
         assert!(
             handle_slash_command("/debug-tool-call", &session, CompactionConfig::default())
                 .is_none()

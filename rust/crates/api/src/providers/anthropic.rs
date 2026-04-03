@@ -9,7 +9,7 @@ use runtime::{
 };
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use telemetry::{AnalyticsEvent, AnthropicRequestProfile, ClientIdentity, SessionTracer};
+use telemetry::{AnalyticsEvent, KcodeRequestProfile, ClientIdentity, SessionTracer};
 
 use crate::error::ApiError;
 use crate::prompt_cache::{PromptCache, PromptCacheRecord, PromptCacheStats};
@@ -117,7 +117,7 @@ pub struct AnthropicClient {
     max_retries: u32,
     initial_backoff: Duration,
     max_backoff: Duration,
-    request_profile: AnthropicRequestProfile,
+    request_profile: KcodeRequestProfile,
     session_tracer: Option<SessionTracer>,
     prompt_cache: Option<PromptCache>,
     last_prompt_cache_record: Arc<Mutex<Option<PromptCacheRecord>>>,
@@ -133,7 +133,7 @@ impl AnthropicClient {
             max_retries: DEFAULT_MAX_RETRIES,
             initial_backoff: DEFAULT_INITIAL_BACKOFF,
             max_backoff: DEFAULT_MAX_BACKOFF,
-            request_profile: AnthropicRequestProfile::default(),
+            request_profile: KcodeRequestProfile::default(),
             session_tracer: None,
             prompt_cache: None,
             last_prompt_cache_record: Arc::new(Mutex::new(None)),
@@ -149,7 +149,7 @@ impl AnthropicClient {
             max_retries: DEFAULT_MAX_RETRIES,
             initial_backoff: DEFAULT_INITIAL_BACKOFF,
             max_backoff: DEFAULT_MAX_BACKOFF,
-            request_profile: AnthropicRequestProfile::default(),
+            request_profile: KcodeRequestProfile::default(),
             session_tracer: None,
             prompt_cache: None,
             last_prompt_cache_record: Arc::new(Mutex::new(None)),
@@ -246,7 +246,7 @@ impl AnthropicClient {
     }
 
     #[must_use]
-    pub fn request_profile(&self) -> &AnthropicRequestProfile {
+    pub fn request_profile(&self) -> &KcodeRequestProfile {
         &self.request_profile
     }
 
@@ -269,7 +269,7 @@ impl AnthropicClient {
     }
 
     #[must_use]
-    pub fn with_request_profile(mut self, request_profile: AnthropicRequestProfile) -> Self {
+    pub fn with_request_profile(mut self, request_profile: KcodeRequestProfile) -> Self {
         self.request_profile = request_profile;
         self
     }

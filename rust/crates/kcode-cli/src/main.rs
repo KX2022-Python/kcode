@@ -26,7 +26,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use api::{
-    AnthropicClient, AuthSource, ContentBlockDelta, InputContentBlock, InputMessage,
+    AuthSource, ContentBlockDelta, InputContentBlock, InputMessage,
     MessageRequest, MessageResponse, OpenAiCompatClient, OpenAiCompatConfig, OutputContentBlock,
     StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition, ToolResultContentBlock,
 };
@@ -1110,60 +1110,16 @@ fn default_oauth_config() -> OAuthConfig {
 }
 
 fn run_login() -> Result<(), Box<dyn std::error::Error>> {
-    let cwd = env::current_dir()?;
-    let config = ConfigLoader::default_for(&cwd).load()?;
-    let default_oauth = default_oauth_config();
-    let oauth = config.oauth().unwrap_or(&default_oauth);
-    let callback_port = oauth.callback_port.unwrap_or(DEFAULT_OAUTH_CALLBACK_PORT);
-    let redirect_uri = runtime::loopback_redirect_uri(callback_port);
-    let pkce = generate_pkce_pair()?;
-    let state = generate_state()?;
-    let authorize_url =
-        OAuthAuthorizationRequest::from_config(oauth, redirect_uri.clone(), state.clone(), &pkce)
-            .build_url();
-
-    println!("Starting Claude OAuth login...");
-    println!("Listening for callback on {redirect_uri}");
-    if let Err(error) = open_browser(&authorize_url) {
-        eprintln!("warning: failed to open browser automatically: {error}");
-        println!("Open this URL manually:\n{authorize_url}");
-    }
-
-    let callback = wait_for_oauth_callback(callback_port)?;
-    if let Some(error) = callback.error {
-        let description = callback
-            .error_description
-            .unwrap_or_else(|| "authorization failed".to_string());
-        return Err(io::Error::other(format!("{error}: {description}")).into());
-    }
-    let code = callback.code.ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "callback did not include code")
-    })?;
-    let returned_state = callback.state.ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidData, "callback did not include state")
-    })?;
-    if returned_state != state {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "oauth state mismatch").into());
-    }
-
-    let client = AnthropicClient::from_auth(AuthSource::None).with_base_url(api::read_base_url());
-    let exchange_request =
-        OAuthTokenExchangeRequest::from_config(oauth, code, state, pkce.verifier, redirect_uri);
-    let runtime = tokio::runtime::Runtime::new()?;
-    let token_set = runtime.block_on(client.exchange_oauth_code(oauth, &exchange_request))?;
-    save_oauth_credentials(&runtime::OAuthTokenSet {
-        access_token: token_set.access_token,
-        refresh_token: token_set.refresh_token,
-        expires_at: token_set.expires_at,
-        scopes: token_set.scopes,
-    })?;
-    println!("Claude OAuth login complete.");
+    println!("Login is retired. Kcode uses configuration-driven authentication.");
+    println!("Set your credentials via KCODE_API_KEY, KCODE_BASE_URL, KCODE_MODEL env vars.");
+    println!("Or edit ~/.kcode/config.toml directly.");
+    println!("Run `kcode doctor` to verify your setup.");
     Ok(())
 }
 
 fn run_logout() -> Result<(), Box<dyn std::error::Error>> {
-    clear_oauth_credentials()?;
-    println!("Claude OAuth credentials cleared.");
+    println!("Logout is retired. Kcode does not use OAuth authentication.");
+    println!("To change your API key, update KCODE_API_KEY or edit ~/.kcode/config.toml.");
     Ok(())
 }
 
@@ -2021,8 +1977,6 @@ fn run_resume_command(
         | SlashCommand::Commit { .. }
         | SlashCommand::Pr { .. }
         | SlashCommand::Issue { .. }
-        | SlashCommand::Ultraplan { .. }
-        | SlashCommand::Teleport { .. }
         | SlashCommand::DebugToolCall { .. }
         | SlashCommand::Resume { .. }
         | SlashCommand::Model { .. }
@@ -2532,14 +2486,6 @@ impl LiveCli {
             }
             SlashCommand::Issue { context } => {
                 self.run_issue(context.as_deref())?;
-                false
-            }
-            SlashCommand::Ultraplan { task } => {
-                self.run_ultraplan(task.as_deref())?;
-                false
-            }
-            SlashCommand::Teleport { target } => {
-                self.run_teleport(target.as_deref())?;
                 false
             }
             SlashCommand::DebugToolCall => {

@@ -28,7 +28,7 @@ pub use types::{
 };
 
 pub use telemetry::{
-    AnalyticsEvent, AnthropicRequestProfile, ClientIdentity, JsonlTelemetrySink,
+    AnalyticsEvent, KcodeRequestProfile, ClientIdentity, JsonlTelemetrySink,
     MemoryTelemetrySink, SessionTraceRecord, SessionTracer, TelemetryEvent, TelemetrySink,
-    DEFAULT_ANTHROPIC_VERSION,
+    DEFAULT_API_VERSION,
 };
