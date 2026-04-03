@@ -3583,6 +3583,8 @@ fn format_provider_status_section(active_profile: &ResolvedProviderProfile) -> S
   Endpoint         {}
   Endpoint source  {}
   Model source     {}
+  Supports tools   {}
+  Supports stream  {}
   Credential env   {}
   Credential source {}",
         active_profile.profile_name,
@@ -3594,6 +3596,8 @@ fn format_provider_status_section(active_profile: &ResolvedProviderProfile) -> S
             .unwrap_or("<unset>"),
         active_profile.base_url_source.label(),
         active_profile.model_source.label(),
+        active_profile.profile.supports_tools,
+        active_profile.profile.supports_streaming,
         active_profile.credential.env_name,
         active_profile.credential.source.label(),
     )
@@ -4071,6 +4075,18 @@ fn doctor_checks(setup: &SetupContext) -> Vec<DiagnosticCheck> {
                 setup.resolved_config.model,
                 setup.active_profile.model_source.label()
             ),
+        },
+        DiagnosticCheck {
+            name: "tool capability".to_string(),
+            status: DiagnosticStatus::Ok,
+            detail: if setup.active_profile.profile.supports_tools {
+                "enabled by active profile".to_string()
+            } else {
+                format!(
+                    "disabled by active profile `{}`; tool-capable commands stay hidden",
+                    setup.active_profile.profile_name
+                )
+            },
         },
         DiagnosticCheck {
             name: "base url".to_string(),
@@ -7151,8 +7167,13 @@ supports_streaming = false
 
     #[test]
     fn rejects_unknown_allowed_tools() {
-        let error = parse_args(&["--allowedTools".to_string(), "teleport".to_string()])
-            .expect_err("tool should be rejected");
+        let error = parse_args(&[
+            "--profile".to_string(),
+            "cliproxyapi".to_string(),
+            "--allowedTools".to_string(),
+            "teleport".to_string(),
+        ])
+        .expect_err("tool should be rejected");
         assert!(error.contains("unsupported tool in --allowedTools: teleport"));
     }
 
@@ -7946,6 +7967,8 @@ supports_streaming = false
         assert!(status.contains("Model            claude-sonnet"));
         assert!(status.contains("Permission mode  workspace-write"));
         assert!(status.contains("Endpoint         https://router.example.test/v1"));
+        assert!(status.contains("Supports tools   true"));
+        assert!(status.contains("Supports stream  true"));
         assert!(status.contains("Messages         7"));
         assert!(status.contains("Latest total     10"));
         assert!(status.contains("Cumulative total 31"));
@@ -8082,6 +8105,27 @@ supports_streaming = false
         assert!(report.contains("Runtime ready    yes"));
         assert!(report.contains("[warn] legacy residue"));
         assert!(report.contains(".claw/settings.json"));
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn doctor_report_describes_toolless_profile_capability() {
+        let root = temp_dir();
+        let workspace = root.join("workspace");
+        fs::create_dir_all(workspace.join(".kcode")).expect("config dir");
+        fs::create_dir_all(workspace.join(".kcode").join("sessions")).expect("sessions dir");
+
+        let mut setup = test_setup_context(&workspace);
+        setup.resolved_config.config_file_present = true;
+        setup.resolved_config.base_url = Some("https://router.example.test".to_string());
+        setup.resolved_config.api_key_present = true;
+        setup.active_profile.profile_name = "bridge".to_string();
+        setup.active_profile.profile.supports_tools = false;
+
+        let report = render_doctor_report_from_setup(&setup);
+        assert!(report.contains("[ok  ] tool capability"));
+        assert!(report.contains("disabled by active profile `bridge`"));
 
         fs::remove_dir_all(root).expect("cleanup temp dir");
     }

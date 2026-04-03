@@ -37,6 +37,43 @@ fn status_command_applies_model_and_permission_mode_flags() {
 }
 
 #[test]
+fn status_command_reports_toolless_profile_capability() {
+    let temp_dir = unique_temp_dir("status-toolless-profile");
+    let config_home = temp_dir.join("home").join(".kcode");
+    fs::create_dir_all(&config_home).expect("config home should exist");
+    fs::write(
+        config_home.join("config.toml"),
+        r#"
+profile = "bridge"
+model = "gpt-4.1-mini"
+
+[profiles.bridge]
+default_model = "gpt-4.1-mini"
+base_url_env = "BRIDGE_BASE_URL"
+api_key_env = "BRIDGE_API_KEY"
+supports_tools = false
+supports_streaming = false
+"#,
+    )
+    .expect("write config");
+
+    let output = command_in(&temp_dir)
+        .env("KCODE_CONFIG_HOME", &config_home)
+        .arg("status")
+        .output()
+        .expect("kcode should launch");
+
+    assert_success(&output);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    assert!(stdout.contains("Status"));
+    assert!(stdout.contains("Profile          bridge"));
+    assert!(stdout.contains("Supports tools   false"));
+    assert!(stdout.contains("Supports stream  false"));
+
+    fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
+}
+
+#[test]
 fn init_command_bootstraps_user_config_home() {
     let temp_dir = unique_temp_dir("init-bootstrap");
     let config_home = temp_dir.join("home").join(".kcode");
@@ -208,6 +245,45 @@ api_key_env = "KCODE_API_KEY"
     assert!(stdout.contains("[ok  ] config file"));
     assert!(stdout.contains("[fail] base url"));
     assert!(stdout.contains("[fail] api credentials"));
+
+    fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
+}
+
+#[test]
+fn doctor_command_reports_toolless_profile_capability() {
+    let temp_dir = unique_temp_dir("doctor-toolless-profile");
+    let config_home = temp_dir.join("home").join(".kcode");
+    fs::create_dir_all(&config_home).expect("config home should exist");
+    fs::write(
+        config_home.join("config.toml"),
+        r#"
+profile = "bridge"
+model = "gpt-4.1-mini"
+base_url = "https://router.example.test/v1"
+api_key_env = "BRIDGE_API_KEY"
+
+[profiles.bridge]
+default_model = "gpt-4.1-mini"
+base_url_env = "BRIDGE_BASE_URL"
+api_key_env = "BRIDGE_API_KEY"
+supports_tools = false
+supports_streaming = false
+"#,
+    )
+    .expect("write config");
+
+    let output = command_in(&temp_dir)
+        .env("KCODE_CONFIG_HOME", &config_home)
+        .env("BRIDGE_API_KEY", "test-bridge-key")
+        .arg("doctor")
+        .output()
+        .expect("kcode should launch");
+
+    assert_success(&output);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    assert!(stdout.contains("Doctor"));
+    assert!(stdout.contains("[ok  ] tool capability"));
+    assert!(stdout.contains("disabled by active profile `bridge`"));
 
     fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
 }
