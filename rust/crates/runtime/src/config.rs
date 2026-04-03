@@ -21,6 +21,8 @@ pub enum ConfigSource {
     User,
     Project,
     Local,
+    /// Enterprise-managed MCP configuration (highest priority, can enforce deny rules).
+    Managed,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

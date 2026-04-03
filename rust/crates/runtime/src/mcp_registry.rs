@@ -170,9 +170,12 @@ impl McpRegistrySnapshot {
 }
 
 /// Assembles an MCP registry from multiple configuration sources.
+/// Supports enterprise-managed MCP configuration with exclusive mode.
 pub struct McpRegistryAssembler {
     sources: BTreeMap<ConfigSource, Vec<ScopedMcpServerConfig>>,
     policy: McpPolicy,
+    /// When true, only managed servers are allowed; all others are blocked.
+    managed_exclusive: bool,
 }
 
 impl McpRegistryAssembler {
@@ -180,6 +183,7 @@ impl McpRegistryAssembler {
         Self {
             sources: BTreeMap::new(),
             policy: McpPolicy::new(),
+            managed_exclusive: false,
         }
     }
 
@@ -191,13 +195,40 @@ impl McpRegistryAssembler {
         self.policy = policy;
     }
 
+    /// Enable managed-exclusive mode: only managed servers are allowed.
+    pub fn with_managed_exclusive(mut self, exclusive: bool) -> Self {
+        self.managed_exclusive = exclusive;
+        self
+    }
+
+    /// Load managed MCP config from a JSON file.
+    pub fn load_managed_config(&mut self, path: &Path) -> Result<(), String> {
+        let servers = load_mcp_config_file(path)?;
+        let managed_servers: Vec<ScopedMcpServerConfig> = servers
+            .into_iter()
+            .map(|mut s| {
+                s.scope = ConfigSource::Managed;
+                s
+            })
+            .collect();
+        if !managed_servers.is_empty() {
+            self.sources
+                .entry(ConfigSource::Managed)
+                .or_default()
+                .extend(managed_servers);
+        }
+        Ok(())
+    }
+
     pub fn assemble(mut self) -> McpRegistrySnapshot {
         let mut snapshot = McpRegistrySnapshot::default();
 
+        // Priority order: Managed > User > Project > Local
         let priority_order = [
             ConfigSource::Local,
             ConfigSource::Project,
             ConfigSource::User,
+            ConfigSource::Managed,
         ];
 
         let mut signature_map: BTreeMap<String, McpServerDescriptor> = BTreeMap::new();
@@ -206,6 +237,16 @@ impl McpRegistryAssembler {
         for source in &priority_order {
             if let Some(servers) = self.sources.remove(source) {
                 for scoped in servers {
+                    // In managed-exclusive mode, block non-managed servers
+                    if self.managed_exclusive && scoped.scope != ConfigSource::Managed {
+                        snapshot.blocked_servers.push(BlockedServer {
+                            name: normalized_server_name(&scoped.config),
+                            source: scoped.scope,
+                            reason: "blocked by managed-exclusive policy".to_string(),
+                        });
+                        continue;
+                    }
+
                     let name = normalized_server_name(&scoped.config);
 
                     if self.policy.is_denied(&name, &scoped.config) {
@@ -584,6 +625,64 @@ mod tests {
                 assert_eq!(cfg.headers.get("Authorization"), Some(&"Bearer token".to_string()));
             }
             _ => panic!("expected SSE config"),
+        }
+    }
+
+    #[test]
+    fn managed_exclusive_blocks_non_managed_servers() {
+        let mut assembler = McpRegistryAssembler::new();
+        // Add a user-level server
+        assembler.add_source(
+            ConfigSource::User,
+            vec![ScopedMcpServerConfig {
+                scope: ConfigSource::User,
+                config: McpServerConfig::Stdio(McpStdioServerConfig {
+                    command: "user-tool".into(),
+                    args: vec![],
+                    env: BTreeMap::new(),
+                    tool_call_timeout_ms: None,
+                }),
+            }],
+        );
+        // Add a managed-level server
+        assembler.add_source(
+            ConfigSource::Managed,
+            vec![ScopedMcpServerConfig {
+                scope: ConfigSource::Managed,
+                config: McpServerConfig::Stdio(McpStdioServerConfig {
+                    command: "managed-tool".into(),
+                    args: vec![],
+                    env: BTreeMap::new(),
+                    tool_call_timeout_ms: None,
+                }),
+            }],
+        );
+
+        // Without managed-exclusive: both should be active
+        let snapshot = assembler.clone().assemble();
+        assert_eq!(snapshot.active_servers.len(), 2);
+
+        // With managed-exclusive: only managed should be active
+        let snapshot = assembler.with_managed_exclusive(true).assemble();
+        assert_eq!(snapshot.active_servers.len(), 1);
+        assert_eq!(snapshot.active_servers[0].config, McpServerConfig::Stdio(McpStdioServerConfig {
+            command: "managed-tool".into(),
+            args: vec![],
+            env: BTreeMap::new(),
+            tool_call_timeout_ms: None,
+        }));
+        assert_eq!(snapshot.blocked_servers.len(), 1);
+        assert!(snapshot.blocked_servers[0].reason.contains("managed-exclusive"));
+    }
+}
+
+// Clone impl for McpRegistryAssembler (needed for tests)
+impl Clone for McpRegistryAssembler {
+    fn clone(&self) -> Self {
+        Self {
+            sources: self.sources.clone(),
+            policy: McpPolicy::new(), // policy doesn't need to be cloned for tests
+            managed_exclusive: self.managed_exclusive,
         }
     }
 }
