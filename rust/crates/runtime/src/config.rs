@@ -412,12 +412,6 @@ impl RuntimeConfig {
     pub fn sandbox(&self) -> &SandboxConfig {
         &self.feature_config.sandbox
     }
-
-    #[cfg(test)]
-    pub(crate) fn with_merged_for_test(mut self, merged: BTreeMap<String, JsonValue>) -> Self {
-        self.merged = merged;
-        self
-    }
 }
 
 impl RuntimeFeatureConfig {

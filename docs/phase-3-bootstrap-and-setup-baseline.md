@@ -50,3 +50,9 @@ Phase 3 removes the imported OAuth-first startup assumption from the Kcode CLI e
 - `cargo test -p rusty-claude-cli --bin kcode doctor_report`
 - `cargo test -p rusty-claude-cli --bin kcode parses_login_and_logout_subcommands`
 - `cargo test -p rusty-claude-cli --test cli_flags_and_config_defaults --test resume_slash_commands`
+
+## Deferred Environment Note
+
+- 2026-04-03 verification hit a host-level Rust toolchain issue: `/home/ubuntu/.rustup` is a broken symlink, so direct `cargo` / `rustup` invocations fail before workspace code runs
+- current workaround is to run with `RUSTUP_HOME=/home/ubuntu/.cache/kcode-rustup` and the matching task-local toolchain described in `README.md`
+- this does not block Phase 4 implementation, but it should be re-evaluated during final environment cleanup so local developer commands do not depend on the workaround
