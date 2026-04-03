@@ -967,6 +967,34 @@ fn filter_tool_specs(
     tool_registry.definitions(allowed_tools)
 }
 
+/// Filter tool specs by permission mode before sending to the model.
+/// Tools that require a higher permission level than the active mode
+/// are excluded from the model-visible tool list.
+fn filter_tools_by_permission_mode(
+    tool_registry: &GlobalToolRegistry,
+    allowed_tools: Option<&AllowedToolSet>,
+    active_mode: PermissionMode,
+) -> Vec<ToolDefinition> {
+    tool_registry
+        .definitions(allowed_tools)
+        .into_iter()
+        .filter(|def| {
+            // Check if this tool's required permission is compatible with active mode
+            // ReadOnly tools are always visible; higher tools require matching mode
+            match def.name.as_str() {
+                "bash" => matches!(active_mode, PermissionMode::DangerFullAccess),
+                "write_file" | "edit_file" | "notebook_edit" => {
+                    matches!(
+                        active_mode,
+                        PermissionMode::WorkspaceWrite | PermissionMode::DangerFullAccess
+                    )
+                }
+                _ => true, // ReadOnly tools always visible
+            }
+        })
+        .collect()
+}
+
 fn parse_system_prompt_args(args: &[String]) -> Result<CliAction, String> {
     let mut cwd = env::current_dir().map_err(|error| error.to_string())?;
     let mut date = DEFAULT_DATE.to_string();

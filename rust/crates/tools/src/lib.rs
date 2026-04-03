@@ -56,6 +56,63 @@ pub struct ToolSpec {
     pub required_permission: PermissionMode,
 }
 
+/// Context passed to a tool when it is executed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolUseContext {
+    pub tool_name: String,
+    pub tool_input: String,
+    pub permission_mode: PermissionMode,
+}
+
+impl ToolUseContext {
+    pub fn new(tool_name: String, tool_input: String, permission_mode: PermissionMode) -> Self {
+        Self {
+            tool_name,
+            tool_input,
+            permission_mode,
+        }
+    }
+}
+
+/// Assemble a tool pool from specs with allow-list and optional deny filtering.
+pub struct ToolPoolAssembler {
+    specs: Vec<ToolSpec>,
+    allowed_tools: Option<BTreeSet<String>>,
+}
+
+impl ToolPoolAssembler {
+    pub fn new() -> Self {
+        Self {
+            specs: Vec::new(),
+            allowed_tools: None,
+        }
+    }
+
+    pub fn with_specs(mut self, specs: Vec<ToolSpec>) -> Self {
+        self.specs.extend(specs);
+        self
+    }
+
+    pub fn with_allowed_tools(mut self, tools: Option<BTreeSet<String>>) -> Self {
+        self.allowed_tools = tools;
+        self
+    }
+
+    /// Assemble the final set of allowed tool names.
+    pub fn assemble(&self) -> BTreeSet<String> {
+        self.specs
+            .iter()
+            .filter(|spec| {
+                self.allowed_tools
+                    .as_ref()
+                    .map(|allowed| allowed.contains(spec.name))
+                    .unwrap_or(true)
+            })
+            .map(|spec| spec.name.to_string())
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlobalToolRegistry {
     include_builtin_tools: bool,

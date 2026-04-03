@@ -88,7 +88,7 @@ pub use oauth::{
 };
 pub use permissions::{
     PermissionContext, PermissionMode, PermissionOutcome, PermissionOverride, PermissionPolicy,
-    PermissionPromptDecision, PermissionPrompter, PermissionRequest,
+    PermissionPromptDecision, PermissionPrompter, PermissionRequest, ToolPermissionContext,
 };
 pub use provider_profile::{
     builtin_profiles, CredentialResolution, CredentialResolver, CredentialSource, ProfileResolver,
