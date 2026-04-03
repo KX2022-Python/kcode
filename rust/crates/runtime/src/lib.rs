@@ -11,6 +11,7 @@ mod mcp_client;
 mod mcp_stdio;
 mod oauth;
 mod permissions;
+mod provider_profile;
 mod prompt;
 mod remote;
 pub mod sandbox;
@@ -74,6 +75,11 @@ pub use oauth::{
 pub use permissions::{
     PermissionContext, PermissionMode, PermissionOutcome, PermissionOverride, PermissionPolicy,
     PermissionPromptDecision, PermissionPrompter, PermissionRequest,
+};
+pub use provider_profile::{
+    builtin_profiles, CredentialResolution, CredentialResolver, CredentialSource, ProfileResolver,
+    ProviderLaunchConfig, ProviderLauncher, ProviderProfile, ProviderProfileError,
+    ResolvedProviderProfile, ResolutionSource,
 };
 pub use prompt::{
     load_system_prompt, prepend_bullets, ContextFile, ProjectContext, PromptBuildError,

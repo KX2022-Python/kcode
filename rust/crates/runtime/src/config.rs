@@ -349,6 +349,21 @@ impl RuntimeConfig {
     }
 
     #[must_use]
+    pub fn get_path<'a>(&'a self, path: &[&str]) -> Option<&'a JsonValue> {
+        let mut current: Option<&JsonValue> = None;
+
+        for (index, key) in path.iter().enumerate() {
+            current = if index == 0 {
+                self.merged.get(*key)
+            } else {
+                current.and_then(JsonValue::as_object).and_then(|object| object.get(*key))
+            };
+        }
+
+        current
+    }
+
+    #[must_use]
     pub fn as_json(&self) -> JsonValue {
         JsonValue::Object(self.merged.clone())
     }
@@ -396,6 +411,12 @@ impl RuntimeConfig {
     #[must_use]
     pub fn sandbox(&self) -> &SandboxConfig {
         &self.feature_config.sandbox
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_merged_for_test(mut self, merged: BTreeMap<String, JsonValue>) -> Self {
+        self.merged = merged;
+        self
     }
 }
 

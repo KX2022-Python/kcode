@@ -69,6 +69,7 @@ pub struct OpenAiCompatClient {
     api_key: String,
     config: OpenAiCompatConfig,
     base_url: String,
+    request_timeout: Duration,
     max_retries: u32,
     initial_backoff: Duration,
     max_backoff: Duration,
@@ -85,6 +86,7 @@ impl OpenAiCompatClient {
             api_key: api_key.into(),
             config,
             base_url: read_base_url(config),
+            request_timeout: Duration::from_secs(120),
             max_retries: DEFAULT_MAX_RETRIES,
             initial_backoff: DEFAULT_INITIAL_BACKOFF,
             max_backoff: DEFAULT_MAX_BACKOFF,
@@ -104,6 +106,12 @@ impl OpenAiCompatClient {
     #[must_use]
     pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
+        self
+    }
+
+    #[must_use]
+    pub fn with_request_timeout(mut self, request_timeout: Duration) -> Self {
+        self.request_timeout = request_timeout;
         self
     }
 
@@ -195,6 +203,7 @@ impl OpenAiCompatClient {
             .post(&request_url)
             .header("content-type", "application/json")
             .bearer_auth(&self.api_key)
+            .timeout(self.request_timeout)
             .json(&build_chat_completion_request(request, self.config()))
             .send()
             .await

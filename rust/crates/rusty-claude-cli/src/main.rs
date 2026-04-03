@@ -24,12 +24,13 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use api::{
-    resolve_startup_auth_source, AnthropicClient, AuthSource, ContentBlockDelta, InputContentBlock,
-    InputMessage, MessageRequest, MessageResponse, OutputContentBlock, PromptCache,
+    AnthropicClient, AuthSource, ContentBlockDelta, InputContentBlock, InputMessage,
+    MessageRequest, MessageResponse, OpenAiCompatClient, OpenAiCompatConfig, OutputContentBlock,
     StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition, ToolResultContentBlock,
 };
 
 use commands::{
+    build_command_registry_snapshot, CommandRegistryContext,
     handle_agents_slash_command, handle_mcp_slash_command, handle_plugins_slash_command,
     handle_skills_slash_command, render_slash_command_help, resume_supported_slash_commands,
     slash_command_specs, validate_slash_command_input, SlashCommand,
@@ -38,14 +39,17 @@ use init::{initialize_repo, initialize_user_config};
 use plugins::{PluginHooks, PluginManager, PluginManagerConfig, PluginRegistry};
 use render::{MarkdownStreamState, Spinner, TerminalRenderer};
 use runtime::{
-    clear_oauth_credentials, generate_pkce_pair, generate_state, load_system_prompt,
-    parse_oauth_callback_request_target, resolve_sandbox_status, save_oauth_credentials, ApiClient,
-    ApiRequest, AssistantEvent, BootstrapInputs, CompactionConfig, ConfigLoader, ConfigSource,
-    ContentBlock, ConversationMessage, ConversationRuntime, DiagnosticCheck, DiagnosticStatus,
-    MessageRole, OAuthAuthorizationRequest, OAuthConfig, OAuthTokenExchangeRequest,
-    PermissionMode, PermissionPolicy, ProjectContext, PromptCacheEvent, ResolvedConfig,
-    ResolvedPermissionMode, RuntimeError, Session, SetupContext, SetupMode, StdioMode,
-    TokenUsage, ToolError, ToolExecutor, TrustPolicyContext, UsageTracker,
+    builtin_profiles, clear_oauth_credentials, generate_pkce_pair, generate_state,
+    load_system_prompt, parse_oauth_callback_request_target, resolve_sandbox_status,
+    save_oauth_credentials, ApiClient, ApiRequest, AssistantEvent, BootstrapInputs,
+    CompactionConfig, ConfigLoader, ConfigSource, ContentBlock, ConversationMessage,
+    ConversationRuntime, DiagnosticCheck, DiagnosticStatus, MessageRole,
+    OAuthAuthorizationRequest, OAuthConfig, OAuthTokenExchangeRequest, PermissionMode,
+    PermissionPolicy, ProfileResolver, ProjectContext, PromptCacheEvent, ProviderLaunchConfig,
+    ProviderLauncher, ProviderProfile, ProviderProfileError, ResolvedConfig,
+    ResolvedPermissionMode, ResolvedProviderProfile, ResolutionSource, RuntimeError, Session,
+    SetupContext, SetupMode, StdioMode, TokenUsage, ToolError, ToolExecutor,
+    TrustPolicyContext, UsageTracker,
 };
 use serde_json::json;
 use tools::GlobalToolRegistry;
@@ -87,6 +91,7 @@ const CLI_OPTION_SUGGESTIONS: &[&str] = &[
     "--version",
     "-V",
     "--model",
+    "--profile",
     "--output-format",
     "--permission-mode",
     "--dangerously-skip-permissions",
@@ -127,29 +132,72 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             session_path,
             commands,
         } => resume_session(&session_path, &commands),
-        CliAction::Doctor => print_doctor()?,
-        CliAction::ConfigShow { section } => print_config_show(section.as_deref())?,
+        CliAction::Doctor {
+            model,
+            model_explicit,
+            profile,
+        } => {
+            print_doctor(model_explicit.then_some(model.as_str()), profile.as_deref())?
+        }
+        CliAction::ConfigShow {
+            section,
+            model,
+            model_explicit,
+            profile,
+        } => print_config_show(
+            section.as_deref(),
+            model_explicit.then_some(model.as_str()),
+            profile.as_deref(),
+        )?,
+        CliAction::Profile {
+            selection,
+            model,
+            model_explicit,
+            profile,
+        } => print_profile_report(
+            &selection,
+            model_explicit.then_some(model.as_str()),
+            profile.as_deref(),
+        )?,
         CliAction::Status {
             model,
+            model_explicit,
+            profile,
             permission_mode,
-        } => print_status_snapshot(&model, permission_mode)?,
+        } => print_status_snapshot(
+            &model,
+            model_explicit.then_some(model.as_str()),
+            profile.as_deref(),
+            permission_mode,
+        )?,
         CliAction::Sandbox => print_sandbox_status_snapshot()?,
         CliAction::Prompt {
             prompt,
             model,
+            model_explicit,
+            profile,
             output_format,
             allowed_tools,
             permission_mode,
-        } => LiveCli::new(model, true, allowed_tools, permission_mode)?
+        } => LiveCli::new(
+            model,
+            model_explicit,
+            profile,
+            true,
+            allowed_tools,
+            permission_mode,
+        )?
             .run_turn_with_output(&prompt, output_format)?,
         CliAction::Login => run_login()?,
         CliAction::Logout => run_logout()?,
         CliAction::Init => run_init()?,
         CliAction::Repl {
             model,
+            model_explicit,
+            profile,
             allowed_tools,
             permission_mode,
-        } => run_repl(model, allowed_tools, permission_mode)?,
+        } => run_repl(model, model_explicit, profile, allowed_tools, permission_mode)?,
         CliAction::Help => print_help(),
     }
     Ok(())
@@ -175,18 +223,35 @@ enum CliAction {
         session_path: PathBuf,
         commands: Vec<String>,
     },
-    Doctor,
+    Doctor {
+        model: String,
+        model_explicit: bool,
+        profile: Option<String>,
+    },
     ConfigShow {
         section: Option<String>,
+        model: String,
+        model_explicit: bool,
+        profile: Option<String>,
+    },
+    Profile {
+        selection: ProfileCommandSelection,
+        model: String,
+        model_explicit: bool,
+        profile: Option<String>,
     },
     Status {
         model: String,
+        model_explicit: bool,
+        profile: Option<String>,
         permission_mode: PermissionMode,
     },
     Sandbox,
     Prompt {
         prompt: String,
         model: String,
+        model_explicit: bool,
+        profile: Option<String>,
         output_format: CliOutputFormat,
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
@@ -196,11 +261,21 @@ enum CliAction {
     Init,
     Repl {
         model: String,
+        model_explicit: bool,
+        profile: Option<String>,
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
     },
     // prompt-mode formatting is only supported for non-interactive runs
     Help,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ProfileCommandSelection {
+    List,
+    Show {
+        profile_name: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -224,6 +299,8 @@ impl CliOutputFormat {
 #[allow(clippy::too_many_lines)]
 fn parse_args(args: &[String]) -> Result<CliAction, String> {
     let mut model = DEFAULT_MODEL.to_string();
+    let mut model_explicit = false;
+    let mut profile = None;
     let mut output_format = CliOutputFormat::Text;
     let mut permission_mode = default_permission_mode();
     let mut wants_help = false;
@@ -247,10 +324,23 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                     .get(index + 1)
                     .ok_or_else(|| "missing value for --model".to_string())?;
                 model = resolve_model_alias(value).to_string();
+                model_explicit = true;
+                index += 2;
+            }
+            "--profile" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --profile".to_string())?;
+                profile = Some(value.trim().to_string());
                 index += 2;
             }
             flag if flag.starts_with("--model=") => {
                 model = resolve_model_alias(&flag[8..]).to_string();
+                model_explicit = true;
+                index += 1;
+            }
+            flag if flag.starts_with("--profile=") => {
+                profile = Some(flag[10..].trim().to_string());
                 index += 1;
             }
             "--output-format" => {
@@ -288,6 +378,8 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                 return Ok(CliAction::Prompt {
                     prompt,
                     model: resolve_model_alias(&model).to_string(),
+                    model_explicit,
+                    profile: profile.clone(),
                     output_format,
                     allowed_tools: normalize_allowed_tools(&allowed_tool_values)?,
                     permission_mode,
@@ -345,6 +437,8 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
     if rest.is_empty() {
         return Ok(CliAction::Repl {
             model,
+            model_explicit,
+            profile,
             allowed_tools,
             permission_mode,
         });
@@ -352,7 +446,14 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
     if rest.first().map(String::as_str) == Some("--resume") {
         return parse_resume_args(&rest[1..]);
     }
-    if let Some(action) = parse_single_word_command_alias(&rest, &model, permission_mode) {
+    if let Some(action) = parse_single_word_command_alias(
+        &rest,
+        &model,
+        model_explicit,
+        profile.as_deref(),
+        permission_mode,
+    )
+    {
         return action;
     }
 
@@ -367,8 +468,13 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             args: join_optional_args(&rest[1..]),
         }),
         "system-prompt" => parse_system_prompt_args(&rest[1..]),
-        "doctor" => Ok(CliAction::Doctor),
-        "config" => parse_config_args(&rest[1..]),
+        "doctor" => Ok(CliAction::Doctor {
+            model,
+            model_explicit,
+            profile,
+        }),
+        "config" => parse_config_args(&rest[1..], &model, model_explicit, profile.clone()),
+        "profile" => parse_profile_args(&rest[1..], &model, model_explicit, profile.clone()),
         "login" => Ok(CliAction::Login),
         "logout" => Ok(CliAction::Logout),
         "init" => Ok(CliAction::Init),
@@ -380,6 +486,8 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             Ok(CliAction::Prompt {
                 prompt,
                 model,
+                model_explicit,
+                profile,
                 output_format,
                 allowed_tools,
                 permission_mode,
@@ -389,6 +497,8 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
         _other => Ok(CliAction::Prompt {
             prompt: rest.join(" "),
             model,
+            model_explicit,
+            profile,
             output_format,
             allowed_tools,
             permission_mode,
@@ -399,6 +509,8 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
 fn parse_single_word_command_alias(
     rest: &[String],
     model: &str,
+    model_explicit: bool,
+    profile: Option<&str>,
     permission_mode: PermissionMode,
 ) -> Option<Result<CliAction, String>> {
     if rest.len() != 1 {
@@ -408,9 +520,21 @@ fn parse_single_word_command_alias(
     match rest[0].as_str() {
         "help" => Some(Ok(CliAction::Help)),
         "version" => Some(Ok(CliAction::Version)),
-        "doctor" => Some(Ok(CliAction::Doctor)),
+        "doctor" => Some(Ok(CliAction::Doctor {
+            model: model.to_string(),
+            model_explicit,
+            profile: profile.map(ToOwned::to_owned),
+        })),
+        "profile" => Some(Ok(CliAction::Profile {
+            selection: ProfileCommandSelection::Show { profile_name: None },
+            model: model.to_string(),
+            model_explicit,
+            profile: profile.map(ToOwned::to_owned),
+        })),
         "status" => Some(Ok(CliAction::Status {
             model: model.to_string(),
+            model_explicit,
+            profile: profile.map(ToOwned::to_owned),
             permission_mode,
         })),
         "sandbox" => Some(Ok(CliAction::Sandbox)),
@@ -424,6 +548,7 @@ fn bare_slash_command_guidance(command_name: &str) -> Option<String> {
         "agents"
             | "mcp"
             | "skills"
+            | "profile"
             | "system-prompt"
             | "doctor"
             | "config"
@@ -449,15 +574,59 @@ fn bare_slash_command_guidance(command_name: &str) -> Option<String> {
     Some(guidance)
 }
 
-fn parse_config_args(args: &[String]) -> Result<CliAction, String> {
+fn parse_config_args(
+    args: &[String],
+    model: &str,
+    model_explicit: bool,
+    profile: Option<String>,
+) -> Result<CliAction, String> {
     match args {
-        [] => Ok(CliAction::ConfigShow { section: None }),
-        [subcommand] if subcommand == "show" => Ok(CliAction::ConfigShow { section: None }),
+        [] => Ok(CliAction::ConfigShow {
+            section: None,
+            model: model.to_string(),
+            model_explicit,
+            profile,
+        }),
+        [subcommand] if subcommand == "show" => Ok(CliAction::ConfigShow {
+            section: None,
+            model: model.to_string(),
+            model_explicit,
+            profile,
+        }),
         [subcommand, section] if subcommand == "show" => Ok(CliAction::ConfigShow {
             section: Some(section.clone()),
+            model: model.to_string(),
+            model_explicit,
+            profile,
         }),
-        _ => Err("usage: kcode config show [section]".to_string()),
+        _ => Err("usage: kcode config show [env|hooks|model|plugins|profile|provider]".to_string()),
     }
+}
+
+fn parse_profile_args(
+    args: &[String],
+    model: &str,
+    model_explicit: bool,
+    profile: Option<String>,
+) -> Result<CliAction, String> {
+    let selection = match args {
+        [] => ProfileCommandSelection::Show { profile_name: None },
+        [subcommand] if subcommand == "list" => ProfileCommandSelection::List,
+        [subcommand] if subcommand == "show" => {
+            ProfileCommandSelection::Show { profile_name: None }
+        }
+        [subcommand, name] if subcommand == "show" => ProfileCommandSelection::Show {
+            profile_name: Some(name.clone()),
+        },
+        _ => return Err("usage: kcode profile [list|show [name]]".to_string()),
+    };
+
+    Ok(CliAction::Profile {
+        selection,
+        model: model.to_string(),
+        model_explicit,
+        profile,
+    })
 }
 
 fn join_optional_args(args: &[String]) -> Option<String> {
@@ -1063,9 +1232,10 @@ fn format_unknown_slash_command_message(name: &str) -> String {
     }
 }
 
-fn format_model_report(model: &str, message_count: usize, turns: u32) -> String {
+fn format_model_report(model: &str, profile: &str, message_count: usize, turns: u32) -> String {
     format!(
         "Model
+  Active profile   {profile}
   Current model    {model}
   Session messages {message_count}
   Session turns    {turns}
@@ -1076,9 +1246,15 @@ Usage
     )
 }
 
-fn format_model_switch_report(previous: &str, next: &str, message_count: usize) -> String {
+fn format_model_switch_report(
+    previous: &str,
+    next: &str,
+    profile: &str,
+    message_count: usize,
+) -> String {
     format!(
         "Model updated
+  Active profile   {profile}
   Previous         {previous}
   Current          {next}
   Preserved msgs   {message_count}"
@@ -1176,6 +1352,7 @@ fn render_resume_usage() -> String {
 fn load_setup_context(
     mode: SetupMode,
     model_override: Option<&str>,
+    profile_override: Option<&str>,
     permission_mode: PermissionMode,
     session_id: Option<&str>,
 ) -> Result<SetupContext, Box<dyn std::error::Error>> {
@@ -1183,6 +1360,8 @@ fn load_setup_context(
     let loader = ConfigLoader::default_for(&cwd);
     let discovered_entries = loader.discover();
     let runtime_config = loader.load()?;
+    let active_profile =
+        ProfileResolver::resolve(&runtime_config, profile_override, model_override)?;
     let project_context = ProjectContext::discover_with_git(&cwd, DEFAULT_DATE)?;
     let git_root = find_git_root_in(&cwd).ok();
     let project_root = git_root.clone().unwrap_or_else(|| cwd.clone());
@@ -1201,12 +1380,12 @@ fn load_setup_context(
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name == "config.toml")
         }),
-        model: resolve_setup_model(model_override, &runtime_config),
-        base_url: resolve_setup_base_url(&runtime_config),
-        api_key_env: resolve_setup_api_key_env(&runtime_config),
-        api_key_present: resolve_setup_api_key_present(&runtime_config),
+        model: active_profile.model.clone(),
+        base_url: active_profile.base_url.clone(),
+        api_key_env: active_profile.credential.env_name.clone(),
+        api_key_present: active_profile.credential.api_key.is_some(),
         oauth_credentials_present,
-        profile: config_string_value(&runtime_config, &["profile"]),
+        profile: Some(active_profile.profile_name.clone()),
         legacy_paths,
     };
     let trust_policy = TrustPolicyContext {
@@ -1229,6 +1408,7 @@ fn load_setup_context(
         project_root,
         git_root,
         resolved_config,
+        active_profile,
         trust_policy,
         mode,
     })
@@ -1259,36 +1439,6 @@ fn config_string_value(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
-}
-
-fn resolve_setup_model(model_override: Option<&str>, runtime_config: &runtime::RuntimeConfig) -> String {
-    model_override
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(resolve_model_alias)
-        .map(ToOwned::to_owned)
-        .or_else(|| read_non_empty_env(PRIMARY_MODEL_ENV).map(|value| resolve_model_alias(&value).to_string()))
-        .or_else(|| config_string_value(runtime_config, &["model"]).map(|value| resolve_model_alias(&value).to_string()))
-        .unwrap_or_else(|| DEFAULT_MODEL.to_string())
-}
-
-fn resolve_setup_base_url(runtime_config: &runtime::RuntimeConfig) -> Option<String> {
-    read_non_empty_env(PRIMARY_BASE_URL_ENV)
-        .or_else(|| config_string_value(runtime_config, &["base_url", "baseUrl"]))
-        .or_else(|| read_non_empty_env("ANTHROPIC_BASE_URL"))
-}
-
-fn resolve_setup_api_key_env(runtime_config: &runtime::RuntimeConfig) -> String {
-    config_string_value(runtime_config, &["api_key_env", "apiKeyEnv"])
-        .unwrap_or_else(|| PRIMARY_API_KEY_ENV.to_string())
-}
-
-fn resolve_setup_api_key_present(runtime_config: &runtime::RuntimeConfig) -> bool {
-    let resolved_env = resolve_setup_api_key_env(runtime_config);
-    read_non_empty_env(PRIMARY_API_KEY_ENV).is_some()
-        || read_non_empty_env(&resolved_env).is_some()
-        || read_non_empty_env("ANTHROPIC_API_KEY").is_some()
-        || read_non_empty_env("ANTHROPIC_AUTH_TOKEN").is_some()
 }
 
 fn resolve_setup_session_dir(cwd: &Path, runtime_config: &runtime::RuntimeConfig) -> PathBuf {
@@ -1350,7 +1500,10 @@ fn has_explicit_bootstrap_inputs(setup: &SetupContext) -> bool {
     setup.resolved_config.config_file_present
         || setup.resolved_config.base_url.is_some()
         || setup.resolved_config.api_key_present
-        || setup.resolved_config.oauth_credentials_present
+        || !matches!(
+            setup.active_profile.profile_source,
+            ResolutionSource::ProfileDefault
+        )
 }
 
 fn ensure_setup_ready_for_runtime(setup: &SetupContext) -> Result<(), Box<dyn std::error::Error>> {
@@ -1371,7 +1524,7 @@ fn ensure_setup_ready_for_runtime(setup: &SetupContext) -> Result<(), Box<dyn st
         )
         .into());
     }
-    if !setup.resolved_config.api_key_present && !setup.resolved_config.oauth_credentials_present {
+    if !setup.resolved_config.api_key_present {
         return Err(format!(
             "missing API credentials.\nSet `{PRIMARY_API_KEY_ENV}` or the env named by `api_key_env`, then rerun `{CLI_NAME} doctor`."
         )
@@ -1578,10 +1731,18 @@ fn run_resume_command(
         SlashCommand::Status => {
             let tracker = UsageTracker::from_session(session);
             let usage = tracker.cumulative_usage();
+            let setup = load_setup_context(
+                SetupMode::Resume,
+                None,
+                None,
+                default_permission_mode(),
+                Some(&session.session_id),
+            )?;
             Ok(ResumeCommandOutcome {
                 session: session.clone(),
                 message: Some(format_status_report(
                     "restored-session",
+                    Some(&setup.active_profile),
                     StatusUsage {
                         message_count: session.messages.len(),
                         turns: tracker.turns(),
@@ -1615,11 +1776,11 @@ fn run_resume_command(
         }
         SlashCommand::Doctor => Ok(ResumeCommandOutcome {
             session: session.clone(),
-            message: Some(render_doctor_report()?),
+            message: Some(render_doctor_report(None, None)?),
         }),
         SlashCommand::Config { section } => Ok(ResumeCommandOutcome {
             session: session.clone(),
-            message: Some(render_config_report(section.as_deref())?),
+            message: Some(render_config_report(section.as_deref(), None, None)?),
         }),
         SlashCommand::Mcp { action, target } => {
             let cwd = env::current_dir()?;
@@ -1735,10 +1896,19 @@ fn run_resume_command(
 
 fn run_repl(
     model: String,
+    model_explicit: bool,
+    profile: Option<String>,
     allowed_tools: Option<AllowedToolSet>,
     permission_mode: PermissionMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut cli = LiveCli::new(model, true, allowed_tools, permission_mode)?;
+    let mut cli = LiveCli::new(
+        model,
+        model_explicit,
+        profile,
+        true,
+        allowed_tools,
+        permission_mode,
+    )?;
     let mut editor =
         input::LineEditor::new("> ", cli.repl_completion_candidates().unwrap_or_default());
     println!("{}", cli.startup_banner());
@@ -1800,10 +1970,13 @@ struct ManagedSessionSummary {
 
 struct LiveCli {
     model: String,
+    model_explicit: bool,
+    profile_override: Option<String>,
     allowed_tools: Option<AllowedToolSet>,
     permission_mode: PermissionMode,
     system_prompt: Vec<String>,
     runtime: BuiltRuntime,
+    active_profile: ResolvedProviderProfile,
     session: SessionHandle,
 }
 
@@ -1814,20 +1987,23 @@ struct RuntimePluginState {
 }
 
 struct BuiltRuntime {
-    runtime: Option<ConversationRuntime<AnthropicRuntimeClient, CliToolExecutor>>,
+    runtime: Option<ConversationRuntime<ProviderRuntimeClient, CliToolExecutor>>,
     plugin_registry: PluginRegistry,
     plugins_active: bool,
+    active_profile: ResolvedProviderProfile,
 }
 
 impl BuiltRuntime {
     fn new(
-        runtime: ConversationRuntime<AnthropicRuntimeClient, CliToolExecutor>,
+        runtime: ConversationRuntime<ProviderRuntimeClient, CliToolExecutor>,
         plugin_registry: PluginRegistry,
+        active_profile: ResolvedProviderProfile,
     ) -> Self {
         Self {
             runtime: Some(runtime),
             plugin_registry,
             plugins_active: true,
+            active_profile,
         }
     }
 
@@ -1850,7 +2026,7 @@ impl BuiltRuntime {
 }
 
 impl Deref for BuiltRuntime {
-    type Target = ConversationRuntime<AnthropicRuntimeClient, CliToolExecutor>;
+    type Target = ConversationRuntime<ProviderRuntimeClient, CliToolExecutor>;
 
     fn deref(&self) -> &Self::Target {
         self.runtime
@@ -1931,6 +2107,8 @@ impl HookAbortMonitor {
 impl LiveCli {
     fn new(
         model: String,
+        model_explicit: bool,
+        profile: Option<String>,
         enable_tools: bool,
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
@@ -1942,6 +2120,8 @@ impl LiveCli {
             session_state.with_persistence_path(session.path.clone()),
             &session.id,
             model.clone(),
+            model_explicit.then_some(model.as_str()),
+            profile.as_deref(),
             system_prompt.clone(),
             enable_tools,
             true,
@@ -1949,12 +2129,16 @@ impl LiveCli {
             permission_mode,
             None,
         )?;
+        let active_profile = runtime.active_profile.clone();
         let cli = Self {
             model,
+            model_explicit,
+            profile_override: profile,
             allowed_tools,
             permission_mode,
             system_prompt,
             runtime,
+            active_profile,
             session,
         };
         cli.persist_session()?;
@@ -1988,6 +2172,7 @@ impl LiveCli {
 ██║  ██╗╚██████╗╚██████╔╝██████╔╝███████╗\n\
 ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝\x1b[0m\n\n\
   \x1b[2mModel\x1b[0m            {}\n\
+  \x1b[2mProfile\x1b[0m          {}\n\
   \x1b[2mPermissions\x1b[0m      {}\n\
   \x1b[2mBranch\x1b[0m           {}\n\
   \x1b[2mWorkspace\x1b[0m        {}\n\
@@ -1996,6 +2181,7 @@ impl LiveCli {
   \x1b[2mAuto-save\x1b[0m        {}\n\n\
   Type \x1b[1m/help\x1b[0m for commands · \x1b[1m/status\x1b[0m for live context · \x1b[2m/resume latest\x1b[0m jumps back to the newest session · \x1b[1m/diff\x1b[0m then \x1b[1m/commit\x1b[0m to ship · \x1b[2mTab\x1b[0m for workflow completions · \x1b[2mShift+Enter\x1b[0m for newline",
             self.model,
+            self.active_profile.profile_name,
             self.permission_mode.as_str(),
             git_branch,
             workspace,
@@ -2025,6 +2211,8 @@ impl LiveCli {
             self.runtime.session().clone(),
             &self.session.id,
             self.model.clone(),
+            self.model_explicit.then_some(self.model.as_str()),
+            self.profile_override.as_deref(),
             self.system_prompt.clone(),
             true,
             emit_output,
@@ -2040,6 +2228,7 @@ impl LiveCli {
 
     fn replace_runtime(&mut self, runtime: BuiltRuntime) -> Result<(), Box<dyn std::error::Error>> {
         self.runtime.shutdown_plugins()?;
+        self.active_profile = runtime.active_profile.clone();
         self.runtime = runtime;
         Ok(())
     }
@@ -2188,7 +2377,7 @@ impl LiveCli {
             }
             SlashCommand::Resume { session_path } => self.resume_session(session_path)?,
             SlashCommand::Config { section } => {
-                Self::print_config(section.as_deref())?;
+                self.print_config(section.as_deref())?;
                 false
             }
             SlashCommand::Mcp { action, target } => {
@@ -2206,7 +2395,7 @@ impl LiveCli {
                 false
             }
             SlashCommand::Doctor => {
-                Self::print_doctor()?;
+                self.print_doctor()?;
                 false
             }
             SlashCommand::Init => {
@@ -2300,6 +2489,7 @@ impl LiveCli {
             "{}",
             format_status_report(
                 &self.model,
+                Some(&self.active_profile),
                 StatusUsage {
                     message_count: self.runtime.session().messages.len(),
                     turns: self.runtime.usage().turns(),
@@ -2331,6 +2521,7 @@ impl LiveCli {
                 "{}",
                 format_model_report(
                     &self.model,
+                    &self.active_profile.profile_name,
                     self.runtime.session().messages.len(),
                     self.runtime.usage().turns(),
                 )
@@ -2345,6 +2536,7 @@ impl LiveCli {
                 "{}",
                 format_model_report(
                     &self.model,
+                    &self.active_profile.profile_name,
                     self.runtime.session().messages.len(),
                     self.runtime.usage().turns(),
                 )
@@ -2359,6 +2551,8 @@ impl LiveCli {
             session,
             &self.session.id,
             model.clone(),
+            Some(model.as_str()),
+            self.profile_override.as_deref(),
             self.system_prompt.clone(),
             true,
             true,
@@ -2368,9 +2562,15 @@ impl LiveCli {
         )?;
         self.replace_runtime(runtime)?;
         self.model.clone_from(&model);
+        self.model_explicit = true;
         println!(
             "{}",
-            format_model_switch_report(&previous, &model, message_count)
+            format_model_switch_report(
+                &previous,
+                &model,
+                &self.active_profile.profile_name,
+                message_count,
+            )
         );
         Ok(true)
     }
@@ -2405,6 +2605,8 @@ impl LiveCli {
             session,
             &self.session.id,
             self.model.clone(),
+            self.model_explicit.then_some(self.model.as_str()),
+            self.profile_override.as_deref(),
             self.system_prompt.clone(),
             true,
             true,
@@ -2435,6 +2637,8 @@ impl LiveCli {
             session_state.with_persistence_path(self.session.path.clone()),
             &self.session.id,
             self.model.clone(),
+            self.model_explicit.then_some(self.model.as_str()),
+            self.profile_override.as_deref(),
             self.system_prompt.clone(),
             true,
             true,
@@ -2477,6 +2681,8 @@ impl LiveCli {
             session,
             &handle.id,
             self.model.clone(),
+            self.model_explicit.then_some(self.model.as_str()),
+            self.profile_override.as_deref(),
             self.system_prompt.clone(),
             true,
             true,
@@ -2500,8 +2706,15 @@ impl LiveCli {
         Ok(true)
     }
 
-    fn print_config(section: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
-        println!("{}", render_config_report(section)?);
+    fn print_config(&self, section: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+        println!(
+            "{}",
+            render_config_report(
+                section,
+                self.model_explicit.then_some(self.model.as_str()),
+                self.profile_override.as_deref(),
+            )?
+        );
         Ok(())
     }
 
@@ -2510,8 +2723,14 @@ impl LiveCli {
         Ok(())
     }
 
-    fn print_doctor() -> Result<(), Box<dyn std::error::Error>> {
-        println!("{}", render_doctor_report()?);
+    fn print_doctor(&self) -> Result<(), Box<dyn std::error::Error>> {
+        println!(
+            "{}",
+            render_doctor_report(
+                self.model_explicit.then_some(self.model.as_str()),
+                self.profile_override.as_deref(),
+            )?
+        );
         Ok(())
     }
 
@@ -2579,6 +2798,8 @@ impl LiveCli {
                     session,
                     &handle.id,
                     self.model.clone(),
+                    self.model_explicit.then_some(self.model.as_str()),
+                    self.profile_override.as_deref(),
                     self.system_prompt.clone(),
                     true,
                     true,
@@ -2614,6 +2835,8 @@ impl LiveCli {
                     forked,
                     &handle.id,
                     self.model.clone(),
+                    self.model_explicit.then_some(self.model.as_str()),
+                    self.profile_override.as_deref(),
                     self.system_prompt.clone(),
                     true,
                     true,
@@ -2664,6 +2887,8 @@ impl LiveCli {
             self.runtime.session().clone(),
             &self.session.id,
             self.model.clone(),
+            self.model_explicit.then_some(self.model.as_str()),
+            self.profile_override.as_deref(),
             self.system_prompt.clone(),
             true,
             true,
@@ -2684,6 +2909,8 @@ impl LiveCli {
             result.compacted_session,
             &self.session.id,
             self.model.clone(),
+            self.model_explicit.then_some(self.model.as_str()),
+            self.profile_override.as_deref(),
             self.system_prompt.clone(),
             true,
             true,
@@ -2708,6 +2935,8 @@ impl LiveCli {
             session,
             &self.session.id,
             self.model.clone(),
+            self.model_explicit.then_some(self.model.as_str()),
+            self.profile_override.as_deref(),
             self.system_prompt.clone(),
             enable_tools,
             false,
@@ -3063,12 +3292,22 @@ fn render_repl_help() -> String {
 
 fn print_status_snapshot(
     model: &str,
+    model_override: Option<&str>,
+    profile_override: Option<&str>,
     permission_mode: PermissionMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let setup = load_setup_context(
+        SetupMode::Status,
+        model_override,
+        profile_override,
+        permission_mode,
+        None,
+    )?;
     println!(
         "{}",
         format_status_report(
             model,
+            Some(&setup.active_profile),
             StatusUsage {
                 message_count: 0,
                 turns: 0,
@@ -3110,20 +3349,34 @@ fn status_context(
 
 fn format_status_report(
     model: &str,
+    active_profile: Option<&ResolvedProviderProfile>,
     usage: StatusUsage,
     permission_mode: &str,
     context: &StatusContext,
 ) -> String {
+    let provider_section = active_profile
+        .map(format_provider_status_section)
+        .unwrap_or_else(|| {
+            "Provider
+  Profile          <unknown>
+  Endpoint         <unknown>"
+                .to_string()
+        });
     [
         format!(
             "Status
+  Profile          {}
   Model            {model}
   Permission mode  {permission_mode}
   Messages         {}
   Turns            {}
   Estimated tokens {}",
+            active_profile
+                .map(|profile| profile.profile_name.as_str())
+                .unwrap_or("unknown"),
             usage.message_count, usage.turns, usage.estimated_tokens,
         ),
+        provider_section,
         format!(
             "Usage
   Latest total     {}
@@ -3174,6 +3427,30 @@ fn format_status_report(
         "
 
 ",
+    )
+}
+
+fn format_provider_status_section(active_profile: &ResolvedProviderProfile) -> String {
+    format!(
+        "Provider
+  Profile          {}
+  Profile source   {}
+  Endpoint         {}
+  Endpoint source  {}
+  Model source     {}
+  Credential env   {}
+  Credential source {}",
+        active_profile.profile_name,
+        active_profile.profile_source.label(),
+        active_profile
+            .base_url
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("<unset>"),
+        active_profile.base_url_source.label(),
+        active_profile.model_source.label(),
+        active_profile.credential.env_name,
+        active_profile.credential.source.label(),
     )
 }
 
@@ -3256,18 +3533,49 @@ fn print_sandbox_status_snapshot() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn print_doctor() -> Result<(), Box<dyn std::error::Error>> {
-    println!("{}", render_doctor_report()?);
+fn print_doctor(
+    model_override: Option<&str>,
+    profile_override: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("{}", render_doctor_report(model_override, profile_override)?);
     Ok(())
 }
 
-fn print_config_show(section: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
-    println!("{}", render_config_report(section)?);
+fn print_config_show(
+    section: Option<&str>,
+    model_override: Option<&str>,
+    profile_override: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "{}",
+        render_config_report(section, model_override, profile_override)?
+    );
     Ok(())
 }
 
-fn render_doctor_report() -> Result<String, Box<dyn std::error::Error>> {
-    let setup = load_setup_context(SetupMode::Doctor, None, default_permission_mode(), None)?;
+fn print_profile_report(
+    selection: &ProfileCommandSelection,
+    model_override: Option<&str>,
+    profile_override: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "{}",
+        render_profile_report(selection, model_override, profile_override)?
+    );
+    Ok(())
+}
+
+fn render_doctor_report(
+    model_override: Option<&str>,
+    profile_override: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let setup = load_setup_context(
+        SetupMode::Doctor,
+        model_override,
+        profile_override,
+        default_permission_mode(),
+        None,
+    )?;
     Ok(render_doctor_report_from_setup(&setup))
 }
 
@@ -3281,10 +3589,12 @@ fn render_doctor_report_from_setup(setup: &SetupContext) -> String {
   Working directory {}
   Config home      {}
   Session dir      {}
+  Active profile   {}
   Runtime ready    {}",
         setup.cwd.display(),
         setup.resolved_config.config_home.display(),
         setup.resolved_config.session_dir.display(),
+        setup.active_profile.profile_name,
         if runtime_ready { "yes" } else { "no" }
     )];
 
@@ -3326,8 +3636,9 @@ fn doctor_checks(setup: &SetupContext) -> Vec<DiagnosticCheck> {
             name: "api credentials".to_string(),
             status: DiagnosticStatus::Ok,
             detail: format!(
-                "env `{}` is available",
-                setup.resolved_config.api_key_env
+                "env `{}` is available ({})",
+                setup.active_profile.credential.env_name,
+                setup.active_profile.credential.source.label()
             ),
         }
     } else if setup.resolved_config.oauth_credentials_present {
@@ -3335,7 +3646,7 @@ fn doctor_checks(setup: &SetupContext) -> Vec<DiagnosticCheck> {
             name: "api credentials".to_string(),
             status: DiagnosticStatus::Warn,
             detail: format!(
-                "legacy OAuth credentials detected{}",
+                "legacy OAuth credentials detected{}; provider profiles ignore OAuth",
                 credentials_path
                     .as_ref()
                     .map(|path| format!(" at {}", path.display()))
@@ -3347,8 +3658,9 @@ fn doctor_checks(setup: &SetupContext) -> Vec<DiagnosticCheck> {
             name: "api credentials".to_string(),
             status: DiagnosticStatus::Fail,
             detail: format!(
-                "unset; export `{}` or the env named by `api_key_env`",
-                PRIMARY_API_KEY_ENV
+                "unset; export `{}` or `{}`",
+                PRIMARY_API_KEY_ENV,
+                setup.active_profile.credential.env_name
             ),
         }
     };
@@ -3383,9 +3695,22 @@ fn doctor_checks(setup: &SetupContext) -> Vec<DiagnosticCheck> {
             },
         },
         DiagnosticCheck {
+            name: "profile".to_string(),
+            status: DiagnosticStatus::Ok,
+            detail: format!(
+                "{} ({})",
+                setup.active_profile.profile_name,
+                setup.active_profile.profile_source.label()
+            ),
+        },
+        DiagnosticCheck {
             name: "model".to_string(),
             status: DiagnosticStatus::Ok,
-            detail: setup.resolved_config.model.clone(),
+            detail: format!(
+                "{} ({})",
+                setup.resolved_config.model,
+                setup.active_profile.model_source.label()
+            ),
         },
         DiagnosticCheck {
             name: "base url".to_string(),
@@ -3404,6 +3729,7 @@ fn doctor_checks(setup: &SetupContext) -> Vec<DiagnosticCheck> {
                 .base_url
                 .clone()
                 .filter(|value| !value.trim().is_empty())
+                .map(|value| format!("{value} ({})", setup.active_profile.base_url_source.label()))
                 .unwrap_or_else(|| {
                     format!(
                         "unset; set `{PRIMARY_BASE_URL_ENV}` or `base_url` in `~/.kcode/config.toml`"
@@ -3460,7 +3786,7 @@ fn doctor_next_step(setup: &SetupContext, runtime_ready: bool) -> String {
             "set `{PRIMARY_BASE_URL_ENV}` or `base_url` in `~/.kcode/config.toml`, then rerun `{CLI_NAME} doctor`"
         );
     }
-    if !setup.resolved_config.api_key_present && !setup.resolved_config.oauth_credentials_present {
+    if !setup.resolved_config.api_key_present {
         return format!(
             "export `{PRIMARY_API_KEY_ENV}` or the env named by `api_key_env`, then rerun `{CLI_NAME} doctor`"
         );
@@ -3476,8 +3802,143 @@ fn doctor_next_step(setup: &SetupContext, runtime_ready: bool) -> String {
     "review warnings above before starting interactive sessions".to_string()
 }
 
-fn render_config_report(section: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
-    let setup = load_setup_context(SetupMode::Config, None, default_permission_mode(), None)?;
+fn render_resolved_profile_report(profile: &ResolvedProviderProfile) -> String {
+    let launch = ProviderLauncher::prepare(profile);
+    let credential_detail = if profile.credential.api_key.is_some() {
+        format!(
+            "present via {} ({})",
+            profile.credential.env_name,
+            profile.credential.source.label()
+        )
+    } else {
+        format!("missing {}", profile.credential.env_name)
+    };
+
+    let mut lines = vec![
+        "Profile".to_string(),
+        format!("  Name              {}", profile.profile_name),
+        format!("  Selected via      {}", profile.profile_source.label()),
+        format!("  Model             {}", profile.model),
+        format!("  Model source      {}", profile.model_source.label()),
+        format!(
+            "  Base URL          {}",
+            profile
+                .base_url
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or("<unset>")
+        ),
+        format!("  Base URL source   {}", profile.base_url_source.label()),
+        format!("  Base URL env      {}", profile.profile.base_url_env),
+        format!("  API key env       {}", profile.credential.env_name),
+        format!("  Credential        {credential_detail}"),
+        format!("  Default model     {}", profile.profile.default_model),
+        format!("  Supports tools    {}", profile.profile.supports_tools),
+        format!("  Supports stream   {}", profile.profile.supports_streaming),
+        format!("  Timeout ms        {}", profile.profile.request_timeout_ms),
+        format!("  Max retries       {}", profile.profile.max_retries),
+        format!("  Launch ready      {}", if launch.is_ok() { "yes" } else { "no" }),
+    ];
+    if let Err(error) = launch {
+        lines.push(format!("  Launch detail     {error}"));
+    }
+    lines.join("\n")
+}
+
+fn render_active_profile_report(setup: &SetupContext) -> String {
+    render_resolved_profile_report(&setup.active_profile)
+}
+
+fn render_profile_report(
+    selection: &ProfileCommandSelection,
+    model_override: Option<&str>,
+    profile_override: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let cwd = env::current_dir()?;
+    let loader = ConfigLoader::default_for(&cwd);
+    let runtime_config = loader.load()?;
+    let setup = load_setup_context(
+        SetupMode::Config,
+        model_override,
+        profile_override,
+        default_permission_mode(),
+        None,
+    )?;
+
+    match selection {
+        ProfileCommandSelection::List => {
+            let names = ProfileResolver::available_profile_names(&runtime_config);
+            let mut lines = vec![
+                "Profile".to_string(),
+                format!("  Active profile    {}", setup.active_profile.profile_name),
+                format!(
+                    "  Selected via      {}",
+                    setup.active_profile.profile_source.label()
+                ),
+                format!(
+                    "  Launch ready      {}",
+                    if ProviderLauncher::prepare(&setup.active_profile).is_ok() {
+                        "yes"
+                    } else {
+                        "no"
+                    }
+                ),
+                format!("  Known profiles    {}", names.len()),
+                String::new(),
+                "Profiles".to_string(),
+            ];
+            for name in names {
+                match ProfileResolver::resolve_named(&runtime_config, &name, None) {
+                    Ok(profile) => {
+                        let marker = if profile.profile_name == setup.active_profile.profile_name {
+                            "*"
+                        } else {
+                            " "
+                        };
+                        lines.push(format!(
+                            "  {marker} {name:<12} key={key:<18} model={model:<24} tools={tools} stream={stream}",
+                            name = profile.profile_name,
+                            key = profile.credential.env_name,
+                            model = profile.model,
+                            tools = profile.profile.supports_tools,
+                            stream = profile.profile.supports_streaming,
+                        ));
+                    }
+                    Err(error) => lines.push(format!("    {name:<12} error={error}")),
+                }
+            }
+            Ok(lines.join("\n"))
+        }
+        ProfileCommandSelection::Show { profile_name: None } => {
+            Ok(render_active_profile_report(&setup))
+        }
+        ProfileCommandSelection::Show {
+            profile_name: Some(name),
+        } if name.eq_ignore_ascii_case(&setup.active_profile.profile_name) => {
+            Ok(render_active_profile_report(&setup))
+        }
+        ProfileCommandSelection::Show {
+            profile_name: Some(name),
+        } => {
+            let resolved = ProfileResolver::resolve_named(&runtime_config, name, model_override)
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            Ok(render_resolved_profile_report(&resolved))
+        }
+    }
+}
+
+fn render_config_report(
+    section: Option<&str>,
+    model_override: Option<&str>,
+    profile_override: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let setup = load_setup_context(
+        SetupMode::Config,
+        model_override,
+        profile_override,
+        default_permission_mode(),
+        None,
+    )?;
     let loader = ConfigLoader::default_for(&setup.cwd);
     let discovered = loader.discover();
     let runtime_config = loader.load()?;
@@ -3488,12 +3949,14 @@ fn render_config_report(section: Option<&str>) -> Result<String, Box<dyn std::er
   Working directory {}
   Config home      {}
   Session dir      {}
+  Effective profile {}
   Effective model  {}
   Loaded files     {}
   Merged keys      {}",
             setup.cwd.display(),
             setup.resolved_config.config_home.display(),
             setup.resolved_config.session_dir.display(),
+            setup.active_profile.profile_name,
             setup.resolved_config.model,
             runtime_config.loaded_entries().len(),
             runtime_config.merged().len()
@@ -3523,30 +3986,68 @@ fn render_config_report(section: Option<&str>) -> Result<String, Box<dyn std::er
 
     if let Some(section) = section {
         lines.push(format!("Merged section: {section}"));
-        let value = match section {
-            "env" => runtime_config.get("env"),
-            "hooks" => runtime_config.get("hooks"),
-            "model" => runtime_config.get("model"),
-            "plugins" => runtime_config
-                .get("plugins")
-                .or_else(|| runtime_config.get("enabledPlugins")),
+        match section {
+            "env" => lines.push(format!(
+                "  {}",
+                runtime_config
+                    .get("env")
+                    .map_or_else(|| "<unset>".to_string(), |value| value.render())
+            )),
+            "hooks" => lines.push(format!(
+                "  {}",
+                runtime_config
+                    .get("hooks")
+                    .map_or_else(|| "<unset>".to_string(), |value| value.render())
+            )),
+            "model" => lines.push(format!(
+                "  {}",
+                runtime_config
+                    .get("model")
+                    .map_or_else(|| "<unset>".to_string(), |value| value.render())
+            )),
+            "plugins" => lines.push(format!(
+                "  {}",
+                runtime_config
+                    .get("plugins")
+                    .or_else(|| runtime_config.get("enabledPlugins"))
+                    .map_or_else(|| "<unset>".to_string(), |value| value.render())
+            )),
+            "profile" => {
+                lines.extend(
+                    render_active_profile_report(&setup)
+                        .lines()
+                        .skip(1)
+                        .map(|line| format!("  {line}")),
+                );
+            }
+            "provider" => {
+                match ProviderLauncher::prepare(&setup.active_profile) {
+                    Ok(launch) => {
+                        lines.push(format!("  Profile          {}", launch.profile_name));
+                        lines.push(format!("  Provider         {}", launch.provider_label));
+                        lines.push(format!("  Base URL         {}", launch.base_url));
+                        lines.push(format!("  Model            {}", launch.model));
+                        lines.push(format!("  Timeout ms       {}", launch.request_timeout_ms));
+                        lines.push(format!("  Max retries      {}", launch.max_retries));
+                        lines.push(format!("  Supports tools   {}", launch.supports_tools));
+                        lines.push(format!(
+                            "  Supports stream  {}",
+                            launch.supports_streaming
+                        ));
+                    }
+                    Err(error) => lines.push(format!("  Launch error     {error}")),
+                }
+            }
             other => {
                 lines.push(format!(
-                    "  Unsupported config section '{other}'. Use env, hooks, model, or plugins."
+                    "  Unsupported config section '{other}'. Use env, hooks, model, plugins, profile, or provider."
                 ));
                 return Ok(lines.join(
                     "
 ",
                 ));
             }
-        };
-        lines.push(format!(
-            "  {}",
-            match value {
-                Some(value) => value.render(),
-                None => "<unset>".to_string(),
-            }
-        ));
+        }
         return Ok(lines.join(
             "
 ",
@@ -4430,6 +4931,8 @@ fn build_runtime(
     session: Session,
     session_id: &str,
     model: String,
+    model_override: Option<&str>,
+    profile_override: Option<&str>,
     system_prompt: Vec<String>,
     enable_tools: bool,
     emit_output: bool,
@@ -4443,7 +4946,8 @@ fn build_runtime(
         } else {
             SetupMode::Print
         },
-        Some(&model),
+        model_override,
+        profile_override,
         permission_mode,
         Some(session_id),
     )?;
@@ -4487,7 +4991,7 @@ fn build_runtime_with_plugin_state(
     plugin_registry.initialize()?;
     let mut runtime = ConversationRuntime::new_with_features(
         session,
-        AnthropicRuntimeClient::new(
+        ProviderRuntimeClient::new(
             session_id,
             model,
             enable_tools,
@@ -4506,7 +5010,11 @@ fn build_runtime_with_plugin_state(
     if emit_output {
         runtime = runtime.with_hook_progress_reporter(Box::new(CliHookProgressReporter));
     }
-    Ok(BuiltRuntime::new(runtime, plugin_registry))
+    Ok(BuiltRuntime::new(
+        runtime,
+        plugin_registry,
+        setup_context.active_profile.clone(),
+    ))
 }
 
 struct CliHookProgressReporter;
@@ -4591,18 +5099,19 @@ impl runtime::PermissionPrompter for CliPermissionPrompter {
     }
 }
 
-struct AnthropicRuntimeClient {
+struct ProviderRuntimeClient {
     runtime: tokio::runtime::Runtime,
-    client: AnthropicClient,
+    client: OpenAiCompatClient,
     model: String,
     enable_tools: bool,
     emit_output: bool,
     allowed_tools: Option<AllowedToolSet>,
     tool_registry: GlobalToolRegistry,
     progress_reporter: Option<InternalPromptProgressReporter>,
+    supports_streaming: bool,
 }
 
-impl AnthropicRuntimeClient {
+impl ProviderRuntimeClient {
     fn new(
         session_id: &str,
         model: String,
@@ -4613,45 +5122,38 @@ impl AnthropicRuntimeClient {
         progress_reporter: Option<InternalPromptProgressReporter>,
         setup_context: &SetupContext,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        let launch = ProviderLauncher::prepare(&setup_context.active_profile)
+            .map_err(|error| std::io::Error::other(error.to_string()))?;
         Ok(Self {
             runtime: tokio::runtime::Runtime::new()?,
-            client: AnthropicClient::from_auth(resolve_cli_auth_source(setup_context)?)
-                .with_base_url(resolve_cli_base_url(setup_context))
-                .with_prompt_cache(PromptCache::new(session_id)),
+            client: OpenAiCompatClient::new(
+                launch.api_key,
+                OpenAiCompatConfig {
+                    provider_name: "Kcode",
+                    api_key_env: PRIMARY_API_KEY_ENV,
+                    base_url_env: PRIMARY_BASE_URL_ENV,
+                    default_base_url: "",
+                },
+            )
+            .with_base_url(launch.base_url)
+            .with_request_timeout(Duration::from_millis(launch.request_timeout_ms))
+            .with_retry_policy(
+                launch.max_retries,
+                Duration::from_millis(200),
+                Duration::from_secs(2),
+            ),
             model,
             enable_tools,
             emit_output,
             allowed_tools,
             tool_registry,
             progress_reporter,
+            supports_streaming: launch.supports_streaming,
         })
     }
 }
 
-fn resolve_cli_base_url(setup: &SetupContext) -> String {
-    setup.resolved_config.base_url.clone().unwrap_or_else(api::read_base_url)
-}
-
-fn resolve_cli_auth_source(setup: &SetupContext) -> Result<AuthSource, Box<dyn std::error::Error>> {
-    if let Some(api_key) = read_non_empty_env(PRIMARY_API_KEY_ENV) {
-        return Ok(AuthSource::ApiKey(api_key));
-    }
-    let configured_env = setup.resolved_config.api_key_env.as_str();
-    if configured_env != PRIMARY_API_KEY_ENV {
-        if let Some(api_key) = read_non_empty_env(configured_env) {
-            return Ok(AuthSource::ApiKey(api_key));
-        }
-    }
-    Ok(resolve_startup_auth_source(|| {
-        let cwd = env::current_dir().map_err(api::ApiError::from)?;
-        let config = ConfigLoader::default_for(&cwd).load().map_err(|error| {
-            api::ApiError::Auth(format!("failed to load runtime OAuth config: {error}"))
-        })?;
-        Ok(config.oauth().cloned())
-    })?)
-}
-
-impl ApiClient for AnthropicRuntimeClient {
+impl ApiClient for ProviderRuntimeClient {
     #[allow(clippy::too_many_lines)]
     fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
         if let Some(progress_reporter) = &self.progress_reporter {
@@ -4666,10 +5168,29 @@ impl ApiClient for AnthropicRuntimeClient {
                 .enable_tools
                 .then(|| filter_tool_specs(&self.tool_registry, self.allowed_tools.as_ref())),
             tool_choice: self.enable_tools.then_some(ToolChoice::Auto),
-            stream: true,
+            stream: self.supports_streaming,
         };
 
         self.runtime.block_on(async {
+            if !self.supports_streaming {
+                let mut stdout = io::stdout();
+                let mut sink = io::sink();
+                let out: &mut dyn Write = if self.emit_output {
+                    &mut stdout
+                } else {
+                    &mut sink
+                };
+                let response = self
+                    .client
+                    .send_message(&MessageRequest {
+                        stream: false,
+                        ..message_request.clone()
+                    })
+                    .await
+                    .map_err(|error| RuntimeError::new(error.to_string()))?;
+                return response_to_events(response, out);
+            }
+
             let mut stream = self
                 .client
                 .stream_message(&message_request)
@@ -4762,7 +5283,7 @@ impl ApiClient for AnthropicRuntimeClient {
                 }
             }
 
-            push_prompt_cache_record(&self.client, &mut events);
+            push_prompt_cache_record(&mut events);
 
             if !saw_stop
                 && events.iter().any(|event| {
@@ -4789,7 +5310,7 @@ impl ApiClient for AnthropicRuntimeClient {
                 .await
                 .map_err(|error| RuntimeError::new(error.to_string()))?;
             let mut events = response_to_events(response, out)?;
-            push_prompt_cache_record(&self.client, &mut events);
+            push_prompt_cache_record(&mut events);
             Ok(events)
         })
     }
@@ -4873,27 +5394,28 @@ fn slash_command_completion_candidates_with_sessions(
     recent_session_ids: Vec<String>,
 ) -> Vec<String> {
     let mut completions = BTreeSet::new();
+    let snapshot = build_command_registry_snapshot(&CommandRegistryContext::cli_local(), &[]);
 
-    for spec in slash_command_specs() {
-        completions.insert(format!("/{}", spec.name));
-        for alias in spec.aliases {
+    for descriptor in &snapshot.session_commands {
+        completions.insert(format!("/{}", descriptor.name));
+        for alias in &descriptor.aliases {
             completions.insert(format!("/{alias}"));
         }
     }
 
     for candidate in [
-        "/bughunter ",
         "/clear --confirm",
         "/config ",
         "/config env",
         "/config hooks",
         "/config model",
         "/config plugins",
+        "/config profile",
+        "/config provider",
         "/mcp ",
         "/mcp list",
         "/mcp show ",
         "/export ",
-        "/issue ",
         "/model ",
         "/model opus",
         "/model sonnet",
@@ -4909,13 +5431,10 @@ fn slash_command_completion_candidates_with_sessions(
         "/plugin uninstall ",
         "/plugin update ",
         "/plugins list",
-        "/pr ",
         "/resume ",
         "/session list",
         "/session switch ",
-        "/session fork ",
-        "/teleport ",
-        "/ultraplan ",
+        "/session fork",
         "/agents help",
         "/mcp help",
         "/skills help",
@@ -5433,13 +5952,7 @@ fn response_to_events(
     Ok(events)
 }
 
-fn push_prompt_cache_record(client: &AnthropicClient, events: &mut Vec<AssistantEvent>) {
-    if let Some(record) = client.take_last_prompt_cache_record() {
-        if let Some(event) = prompt_cache_record_to_runtime_event(record) {
-            events.push(AssistantEvent::PromptCache(event));
-        }
-    }
-}
+fn push_prompt_cache_record(_events: &mut Vec<AssistantEvent>) {}
 
 fn prompt_cache_record_to_runtime_event(
     record: api::PromptCacheRecord,
@@ -5573,17 +6086,17 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "Usage:")?;
     writeln!(
         out,
-        "  {CLI_NAME} [--model MODEL] [--allowedTools TOOL[,TOOL...]]"
+        "  {CLI_NAME} [--model MODEL] [--profile PROFILE] [--allowedTools TOOL[,TOOL...]]"
     )?;
     writeln!(out, "      Start the interactive REPL")?;
     writeln!(
         out,
-        "  {CLI_NAME} [--model MODEL] [--output-format text|json] prompt TEXT"
+        "  {CLI_NAME} [--model MODEL] [--profile PROFILE] [--output-format text|json] prompt TEXT"
     )?;
     writeln!(out, "      Send one prompt and exit")?;
     writeln!(
         out,
-        "  {CLI_NAME} [--model MODEL] [--output-format text|json] TEXT"
+        "  {CLI_NAME} [--model MODEL] [--profile PROFILE] [--output-format text|json] TEXT"
     )?;
     writeln!(out, "      Shorthand non-interactive prompt mode")?;
     writeln!(
@@ -5608,6 +6121,7 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "  {CLI_NAME} agents")?;
     writeln!(out, "  {CLI_NAME} mcp")?;
     writeln!(out, "  {CLI_NAME} skills")?;
+    writeln!(out, "  {CLI_NAME} profile [list|show [name]]")?;
     writeln!(out, "  {CLI_NAME} system-prompt [--cwd PATH] [--date YYYY-MM-DD]")?;
     writeln!(out, "  {CLI_NAME} login")?;
     writeln!(out, "  {CLI_NAME} logout")?;
@@ -5617,6 +6131,10 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(
         out,
         "  --model MODEL              Override the active model"
+    )?;
+    writeln!(
+        out,
+        "  --profile PROFILE          Override the active provider profile"
     )?;
     writeln!(
         out,
@@ -5663,7 +6181,10 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
         "  Use /session list in the REPL to browse managed sessions"
     )?;
     writeln!(out, "Examples:")?;
-    writeln!(out, "  {CLI_NAME} --model claude-opus \"summarize this repo\"")?;
+    writeln!(
+        out,
+        "  {CLI_NAME} --model gpt-4.1-mini --profile custom \"summarize this repo\""
+    )?;
     writeln!(
         out,
         "  {CLI_NAME} --output-format json prompt \"explain src/main.rs\""
@@ -5679,8 +6200,9 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     )?;
     writeln!(out, "  {CLI_NAME} agents")?;
     writeln!(out, "  {CLI_NAME} mcp show my-server")?;
+    writeln!(out, "  {CLI_NAME} profile show nvidia")?;
+    writeln!(out, "  {CLI_NAME} profile list")?;
     writeln!(out, "  {CLI_NAME} /skills")?;
-    writeln!(out, "  {CLI_NAME} login")?;
     writeln!(out, "  {CLI_NAME} init")?;
     writeln!(out, "  {CLI_NAME} doctor")?;
     writeln!(out, "  {CLI_NAME} config show")?;
@@ -5717,8 +6239,9 @@ mod tests {
         PluginManager, PluginManagerConfig, PluginTool, PluginToolDefinition, PluginToolPermission,
     };
     use runtime::{
-        AssistantEvent, ConfigLoader, ContentBlock, ConversationMessage, MessageRole,
-        PermissionMode, Session,
+        AssistantEvent, ConfigLoader, ContentBlock, ConversationMessage, CredentialResolution,
+        CredentialSource, MessageRole, PermissionMode, ProviderProfile,
+        ResolvedProviderProfile, ResolutionSource, Session,
     };
     use serde_json::json;
     use std::fs;
@@ -5815,6 +6338,30 @@ mod tests {
                 profile: None,
                 legacy_paths: Vec::new(),
             },
+            active_profile: ResolvedProviderProfile {
+                profile_name: "cliproxyapi".to_string(),
+                profile_source: ResolutionSource::ProfileDefault,
+                model: DEFAULT_MODEL.to_string(),
+                model_source: ResolutionSource::ProfileDefault,
+                base_url: None,
+                base_url_source: ResolutionSource::Missing,
+                credential: CredentialResolution {
+                    source: CredentialSource::Missing,
+                    env_name: "KCODE_API_KEY".to_string(),
+                    api_key: None,
+                },
+                profile: ProviderProfile {
+                    name: "cliproxyapi".to_string(),
+                    base_url_env: "KCODE_BASE_URL".to_string(),
+                    base_url: String::new(),
+                    api_key_env: "KCODE_API_KEY".to_string(),
+                    default_model: DEFAULT_MODEL.to_string(),
+                    supports_tools: true,
+                    supports_streaming: true,
+                    request_timeout_ms: 120_000,
+                    max_retries: 2,
+                },
+            },
             trust_policy: runtime::TrustPolicyContext {
                 permission_mode: "danger-full-access".to_string(),
                 workspace_writeable: true,
@@ -5869,12 +6416,15 @@ mod tests {
     }
     #[test]
     fn defaults_to_repl_when_no_args() {
+        let permission_mode = super::default_permission_mode();
         assert_eq!(
             parse_args(&[]).expect("args should parse"),
             CliAction::Repl {
                 model: DEFAULT_MODEL.to_string(),
+                model_explicit: false,
+                profile: None,
                 allowed_tools: None,
-                permission_mode: PermissionMode::DangerFullAccess,
+                permission_mode,
             }
         );
     }
@@ -5949,6 +6499,7 @@ mod tests {
 
     #[test]
     fn parses_prompt_subcommand() {
+        let permission_mode = super::default_permission_mode();
         let args = vec![
             "prompt".to_string(),
             "hello".to_string(),
@@ -5959,15 +6510,18 @@ mod tests {
             CliAction::Prompt {
                 prompt: "hello world".to_string(),
                 model: DEFAULT_MODEL.to_string(),
+                model_explicit: false,
+                profile: None,
                 output_format: CliOutputFormat::Text,
                 allowed_tools: None,
-                permission_mode: PermissionMode::DangerFullAccess,
+                permission_mode,
             }
         );
     }
 
     #[test]
     fn parses_bare_prompt_and_json_output_flag() {
+        let permission_mode = super::default_permission_mode();
         let args = vec![
             "--output-format=json".to_string(),
             "--model".to_string(),
@@ -5980,15 +6534,18 @@ mod tests {
             CliAction::Prompt {
                 prompt: "explain this".to_string(),
                 model: "claude-opus".to_string(),
+                model_explicit: true,
+                profile: None,
                 output_format: CliOutputFormat::Json,
                 allowed_tools: None,
-                permission_mode: PermissionMode::DangerFullAccess,
+                permission_mode,
             }
         );
     }
 
     #[test]
     fn resolves_model_aliases_in_args() {
+        let permission_mode = super::default_permission_mode();
         let args = vec![
             "--model".to_string(),
             "opus".to_string(),
@@ -6000,9 +6557,11 @@ mod tests {
             CliAction::Prompt {
                 prompt: "explain this".to_string(),
                 model: "claude-opus-4-6".to_string(),
+                model_explicit: true,
+                profile: None,
                 output_format: CliOutputFormat::Text,
                 allowed_tools: None,
-                permission_mode: PermissionMode::DangerFullAccess,
+                permission_mode,
             }
         );
     }
@@ -6034,6 +6593,8 @@ mod tests {
             parse_args(&args).expect("args should parse"),
             CliAction::Repl {
                 model: DEFAULT_MODEL.to_string(),
+                model_explicit: false,
+                profile: None,
                 allowed_tools: None,
                 permission_mode: PermissionMode::ReadOnly,
             }
@@ -6042,6 +6603,7 @@ mod tests {
 
     #[test]
     fn parses_allowed_tools_flags_with_aliases_and_lists() {
+        let permission_mode = super::default_permission_mode();
         let args = vec![
             "--allowedTools".to_string(),
             "read,glob".to_string(),
@@ -6051,13 +6613,15 @@ mod tests {
             parse_args(&args).expect("args should parse"),
             CliAction::Repl {
                 model: DEFAULT_MODEL.to_string(),
+                model_explicit: false,
+                profile: None,
                 allowed_tools: Some(
                     ["glob_search", "read_file", "write_file"]
                         .into_iter()
                         .map(str::to_string)
                         .collect()
                 ),
-                permission_mode: PermissionMode::DangerFullAccess,
+                permission_mode,
             }
         );
     }
@@ -6103,12 +6667,21 @@ mod tests {
         );
         assert_eq!(
             parse_args(&["doctor".to_string()]).expect("doctor should parse"),
-            CliAction::Doctor
+            CliAction::Doctor {
+                model: DEFAULT_MODEL.to_string(),
+                model_explicit: false,
+                profile: None,
+            }
         );
         assert_eq!(
             parse_args(&["config".to_string(), "show".to_string()])
                 .expect("config show should parse"),
-            CliAction::ConfigShow { section: None }
+            CliAction::ConfigShow {
+                section: None,
+                model: DEFAULT_MODEL.to_string(),
+                model_explicit: false,
+                profile: None,
+            }
         );
         assert_eq!(
             parse_args(&[
@@ -6118,7 +6691,10 @@ mod tests {
             ])
             .expect("config section should parse"),
             CliAction::ConfigShow {
-                section: Some("plugins".to_string())
+                section: Some("plugins".to_string()),
+                model: DEFAULT_MODEL.to_string(),
+                model_explicit: false,
+                profile: None,
             }
         );
         assert_eq!(
@@ -6144,6 +6720,7 @@ mod tests {
 
     #[test]
     fn parses_single_word_command_aliases_without_falling_back_to_prompt_mode() {
+        let permission_mode = super::default_permission_mode();
         assert_eq!(
             parse_args(&["help".to_string()]).expect("help should parse"),
             CliAction::Help
@@ -6156,7 +6733,9 @@ mod tests {
             parse_args(&["status".to_string()]).expect("status should parse"),
             CliAction::Status {
                 model: DEFAULT_MODEL.to_string(),
-                permission_mode: PermissionMode::DangerFullAccess,
+                model_explicit: false,
+                profile: None,
+                permission_mode,
             }
         );
         assert_eq!(
@@ -6174,15 +6753,18 @@ mod tests {
 
     #[test]
     fn multi_word_prompt_still_uses_shorthand_prompt_mode() {
+        let permission_mode = super::default_permission_mode();
         assert_eq!(
             parse_args(&["help".to_string(), "me".to_string(), "debug".to_string()])
                 .expect("prompt shorthand should still work"),
             CliAction::Prompt {
                 prompt: "help me debug".to_string(),
                 model: DEFAULT_MODEL.to_string(),
+                model_explicit: false,
+                profile: None,
                 output_format: CliOutputFormat::Text,
                 allowed_tools: None,
-                permission_mode: PermissionMode::DangerFullAccess,
+                permission_mode,
             }
         );
     }
@@ -6225,7 +6807,7 @@ mod tests {
         let error = parse_args(&["/status".to_string()])
             .expect_err("/status should remain REPL-only when invoked directly");
         assert!(error.contains("interactive-only"));
-        assert!(error.contains("claw --resume SESSION.jsonl /status"));
+        assert!(error.contains("kcode --resume SESSION.jsonl /status"));
     }
 
     #[test]
@@ -6315,7 +6897,7 @@ mod tests {
         let error = parse_args(&["--resum".to_string()]).expect_err("unknown option should fail");
         assert!(error.contains("unknown option: --resum"));
         assert!(error.contains("Did you mean --resume?"));
-        assert!(error.contains("claw --help"));
+        assert!(error.contains("kcode --help"));
     }
 
     #[test]
@@ -6431,7 +7013,7 @@ mod tests {
         assert!(help.contains("/agents"));
         assert!(help.contains("/skills"));
         assert!(help.contains("/exit"));
-        assert!(help.contains("Auto-save            .claw/sessions/<session-id>.jsonl"));
+        assert!(help.contains("Auto-save            .kcode/sessions/<session-id>.jsonl"));
         assert!(help.contains("Resume latest        /resume latest"));
     }
 
@@ -6449,20 +7031,21 @@ mod tests {
         assert!(completions.contains(&"/session switch session-current".to_string()));
         assert!(completions.contains(&"/resume session-old".to_string()));
         assert!(completions.contains(&"/mcp list".to_string()));
-        assert!(completions.contains(&"/ultraplan ".to_string()));
     }
 
     #[test]
     fn startup_banner_mentions_workflow_completions() {
         let _guard = env_lock();
-        // Inject dummy credentials so LiveCli can construct without real Anthropic key
-        std::env::set_var("ANTHROPIC_API_KEY", "test-dummy-key-for-banner-test");
+        std::env::set_var("KCODE_BASE_URL", "https://router.example.test/v1");
+        std::env::set_var("KCODE_API_KEY", "test-dummy-key-for-banner-test");
         let root = temp_dir();
         fs::create_dir_all(&root).expect("root dir");
 
         let banner = with_current_dir(&root, || {
             LiveCli::new(
                 "claude-sonnet-4-6".to_string(),
+                false,
+                None,
                 true,
                 None,
                 PermissionMode::DangerFullAccess,
@@ -6473,9 +7056,11 @@ mod tests {
 
         assert!(banner.contains("Tab"));
         assert!(banner.contains("workflow completions"));
+        assert!(banner.contains("Profile"));
 
         fs::remove_dir_all(root).expect("cleanup temp dir");
-        std::env::remove_var("ANTHROPIC_API_KEY");
+        std::env::remove_var("KCODE_BASE_URL");
+        std::env::remove_var("KCODE_API_KEY");
     }
 
     #[test]
@@ -6503,29 +7088,6 @@ mod tests {
                 "agents",
                 "skills",
                 "doctor",
-                "plan",
-                "tasks",
-                "theme",
-                "vim",
-                "usage",
-                "stats",
-                "copy",
-                "hooks",
-                "files",
-                "context",
-                "color",
-                "effort",
-                "fast",
-                "summary",
-                "tag",
-                "brief",
-                "advisor",
-                "stickers",
-                "insights",
-                "thinkback",
-                "keybindings",
-                "privacy-settings",
-                "output-style",
             ]
         );
     }
@@ -6591,39 +7153,66 @@ mod tests {
         let mut help = Vec::new();
         print_help_to(&mut help).expect("help should render");
         let help = String::from_utf8(help).expect("help should be utf8");
-        assert!(help.contains("claw help"));
-        assert!(help.contains("claw version"));
-        assert!(help.contains("claw status"));
-        assert!(help.contains("claw sandbox"));
-        assert!(help.contains("claw init"));
-        assert!(help.contains("claw agents"));
-        assert!(help.contains("claw mcp"));
-        assert!(help.contains("claw skills"));
-        assert!(help.contains("claw /skills"));
+        assert!(help.contains("kcode help"));
+        assert!(help.contains("kcode version"));
+        assert!(help.contains("kcode status"));
+        assert!(help.contains("kcode sandbox"));
+        assert!(help.contains("kcode init"));
+        assert!(help.contains("kcode agents"));
+        assert!(help.contains("kcode mcp"));
+        assert!(help.contains("kcode skills"));
+        assert!(help.contains("kcode /skills"));
     }
 
     #[test]
     fn model_report_uses_sectioned_layout() {
-        let report = format_model_report("claude-sonnet", 12, 4);
+        let report = format_model_report("claude-sonnet", "cliproxyapi", 12, 4);
         assert!(report.contains("Model"));
         assert!(report.contains("Current model    claude-sonnet"));
+        assert!(report.contains("Active profile   cliproxyapi"));
         assert!(report.contains("Session messages 12"));
         assert!(report.contains("Switch models with /model <name>"));
     }
 
     #[test]
     fn model_switch_report_preserves_context_summary() {
-        let report = format_model_switch_report("claude-sonnet", "claude-opus", 9);
+        let report = format_model_switch_report("claude-sonnet", "claude-opus", "nvidia", 9);
         assert!(report.contains("Model updated"));
         assert!(report.contains("Previous         claude-sonnet"));
         assert!(report.contains("Current          claude-opus"));
+        assert!(report.contains("Active profile   nvidia"));
         assert!(report.contains("Preserved msgs   9"));
     }
 
     #[test]
     fn status_line_reports_model_and_token_totals() {
+        let profile = ResolvedProviderProfile {
+            profile_name: "cliproxyapi".to_string(),
+            profile_source: ResolutionSource::ProfileDefault,
+            model: "claude-sonnet".to_string(),
+            model_source: ResolutionSource::Cli,
+            base_url: Some("https://router.example.test/v1".to_string()),
+            base_url_source: ResolutionSource::Env("KCODE_BASE_URL"),
+            credential: CredentialResolution {
+                source: CredentialSource::PrimaryEnv,
+                env_name: "KCODE_API_KEY".to_string(),
+                api_key: Some("test-key".to_string()),
+            },
+            profile: ProviderProfile {
+                name: "cliproxyapi".to_string(),
+                base_url_env: "KCODE_BASE_URL".to_string(),
+                base_url: String::new(),
+                api_key_env: "KCODE_API_KEY".to_string(),
+                default_model: "claude-sonnet".to_string(),
+                supports_tools: true,
+                supports_streaming: true,
+                request_timeout_ms: 120_000,
+                max_retries: 2,
+            },
+        };
         let status = format_status_report(
             "claude-sonnet",
+            Some(&profile),
             StatusUsage {
                 message_count: 7,
                 turns: 3,
@@ -6661,8 +7250,10 @@ mod tests {
             },
         );
         assert!(status.contains("Status"));
+        assert!(status.contains("Profile          cliproxyapi"));
         assert!(status.contains("Model            claude-sonnet"));
         assert!(status.contains("Permission mode  workspace-write"));
+        assert!(status.contains("Endpoint         https://router.example.test/v1"));
         assert!(status.contains("Messages         7"));
         assert!(status.contains("Latest total     10"));
         assert!(status.contains("Cumulative total 31"));
@@ -6742,10 +7333,11 @@ mod tests {
 
     #[test]
     fn config_report_supports_section_views() {
-        let report = render_config_report(Some("env")).expect("config report should render");
+        let report =
+            render_config_report(Some("env"), None, None).expect("config report should render");
         assert!(report.contains("Merged section: env"));
-        let plugins_report =
-            render_config_report(Some("plugins")).expect("plugins config report should render");
+        let plugins_report = render_config_report(Some("plugins"), None, None)
+            .expect("plugins config report should render");
         assert!(plugins_report.contains("Merged section: plugins"));
     }
 
@@ -6760,7 +7352,7 @@ mod tests {
 
     #[test]
     fn config_report_uses_sectioned_layout() {
-        let report = render_config_report(None).expect("config report should render");
+        let report = render_config_report(None, None, None).expect("config report should render");
         assert!(report.contains("Config"));
         assert!(report.contains("Config home"));
         assert!(report.contains("Discovered files"));
@@ -7044,10 +7636,10 @@ UU conflicted.rs",
         let mut help = Vec::new();
         print_help_to(&mut help).expect("help should render");
         let help = String::from_utf8(help).expect("help should be utf8");
-        assert!(help.contains("claw --resume [SESSION.jsonl|session-id|latest]"));
+        assert!(help.contains("kcode --resume [SESSION.jsonl|session-id|latest]"));
         assert!(help.contains("Use `latest` with --resume, /resume, or /session switch"));
-        assert!(help.contains("claw --resume latest"));
-        assert!(help.contains("claw --resume latest /status /diff /export notes.txt"));
+        assert!(help.contains("kcode --resume latest"));
+        assert!(help.contains("kcode --resume latest /status /diff /export notes.txt"));
     }
 
     #[test]
@@ -7133,7 +7725,7 @@ UU conflicted.rs",
     fn resume_usage_mentions_latest_shortcut() {
         let usage = render_resume_usage();
         assert!(usage.contains("/resume <session-path|session-id|latest>"));
-        assert!(usage.contains(".claw/sessions/<session-id>.jsonl"));
+        assert!(usage.contains(".kcode/sessions/<session-id>.jsonl"));
         assert!(usage.contains("/session list"));
     }
 
@@ -7152,9 +7744,16 @@ UU conflicted.rs",
 
     #[test]
     fn init_template_mentions_detected_rust_workspace() {
-        let rendered = crate::init::render_init_kcode_md(std::path::Path::new("."));
+        let workspace = temp_workspace("init-rust-workspace");
+        std::fs::create_dir_all(workspace.join("rust")).expect("create rust dir");
+        std::fs::write(workspace.join("rust").join("Cargo.toml"), "[workspace]\n")
+            .expect("write workspace cargo");
+
+        let rendered = crate::init::render_init_kcode_md(&workspace);
         assert!(rendered.contains("# KCODE.md"));
         assert!(rendered.contains("cargo clippy --workspace --all-targets -- -D warnings"));
+
+        std::fs::remove_dir_all(workspace).expect("cleanup temp workspace");
     }
 
     #[test]
@@ -7546,9 +8145,6 @@ UU conflicted.rs",
     #[test]
     fn build_runtime_runs_plugin_lifecycle_init_and_shutdown() {
         let config_home = temp_dir();
-        // Inject a dummy API key so runtime construction succeeds without real credentials.
-        // This test only exercises plugin lifecycle (init/shutdown), never calls the API.
-        std::env::set_var("ANTHROPIC_API_KEY", "test-dummy-key-for-plugin-lifecycle");
         let workspace = temp_dir();
         let source_root = temp_dir();
         fs::create_dir_all(&config_home).expect("config home");
@@ -7566,6 +8162,17 @@ UU conflicted.rs",
         let runtime_plugin_state =
             build_runtime_plugin_state_with_loader(&workspace, &loader, &runtime_config)
                 .expect("plugin state should load");
+        let mut setup = test_setup_context(&workspace);
+        setup.resolved_config.base_url = Some("https://router.example.test/v1".to_string());
+        setup.resolved_config.api_key_present = true;
+        setup.resolved_config.profile = Some("cliproxyapi".to_string());
+        setup.active_profile.base_url = Some("https://router.example.test/v1".to_string());
+        setup.active_profile.base_url_source = ResolutionSource::Env("KCODE_BASE_URL");
+        setup.active_profile.credential = CredentialResolution {
+            source: CredentialSource::PrimaryEnv,
+            env_name: "KCODE_API_KEY".to_string(),
+            api_key: Some("test-dummy-key-for-plugin-lifecycle".to_string()),
+        };
         let mut runtime = build_runtime_with_plugin_state(
             Session::new(),
             "runtime-plugin-lifecycle",
@@ -7576,7 +8183,7 @@ UU conflicted.rs",
             None,
             PermissionMode::DangerFullAccess,
             None,
-            &test_setup_context(&workspace),
+            &setup,
             runtime_plugin_state,
         )
         .expect("runtime should build");
@@ -7598,7 +8205,6 @@ UU conflicted.rs",
         let _ = fs::remove_dir_all(config_home);
         let _ = fs::remove_dir_all(workspace);
         let _ = fs::remove_dir_all(source_root);
-        std::env::remove_var("ANTHROPIC_API_KEY");
     }
 }
 

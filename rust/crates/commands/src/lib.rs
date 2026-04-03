@@ -14,30 +14,128 @@ use runtime::{
 pub struct CommandManifestEntry {
     pub name: String,
     pub source: CommandSource,
+    pub scope: CommandScope,
+    pub kind: CommandKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum CommandSource {
+    Builtin,
+    Skills,
+    Plugins,
+    Workflow,
+    Mcp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CommandSource {
-    Builtin,
-    InternalOnly,
-    FeatureGated,
+pub enum CommandKind {
+    Prompt,
+    Local,
+    LocalUi,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandScope {
+    Process,
+    Session,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommandAvailability {
+    pub cli_visible: bool,
+    pub bridge_visible: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandDescriptor {
+    pub id: String,
+    pub name: String,
+    pub kind: CommandKind,
+    pub source: CommandSource,
+    pub scope: CommandScope,
+    pub availability: CommandAvailability,
+    pub enabled: bool,
+    pub remote_safe: bool,
+    pub channel_safe: bool,
+    pub aliases: Vec<String>,
+    pub description: String,
+    pub argument_hint: Option<String>,
+    pub resume_supported: bool,
+    pub visibility_tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandSurface {
+    CliLocal,
+    Bridge,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilteredCommand {
+    pub id: String,
+    pub scope: CommandScope,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CommandRegistrySnapshot {
+    pub process_commands: Vec<CommandDescriptor>,
+    pub session_commands: Vec<CommandDescriptor>,
+    pub filtered_out_commands: Vec<FilteredCommand>,
+    pub source_breakdown: BTreeMap<CommandSource, usize>,
+    pub safety_profile: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandRegistryContext {
+    pub surface: CommandSurface,
+    pub include_local_ui: bool,
+    pub profile_supports_tools: bool,
+}
+
+impl CommandRegistryContext {
+    #[must_use]
+    pub fn cli_local() -> Self {
+        Self {
+            surface: CommandSurface::CliLocal,
+            include_local_ui: true,
+            profile_supports_tools: true,
+        }
+    }
+
+    #[must_use]
+    pub fn bridge_safe() -> Self {
+        Self {
+            surface: CommandSurface::Bridge,
+            include_local_ui: false,
+            profile_supports_tools: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CommandRegistry {
-    entries: Vec<CommandManifestEntry>,
+    descriptors: Vec<CommandDescriptor>,
 }
 
 impl CommandRegistry {
     #[must_use]
-    pub fn new(entries: Vec<CommandManifestEntry>) -> Self {
-        Self { entries }
+    pub fn new(descriptors: Vec<CommandDescriptor>) -> Self {
+        Self { descriptors }
     }
 
     #[must_use]
-    pub fn entries(&self) -> &[CommandManifestEntry] {
-        &self.entries
+    pub fn descriptors(&self) -> &[CommandDescriptor] {
+        &self.descriptors
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ProcessCommandSpec {
+    name: &'static str,
+    aliases: &'static [&'static str],
+    summary: &'static str,
+    argument_hint: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -520,6 +618,75 @@ const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
         summary: "Add an additional directory to the context",
         argument_hint: Some("<path>"),
         resume_supported: false,
+    },
+];
+
+const PROCESS_COMMAND_SPECS: &[ProcessCommandSpec] = &[
+    ProcessCommandSpec {
+        name: "init",
+        aliases: &[],
+        summary: "Bootstrap the user config home",
+        argument_hint: None,
+    },
+    ProcessCommandSpec {
+        name: "doctor",
+        aliases: &[],
+        summary: "Diagnose setup, profile, and environment health",
+        argument_hint: None,
+    },
+    ProcessCommandSpec {
+        name: "config",
+        aliases: &[],
+        summary: "Inspect discovered config files or merged sections",
+        argument_hint: Some("[show [env|hooks|model|plugins|profile|provider]]"),
+    },
+    ProcessCommandSpec {
+        name: "profile",
+        aliases: &[],
+        summary: "Inspect built-in provider profiles and the active selection",
+        argument_hint: Some("[list|show [name]]"),
+    },
+    ProcessCommandSpec {
+        name: "resume",
+        aliases: &[],
+        summary: "Resume a saved session and optionally dispatch slash commands",
+        argument_hint: Some("<session-path|latest>"),
+    },
+    ProcessCommandSpec {
+        name: "mcp",
+        aliases: &[],
+        summary: "Inspect configured MCP servers",
+        argument_hint: Some("[list|show <server>|help]"),
+    },
+    ProcessCommandSpec {
+        name: "agents",
+        aliases: &[],
+        summary: "Inspect configured agents",
+        argument_hint: Some("[list|help]"),
+    },
+    ProcessCommandSpec {
+        name: "skills",
+        aliases: &[],
+        summary: "Inspect or install skills",
+        argument_hint: Some("[list|install <path>|help]"),
+    },
+    ProcessCommandSpec {
+        name: "status",
+        aliases: &[],
+        summary: "Show current model, profile, and workspace status",
+        argument_hint: None,
+    },
+    ProcessCommandSpec {
+        name: "sandbox",
+        aliases: &[],
+        summary: "Show current sandbox isolation state",
+        argument_hint: None,
+    },
+    ProcessCommandSpec {
+        name: "prompt",
+        aliases: &[],
+        summary: "Run a non-interactive one-shot prompt",
+        argument_hint: Some("<prompt>"),
     },
 ];
 
@@ -1212,6 +1379,250 @@ fn find_slash_command_spec(name: &str) -> Option<&'static SlashCommandSpec> {
     })
 }
 
+fn session_command_kind(name: &str) -> CommandKind {
+    match name {
+        "help" | "context" => CommandKind::Prompt,
+        "plan" | "tasks" | "vim" | "theme" | "voice" | "ide" | "desktop" => {
+            CommandKind::LocalUi
+        }
+        _ => CommandKind::Local,
+    }
+}
+
+fn process_command_kind(name: &str) -> CommandKind {
+    match name {
+        "prompt" => CommandKind::Prompt,
+        _ => CommandKind::Local,
+    }
+}
+
+fn session_command_enabled(name: &str) -> bool {
+    matches!(
+        name,
+        "help"
+            | "status"
+            | "sandbox"
+            | "compact"
+            | "model"
+            | "permissions"
+            | "clear"
+            | "cost"
+            | "resume"
+            | "config"
+            | "mcp"
+            | "memory"
+            | "init"
+            | "diff"
+            | "version"
+            | "export"
+            | "session"
+            | "plugin"
+            | "agents"
+            | "skills"
+            | "doctor"
+            | "add-dir"
+    )
+}
+
+fn process_command_enabled(name: &str) -> bool {
+    matches!(
+        name,
+        "init"
+            | "doctor"
+            | "config"
+            | "profile"
+            | "resume"
+            | "mcp"
+            | "agents"
+            | "skills"
+            | "status"
+            | "sandbox"
+            | "prompt"
+    )
+}
+
+fn is_v1_core_session_command(name: &str) -> bool {
+    matches!(
+        name,
+        "help"
+            | "clear"
+            | "compact"
+            | "config"
+            | "doctor"
+            | "init"
+            | "model"
+            | "memory"
+            | "add-dir"
+            | "resume"
+            | "mcp"
+            | "permissions"
+    )
+}
+
+fn session_command_safety(name: &str, kind: CommandKind) -> (bool, bool) {
+    match name {
+        "help" | "compact" | "model" | "permissions" | "memory" | "mcp" => (true, true),
+        "status" | "sandbox" => (true, false),
+        _ => default_safety_for_kind(kind),
+    }
+}
+
+fn default_safety_for_kind(kind: CommandKind) -> (bool, bool) {
+    match kind {
+        CommandKind::Prompt => (true, true),
+        CommandKind::Local => (false, false),
+        CommandKind::LocalUi => (false, false),
+    }
+}
+
+fn session_command_descriptor(spec: &SlashCommandSpec) -> CommandDescriptor {
+    let kind = session_command_kind(spec.name);
+    let (remote_safe, channel_safe) = session_command_safety(spec.name, kind);
+    let mut visibility_tags = vec!["session".to_string()];
+    if is_v1_core_session_command(spec.name) {
+        visibility_tags.push("v1-core".to_string());
+    }
+    if spec.resume_supported {
+        visibility_tags.push("resume".to_string());
+    }
+    if !session_command_enabled(spec.name) {
+        visibility_tags.push("compat-hidden".to_string());
+    }
+    CommandDescriptor {
+        id: format!("builtin.session.{}", spec.name),
+        name: spec.name.to_string(),
+        kind,
+        source: CommandSource::Builtin,
+        scope: CommandScope::Session,
+        availability: CommandAvailability {
+            cli_visible: true,
+            bridge_visible: remote_safe && channel_safe,
+        },
+        enabled: session_command_enabled(spec.name),
+        remote_safe,
+        channel_safe,
+        aliases: spec.aliases.iter().map(|alias| (*alias).to_string()).collect(),
+        description: spec.summary.to_string(),
+        argument_hint: spec.argument_hint.map(ToOwned::to_owned),
+        resume_supported: spec.resume_supported,
+        visibility_tags,
+    }
+}
+
+fn process_command_descriptor(spec: &ProcessCommandSpec) -> CommandDescriptor {
+    let kind = process_command_kind(spec.name);
+    let (remote_safe, channel_safe) = default_safety_for_kind(kind);
+    let mut visibility_tags = vec!["process".to_string()];
+    if spec.name == "profile" {
+        visibility_tags.push("provider-profile".to_string());
+    }
+    CommandDescriptor {
+        id: format!("builtin.process.{}", spec.name),
+        name: spec.name.to_string(),
+        kind,
+        source: CommandSource::Builtin,
+        scope: CommandScope::Process,
+        availability: CommandAvailability {
+            cli_visible: true,
+            bridge_visible: remote_safe && channel_safe,
+        },
+        enabled: process_command_enabled(spec.name),
+        remote_safe,
+        channel_safe,
+        aliases: spec.aliases.iter().map(|alias| (*alias).to_string()).collect(),
+        description: spec.summary.to_string(),
+        argument_hint: spec.argument_hint.map(ToOwned::to_owned),
+        resume_supported: false,
+        visibility_tags,
+    }
+}
+
+#[must_use]
+pub fn build_command_registry_snapshot(
+    context: &CommandRegistryContext,
+    extra_descriptors: &[CommandDescriptor],
+) -> CommandRegistrySnapshot {
+    let mut snapshot = CommandRegistrySnapshot {
+        safety_profile: match context.surface {
+            CommandSurface::CliLocal => "cli-local".to_string(),
+            CommandSurface::Bridge => "bridge-safe".to_string(),
+        },
+        ..CommandRegistrySnapshot::default()
+    };
+
+    let descriptors = slash_command_specs()
+        .iter()
+        .map(session_command_descriptor)
+        .chain(PROCESS_COMMAND_SPECS.iter().map(process_command_descriptor))
+        .chain(extra_descriptors.iter().cloned())
+        .collect::<Vec<_>>();
+
+    for descriptor in descriptors {
+        let allowed_by_surface = match context.surface {
+            CommandSurface::CliLocal => descriptor.availability.cli_visible,
+            CommandSurface::Bridge => {
+                descriptor.availability.bridge_visible
+                    && descriptor.remote_safe
+                    && descriptor.channel_safe
+            }
+        };
+
+        let local_ui_allowed = context.include_local_ui || descriptor.kind != CommandKind::LocalUi;
+        let tools_allowed = context.profile_supports_tools
+            || !matches!(descriptor.name.as_str(), "mcp" | "plugin" | "plugins");
+
+        let filtered_reason = if !descriptor.enabled {
+            Some("disabled".to_string())
+        } else if !allowed_by_surface {
+            Some(match context.surface {
+                CommandSurface::CliLocal => "hidden on local CLI surface".to_string(),
+                CommandSurface::Bridge => "not bridge-safe".to_string(),
+            })
+        } else if !local_ui_allowed {
+            Some("requires local UI".to_string())
+        } else if !tools_allowed {
+            Some("active profile does not expose tool-capable commands".to_string())
+        } else {
+            None
+        };
+
+        if let Some(reason) = filtered_reason {
+            snapshot.filtered_out_commands.push(FilteredCommand {
+                id: descriptor.id,
+                scope: descriptor.scope,
+                reason,
+            });
+            continue;
+        }
+
+        *snapshot
+            .source_breakdown
+            .entry(descriptor.source)
+            .or_insert(0) += 1;
+
+        match descriptor.scope {
+            CommandScope::Process => snapshot.process_commands.push(descriptor),
+            CommandScope::Session => snapshot.session_commands.push(descriptor),
+        }
+    }
+
+    snapshot
+}
+
+#[must_use]
+pub fn v1_command_manifest() -> Vec<CommandManifestEntry> {
+    slash_command_specs()
+        .iter()
+        .filter(|spec| is_v1_core_session_command(spec.name))
+        .map(|spec| CommandManifestEntry {
+            name: spec.name.to_string(),
+            source: CommandSource::Builtin,
+            scope: CommandScope::Session,
+            kind: session_command_kind(spec.name),
+        })
+        .collect()
+}
+
 fn command_root_name(command: &str) -> &str {
     command.split_whitespace().next().unwrap_or(command)
 }
@@ -1224,12 +1635,40 @@ fn slash_command_usage(spec: &SlashCommandSpec) -> String {
 }
 
 fn slash_command_detail_lines(spec: &SlashCommandSpec) -> Vec<String> {
+    let descriptor = session_command_descriptor(spec);
     let mut lines = vec![format!("/{}", spec.name)];
     lines.push(format!("  Summary          {}", spec.summary));
     lines.push(format!("  Usage            {}", slash_command_usage(spec)));
     lines.push(format!(
+        "  Kind             {}",
+        match descriptor.kind {
+            CommandKind::Prompt => "prompt",
+            CommandKind::Local => "local",
+            CommandKind::LocalUi => "local-ui",
+        }
+    ));
+    lines.push(format!(
+        "  Scope            {}",
+        match descriptor.scope {
+            CommandScope::Process => "process",
+            CommandScope::Session => "session",
+        }
+    ));
+    lines.push(format!(
         "  Category         {}",
         slash_command_category(spec.name)
+    ));
+    lines.push(format!(
+        "  Surface          local={} bridge={}",
+        descriptor.availability.cli_visible, descriptor.availability.bridge_visible
+    ));
+    lines.push(format!(
+        "  Enabled          {}",
+        if descriptor.enabled {
+            "yes"
+        } else {
+            "hidden from default manifest"
+        }
     ));
     if !spec.aliases.is_empty() {
         lines.push(format!(
@@ -1243,6 +1682,12 @@ fn slash_command_detail_lines(spec: &SlashCommandSpec) -> Vec<String> {
     }
     if spec.resume_supported {
         lines.push("  Resume           Supported with --resume SESSION.jsonl".to_string());
+    }
+    if !descriptor.visibility_tags.is_empty() {
+        lines.push(format!(
+            "  Tags             {}",
+            descriptor.visibility_tags.join(", ")
+        ));
     }
     lines
 }
@@ -1259,9 +1704,12 @@ pub fn slash_command_specs() -> &'static [SlashCommandSpec] {
 
 #[must_use]
 pub fn resume_supported_slash_commands() -> Vec<&'static SlashCommandSpec> {
-    slash_command_specs()
+    let snapshot = build_command_registry_snapshot(&CommandRegistryContext::cli_local(), &[]);
+    snapshot
+        .session_commands
         .iter()
-        .filter(|spec| spec.resume_supported)
+        .filter(|descriptor| descriptor.resume_supported)
+        .filter_map(|descriptor| find_slash_command_spec(&descriptor.name))
         .collect()
 }
 
@@ -1288,26 +1736,33 @@ fn slash_command_category(name: &str) -> &'static str {
     }
 }
 
-fn format_slash_command_help_line(spec: &SlashCommandSpec) -> String {
-    let name = slash_command_usage(spec);
-    let alias_suffix = if spec.aliases.is_empty() {
+fn format_command_help_line(descriptor: &CommandDescriptor) -> String {
+    let usage = match &descriptor.argument_hint {
+        Some(argument_hint) => format!("/{} {argument_hint}", descriptor.name),
+        None => format!("/{}", descriptor.name),
+    };
+    let alias_suffix = if descriptor.aliases.is_empty() {
         String::new()
     } else {
         format!(
             " (aliases: {})",
-            spec.aliases
+            descriptor
+                .aliases
                 .iter()
                 .map(|alias| format!("/{alias}"))
                 .collect::<Vec<_>>()
                 .join(", ")
         )
     };
-    let resume = if spec.resume_supported {
+    let resume = if descriptor.resume_supported {
         " [resume]"
     } else {
         ""
     };
-    format!("  {name:<66} {}{alias_suffix}{resume}", spec.summary)
+    format!(
+        "  {usage:<66} {}{alias_suffix}{resume}",
+        descriptor.description
+    )
 }
 
 fn levenshtein_distance(left: &str, right: &str) -> usize {
@@ -1386,27 +1841,42 @@ pub fn suggest_slash_commands(input: &str, limit: usize) -> Vec<String> {
 
 #[must_use]
 pub fn render_slash_command_help() -> String {
+    let snapshot = build_command_registry_snapshot(&CommandRegistryContext::cli_local(), &[]);
     let mut lines = vec![
         "Slash commands".to_string(),
-        "  Start here        /status, /diff, /agents, /skills, /commit".to_string(),
+        format!(
+            "  Active surface    cli-local ({} commands)",
+            snapshot.session_commands.len()
+        ),
+        "  Start here        /doctor, /config, /status, /mcp, /memory".to_string(),
         "  [resume]          also works with --resume SESSION.jsonl".to_string(),
         String::new(),
     ];
 
-    let categories = [
-        "Session & visibility",
-        "Workspace & git",
-        "Discovery & debugging",
-        "Analysis & automation",
-    ];
+    lines.push("Core v1.0 manifest".to_string());
+    for descriptor in snapshot
+        .session_commands
+        .iter()
+        .filter(|descriptor| descriptor.visibility_tags.iter().any(|tag| tag == "v1-core"))
+    {
+        lines.push(format_command_help_line(descriptor));
+    }
+    lines.push(String::new());
+
+    lines.push("Extended local surface".to_string());
+    let categories = ["Session & visibility", "Workspace & git", "Discovery & debugging"];
 
     for category in categories {
         lines.push(category.to_string());
-        for spec in slash_command_specs()
+        for descriptor in snapshot
+            .session_commands
             .iter()
-            .filter(|spec| slash_command_category(spec.name) == category)
+            .filter(|descriptor| {
+                !descriptor.visibility_tags.iter().any(|tag| tag == "v1-core")
+                    && slash_command_category(&descriptor.name) == category
+            })
         {
-            lines.push(format_slash_command_help_line(spec));
+            lines.push(format_command_help_line(descriptor));
         }
         lines.push(String::new());
     }
@@ -3130,23 +3600,17 @@ mod tests {
     #[test]
     fn renders_help_from_shared_specs() {
         let help = render_slash_command_help();
-        assert!(help.contains("Start here        /status, /diff, /agents, /skills, /commit"));
+        assert!(help.contains("Start here        /doctor, /config, /status, /mcp, /memory"));
         assert!(help.contains("[resume]          also works with --resume SESSION.jsonl"));
         assert!(help.contains("Session & visibility"));
         assert!(help.contains("Workspace & git"));
         assert!(help.contains("Discovery & debugging"));
-        assert!(help.contains("Analysis & automation"));
+        assert!(help.contains("Core v1.0 manifest"));
+        assert!(help.contains("Extended local surface"));
         assert!(help.contains("/help"));
         assert!(help.contains("/status"));
         assert!(help.contains("/sandbox"));
         assert!(help.contains("/compact"));
-        assert!(help.contains("/bughunter [scope]"));
-        assert!(help.contains("/commit"));
-        assert!(help.contains("/pr [context]"));
-        assert!(help.contains("/issue [context]"));
-        assert!(help.contains("/ultraplan [task]"));
-        assert!(help.contains("/teleport <symbol-or-path>"));
-        assert!(help.contains("/debug-tool-call"));
         assert!(help.contains("/model [model]"));
         assert!(help.contains("/permissions [read-only|workspace-write|danger-full-access]"));
         assert!(help.contains("/clear [--confirm]"));
@@ -3159,16 +3623,51 @@ mod tests {
         assert!(help.contains("/diff"));
         assert!(help.contains("/version"));
         assert!(help.contains("/export [file]"));
-        assert!(help.contains("/session [list|switch <session-id>|fork [branch-name]]"));
         assert!(help.contains("/sandbox"));
-        assert!(help.contains(
-            "/plugin [list|install <path>|enable <name>|disable <name>|uninstall <id>|update <id>]"
-        ));
-        assert!(help.contains("aliases: /plugins, /marketplace"));
         assert!(help.contains("/agents [list|help]"));
         assert!(help.contains("/skills [list|install <path>|help]"));
         assert_eq!(slash_command_specs().len(), 67);
-        assert_eq!(resume_supported_slash_commands().len(), 39);
+        assert_eq!(resume_supported_slash_commands().len(), 16);
+    }
+
+    #[test]
+    fn command_registry_snapshot_filters_bridge_unsafe_commands() {
+        let snapshot =
+            super::build_command_registry_snapshot(&super::CommandRegistryContext::bridge_safe(), &[]);
+
+        assert!(snapshot
+            .session_commands
+            .iter()
+            .all(|descriptor| descriptor.remote_safe && descriptor.channel_safe));
+        assert!(snapshot
+            .filtered_out_commands
+            .iter()
+            .any(|command| command.reason == "not bridge-safe"));
+    }
+
+    #[test]
+    fn v1_command_manifest_matches_expected_session_surface() {
+        let names = super::v1_command_manifest()
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![
+                "help",
+                "compact",
+                "model",
+                "permissions",
+                "clear",
+                "resume",
+                "config",
+                "mcp",
+                "memory",
+                "init",
+                "doctor",
+                "add-dir",
+            ]
+        );
     }
 
     #[test]
@@ -3181,7 +3680,7 @@ mod tests {
 
         // then
         assert!(help.contains("/plugin"));
-        assert!(help.contains("Summary          Manage Claw Code plugins"));
+        assert!(help.contains("Summary          Manage Kcode plugins"));
         assert!(help.contains("Aliases          /plugins, /marketplace"));
         assert!(help.contains("Category         Workspace & git"));
     }
@@ -3488,7 +3987,7 @@ mod tests {
         let agents_help =
             super::handle_agents_slash_command(Some("help"), &cwd).expect("agents help");
         assert!(agents_help.contains("Usage            /agents [list|help]"));
-        assert!(agents_help.contains("Direct CLI       claw agents"));
+        assert!(agents_help.contains("Direct CLI       kcode agents"));
 
         let agents_unexpected =
             super::handle_agents_slash_command(Some("show planner"), &cwd).expect("agents usage");
@@ -3513,7 +4012,7 @@ mod tests {
 
         let help = super::handle_mcp_slash_command(Some("help"), &cwd).expect("mcp help");
         assert!(help.contains("Usage            /mcp [list|show <server>|help]"));
-        assert!(help.contains("Direct CLI       claw mcp [list|show <server>|help]"));
+        assert!(help.contains("Direct CLI       kcode mcp [list|show <server>|help]"));
 
         let unexpected =
             super::handle_mcp_slash_command(Some("show alpha beta"), &cwd).expect("mcp usage");

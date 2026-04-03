@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::config::ConfigEntry;
+use crate::provider_profile::ResolvedProviderProfile;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BootstrapPhase {
@@ -90,7 +91,7 @@ impl ResolvedConfig {
         self.base_url
             .as_deref()
             .is_some_and(|value| !value.trim().is_empty())
-            && (self.api_key_present || self.oauth_credentials_present)
+            && self.api_key_present
     }
 }
 
@@ -110,6 +111,7 @@ pub struct SetupContext {
     pub project_root: PathBuf,
     pub git_root: Option<PathBuf>,
     pub resolved_config: ResolvedConfig,
+    pub active_profile: ResolvedProviderProfile,
     pub trust_policy: TrustPolicyContext,
     pub mode: SetupMode,
 }
@@ -189,6 +191,10 @@ mod tests {
         DiagnosticStatus, ResolvedConfig, SetupMode,
     };
     use crate::config::ConfigEntry;
+    use crate::provider_profile::{
+        CredentialResolution, CredentialSource, ProviderProfile, ResolvedProviderProfile,
+        ResolutionSource,
+    };
     use crate::ConfigSource;
     use std::path::PathBuf;
 
@@ -264,6 +270,32 @@ mod tests {
         };
 
         assert!(config.is_runtime_ready());
+
+        let profile = ResolvedProviderProfile {
+            profile_name: "custom".to_string(),
+            profile_source: ResolutionSource::ProfileDefault,
+            model: "gpt-4.1-mini".to_string(),
+            model_source: ResolutionSource::ProfileDefault,
+            base_url: Some("https://example.test".to_string()),
+            base_url_source: ResolutionSource::ProfileDefault,
+            credential: CredentialResolution {
+                source: CredentialSource::PrimaryEnv,
+                env_name: "KCODE_API_KEY".to_string(),
+                api_key: Some("test-key".to_string()),
+            },
+            profile: ProviderProfile {
+                name: "custom".to_string(),
+                base_url_env: "KCODE_BASE_URL".to_string(),
+                base_url: "https://example.test".to_string(),
+                api_key_env: "KCODE_API_KEY".to_string(),
+                default_model: "gpt-4.1-mini".to_string(),
+                supports_tools: true,
+                supports_streaming: true,
+                request_timeout_ms: 120_000,
+                max_retries: 2,
+            },
+        };
+        assert_eq!(profile.profile_name, "custom");
     }
 
     #[test]

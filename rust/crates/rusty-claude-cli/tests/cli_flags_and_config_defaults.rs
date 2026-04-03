@@ -212,6 +212,44 @@ api_key_env = "KCODE_API_KEY"
     fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
 }
 
+#[test]
+fn profile_commands_report_effective_router_settings_after_init() {
+    let temp_dir = unique_temp_dir("profile-bootstrap");
+    let config_home = temp_dir.join("home").join(".kcode");
+    fs::create_dir_all(&temp_dir).expect("temp dir should exist");
+
+    let init_output = command_in(&temp_dir)
+        .env("KCODE_CONFIG_HOME", &config_home)
+        .arg("init")
+        .output()
+        .expect("kcode should launch");
+    assert_success(&init_output);
+
+    let list_output = command_in(&temp_dir)
+        .env("KCODE_CONFIG_HOME", &config_home)
+        .args(["profile", "list"])
+        .output()
+        .expect("kcode should launch");
+    assert_success(&list_output);
+    let list_stdout = String::from_utf8(list_output.stdout).expect("stdout should be utf8");
+    assert!(list_stdout.contains("* cliproxyapi"));
+    assert!(list_stdout.contains("key=KCODE_API_KEY"));
+    assert!(list_stdout.contains("model=claude-sonnet-4-6"));
+
+    let show_output = command_in(&temp_dir)
+        .env("KCODE_CONFIG_HOME", &config_home)
+        .args(["profile", "show"])
+        .output()
+        .expect("kcode should launch");
+    assert_success(&show_output);
+    let show_stdout = String::from_utf8(show_output.stdout).expect("stdout should be utf8");
+    assert!(show_stdout.contains("Base URL env      KCODE_BASE_URL"));
+    assert!(show_stdout.contains("API key env       KCODE_API_KEY"));
+    assert!(show_stdout.contains("Default model     claude-sonnet-4-6"));
+
+    fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
+}
+
 fn command_in(cwd: &Path) -> Command {
     let home = cwd.join("__home");
     fs::create_dir_all(&home).expect("isolated home should exist");
