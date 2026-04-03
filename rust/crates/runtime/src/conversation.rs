@@ -176,7 +176,7 @@ where
             api_client,
             tool_executor,
             permission_policy,
-            system_prompt,
+            system_prompt: Self::inject_memories_into_prompt(system_prompt),
             max_iterations: usize::MAX,
             usage_tracker,
             hook_runner: HookRunner::from_feature_config(feature_config),
@@ -187,6 +187,29 @@ where
             compaction_failure_tracker: CompactionFailureTracker::new(),
             memory_extraction_state: MemoryExtractionState::new(),
         }
+    }
+
+    /// Load memories from disk and inject them into the system prompt.
+    /// This matches CC Source Map's principle: memory is loaded as a
+    /// persistent collaboration side-channel, available from session start.
+    fn inject_memories_into_prompt(mut system_prompt: Vec<String>) -> Vec<String> {
+        match crate::memory::load_user_memories() {
+            Ok(memories) if !memories.is_empty() => {
+                let mut memory_section = String::from("\n# Loaded Memories\n\n");
+                for mem in &memories {
+                    memory_section.push_str(&format!(
+                        "## {} ({})\n{}\n{}\n",
+                        mem.name,
+                        mem.memory_type.as_str(),
+                        mem.description,
+                        mem.body,
+                    ));
+                }
+                system_prompt.push(memory_section);
+            }
+            _ => {}
+        }
+        system_prompt
     }
 
     #[must_use]
@@ -521,13 +544,48 @@ where
     }
 
     /// Compact the session and track success/failure for the circuit breaker.
+    /// After compaction, reinjects loaded memories as attachments so the model
+    /// retains access to long-term context that was lost during compaction.
     pub fn compact_with_tracking(&mut self, config: CompactionConfig) -> CompactionResult {
         let result = compact_session(&self.session, config);
         if result.removed_message_count > 0 {
             self.compaction_failure_tracker.record_success();
         }
         self.session = result.compacted_session.clone();
+
+        // Reinjected memories as system message after compact boundary
+        self.reinject_memories_after_compact();
+
         result
+    }
+
+    /// Load memories and add them as a system message attachment after compact.
+    /// This ensures the model retains access to long-term memory post-compaction.
+    fn reinject_memories_after_compact(&mut self) {
+        if let Ok(memories) = crate::memory::load_user_memories() {
+            if memories.is_empty() {
+                return;
+            }
+
+            let mut attachment_text = String::from("[Reinjected Memory Attachments]\n\n");
+            for mem in &memories {
+                attachment_text.push_str(&format!(
+                    "### {} ({})\n{}\n{}\n\n",
+                    mem.name,
+                    mem.memory_type.as_str(),
+                    mem.description,
+                    mem.body.chars().take(500).collect::<String>(),
+                ));
+            }
+
+            self.session.messages.push(ConversationMessage {
+                role: MessageRole::System,
+                blocks: vec![ContentBlock::Text {
+                    text: attachment_text,
+                }],
+                usage: None,
+            });
+        }
     }
 
     /// Returns whether the auto-compaction circuit breaker is tripped.
