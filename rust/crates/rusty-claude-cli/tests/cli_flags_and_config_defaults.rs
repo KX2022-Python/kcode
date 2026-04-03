@@ -250,6 +250,47 @@ fn profile_commands_report_effective_router_settings_after_init() {
     fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
 }
 
+#[test]
+fn commands_command_reports_bridge_surface_for_toolless_profile() {
+    let temp_dir = unique_temp_dir("commands-bridge");
+    let config_home = temp_dir.join("home").join(".kcode");
+    fs::create_dir_all(&config_home).expect("config home should exist");
+    fs::write(
+        config_home.join("config.toml"),
+        r#"
+profile = "bridge"
+model = "gpt-4.1-mini"
+
+[profiles.bridge]
+default_model = "gpt-4.1-mini"
+base_url_env = "BRIDGE_BASE_URL"
+api_key_env = "BRIDGE_API_KEY"
+supports_tools = false
+supports_streaming = false
+"#,
+    )
+    .expect("write config");
+
+    let output = command_in(&temp_dir)
+        .env("KCODE_CONFIG_HOME", &config_home)
+        .args(["commands", "show", "bridge"])
+        .output()
+        .expect("kcode should launch");
+
+    assert_success(&output);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    assert!(stdout.contains("Commands"));
+    assert!(stdout.contains("Surface           bridge"));
+    assert!(stdout.contains("Safety profile    bridge-safe"));
+    assert!(stdout.contains("Supports tools    false"));
+    assert!(stdout.contains("Supports stream   false"));
+    assert!(stdout.contains("Filtered"));
+    assert!(stdout.contains("/mcp"));
+    assert!(stdout.contains("active profile does not expose tool-capable commands"));
+
+    fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
+}
+
 fn command_in(cwd: &Path) -> Command {
     let home = cwd.join("__home");
     fs::create_dir_all(&home).expect("isolated home should exist");

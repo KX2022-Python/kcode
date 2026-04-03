@@ -95,21 +95,22 @@ pub struct CommandRegistryContext {
 
 impl CommandRegistryContext {
     #[must_use]
-    pub fn cli_local() -> Self {
+    pub fn for_surface(surface: CommandSurface, profile_supports_tools: bool) -> Self {
         Self {
-            surface: CommandSurface::CliLocal,
-            include_local_ui: true,
-            profile_supports_tools: true,
+            surface,
+            include_local_ui: matches!(surface, CommandSurface::CliLocal),
+            profile_supports_tools,
         }
     }
 
     #[must_use]
+    pub fn cli_local() -> Self {
+        Self::for_surface(CommandSurface::CliLocal, true)
+    }
+
+    #[must_use]
     pub fn bridge_safe() -> Self {
-        Self {
-            surface: CommandSurface::Bridge,
-            include_local_ui: false,
-            profile_supports_tools: true,
-        }
+        Self::for_surface(CommandSurface::Bridge, true)
     }
 }
 
@@ -645,6 +646,12 @@ const PROCESS_COMMAND_SPECS: &[ProcessCommandSpec] = &[
         aliases: &[],
         summary: "Inspect built-in provider profiles and the active selection",
         argument_hint: Some("[list|show [name]]"),
+    },
+    ProcessCommandSpec {
+        name: "commands",
+        aliases: &[],
+        summary: "Inspect command registry surfaces for the active profile",
+        argument_hint: Some("[show [local|bridge]]"),
     },
     ProcessCommandSpec {
         name: "resume",
@@ -1431,6 +1438,7 @@ fn process_command_enabled(name: &str) -> bool {
             | "doctor"
             | "config"
             | "profile"
+            | "commands"
             | "resume"
             | "mcp"
             | "agents"
@@ -1840,15 +1848,27 @@ pub fn suggest_slash_commands(input: &str, limit: usize) -> Vec<String> {
 }
 
 #[must_use]
-pub fn render_slash_command_help() -> String {
-    let snapshot = build_command_registry_snapshot(&CommandRegistryContext::cli_local(), &[]);
+pub fn render_slash_command_help_for_context(context: &CommandRegistryContext) -> String {
+    let snapshot = build_command_registry_snapshot(context, &[]);
+    let start_here = ["doctor", "config", "status", "mcp", "memory"]
+        .into_iter()
+        .filter(|name| {
+            snapshot
+                .session_commands
+                .iter()
+                .any(|descriptor| descriptor.name == *name)
+        })
+        .map(|name| format!("/{name}"))
+        .collect::<Vec<_>>()
+        .join(", ");
     let mut lines = vec![
         "Slash commands".to_string(),
         format!(
-            "  Active surface    cli-local ({} commands)",
+            "  Active surface    {} ({} commands)",
+            snapshot.safety_profile,
             snapshot.session_commands.len()
         ),
-        "  Start here        /doctor, /config, /status, /mcp, /memory".to_string(),
+        format!("  Start here        {start_here}"),
         "  [resume]          also works with --resume SESSION.jsonl".to_string(),
         String::new(),
     ];
@@ -1890,6 +1910,11 @@ pub fn render_slash_command_help() -> String {
         .rev()
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[must_use]
+pub fn render_slash_command_help() -> String {
+    render_slash_command_help_for_context(&CommandRegistryContext::cli_local())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3643,6 +3668,16 @@ mod tests {
             .filtered_out_commands
             .iter()
             .any(|command| command.reason == "not bridge-safe"));
+    }
+
+    #[test]
+    fn render_slash_command_help_for_context_hides_tool_commands_when_profile_disables_tools() {
+        let help = super::render_slash_command_help_for_context(
+            &super::CommandRegistryContext::for_surface(super::CommandSurface::CliLocal, false),
+        );
+
+        assert!(help.contains("Start here        /doctor, /config, /status, /memory"));
+        assert!(!help.contains("/mcp [list|show <server>|help]"));
     }
 
     #[test]

@@ -30,7 +30,8 @@ use api::{
 };
 
 use commands::{
-    build_command_registry_snapshot, CommandRegistryContext,
+    build_command_registry_snapshot, render_slash_command_help_for_context, CommandDescriptor,
+    CommandRegistryContext, CommandScope, CommandSurface, FilteredCommand,
     handle_agents_slash_command, handle_mcp_slash_command, handle_plugins_slash_command,
     handle_skills_slash_command, render_slash_command_help, resume_supported_slash_commands,
     slash_command_specs, validate_slash_command_input, SlashCommand,
@@ -149,6 +150,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             model_explicit.then_some(model.as_str()),
             profile.as_deref(),
         )?,
+        CliAction::Commands {
+            surface,
+            model,
+            model_explicit,
+            profile,
+        } => print_commands_report(
+            surface,
+            model_explicit.then_some(model.as_str()),
+            profile.as_deref(),
+        )?,
         CliAction::Profile {
             selection,
             model,
@@ -234,6 +245,12 @@ enum CliAction {
         model_explicit: bool,
         profile: Option<String>,
     },
+    Commands {
+        surface: CommandReportSurfaceSelection,
+        model: String,
+        model_explicit: bool,
+        profile: Option<String>,
+    },
     Profile {
         selection: ProfileCommandSelection,
         model: String,
@@ -276,6 +293,38 @@ enum ProfileCommandSelection {
     Show {
         profile_name: Option<String>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CommandReportSurfaceSelection {
+    Local,
+    Bridge,
+}
+
+impl CommandReportSurfaceSelection {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "local" => Ok(Self::Local),
+            "bridge" => Ok(Self::Bridge),
+            other => Err(format!(
+                "unsupported commands surface: {other} (expected local or bridge)"
+            )),
+        }
+    }
+
+    const fn command_surface(self) -> CommandSurface {
+        match self {
+            Self::Local => CommandSurface::CliLocal,
+            Self::Bridge => CommandSurface::Bridge,
+        }
+    }
+
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Bridge => "bridge",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -474,6 +523,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             profile,
         }),
         "config" => parse_config_args(&rest[1..], &model, model_explicit, profile.clone()),
+        "commands" => parse_commands_args(&rest[1..], &model, model_explicit, profile.clone()),
         "profile" => parse_profile_args(&rest[1..], &model, model_explicit, profile.clone()),
         "login" => Ok(CliAction::Login),
         "logout" => Ok(CliAction::Logout),
@@ -623,6 +673,28 @@ fn parse_profile_args(
 
     Ok(CliAction::Profile {
         selection,
+        model: model.to_string(),
+        model_explicit,
+        profile,
+    })
+}
+
+fn parse_commands_args(
+    args: &[String],
+    model: &str,
+    model_explicit: bool,
+    profile: Option<String>,
+) -> Result<CliAction, String> {
+    let surface = match args {
+        [] => CommandReportSurfaceSelection::Local,
+        [subcommand] if subcommand == "show" => CommandReportSurfaceSelection::Local,
+        [surface] => CommandReportSurfaceSelection::parse(surface)?,
+        [subcommand, surface] if subcommand == "show" => CommandReportSurfaceSelection::parse(surface)?,
+        _ => return Err("usage: kcode commands [show [local|bridge]]".to_string()),
+    };
+
+    Ok(CliAction::Commands {
+        surface,
         model: model.to_string(),
         model_explicit,
         profile,
@@ -2194,6 +2266,7 @@ impl LiveCli {
     fn repl_completion_candidates(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
         Ok(slash_command_completion_candidates_with_sessions(
             &self.model,
+            self.active_profile.profile.supports_tools,
             Some(&self.session.id),
             list_managed_sessions()?
                 .into_iter()
@@ -2325,7 +2398,10 @@ impl LiveCli {
     ) -> Result<bool, Box<dyn std::error::Error>> {
         Ok(match command {
             SlashCommand::Help => {
-                println!("{}", render_repl_help());
+                println!(
+                    "{}",
+                    render_repl_help_for_profile(self.active_profile.profile.supports_tools)
+                );
                 false
             }
             SlashCommand::Status => {
@@ -3270,6 +3346,10 @@ fn session_clear_backup_path(session_path: &Path) -> PathBuf {
 }
 
 fn render_repl_help() -> String {
+    render_repl_help_for_profile(true)
+}
+
+fn render_repl_help_for_profile(profile_supports_tools: bool) -> String {
     [
         "REPL".to_string(),
         "  /exit                Quit the REPL".to_string(),
@@ -3282,12 +3362,12 @@ fn render_repl_help() -> String {
         "  Resume latest        /resume latest".to_string(),
         "  Browse sessions      /session list".to_string(),
         String::new(),
-        render_slash_command_help(),
+        render_slash_command_help_for_context(&CommandRegistryContext::for_surface(
+            CommandSurface::CliLocal,
+            profile_supports_tools,
+        )),
     ]
-    .join(
-        "
-",
-    )
+    .join("\n")
 }
 
 fn print_status_snapshot(
@@ -3553,6 +3633,18 @@ fn print_config_show(
     Ok(())
 }
 
+fn print_commands_report(
+    surface: CommandReportSurfaceSelection,
+    model_override: Option<&str>,
+    profile_override: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "{}",
+        render_commands_report(surface, model_override, profile_override)?
+    );
+    Ok(())
+}
+
 fn print_profile_report(
     selection: &ProfileCommandSelection,
     model_override: Option<&str>,
@@ -3563,6 +3655,116 @@ fn print_profile_report(
         render_profile_report(selection, model_override, profile_override)?
     );
     Ok(())
+}
+
+fn command_registry_context(
+    setup: &SetupContext,
+    surface: CommandReportSurfaceSelection,
+) -> CommandRegistryContext {
+    CommandRegistryContext::for_surface(
+        surface.command_surface(),
+        setup.active_profile.profile.supports_tools,
+    )
+}
+
+fn command_descriptor_usage(descriptor: &CommandDescriptor) -> String {
+    match (&descriptor.scope, &descriptor.argument_hint) {
+        (CommandScope::Session, Some(argument_hint)) => {
+            format!("/{} {}", descriptor.name, argument_hint)
+        }
+        (CommandScope::Session, None) => format!("/{}", descriptor.name),
+        (CommandScope::Process, Some(argument_hint)) => {
+            format!("{} {}", descriptor.name, argument_hint)
+        }
+        (CommandScope::Process, None) => descriptor.name.clone(),
+    }
+}
+
+fn filtered_command_usage(filtered: &FilteredCommand) -> String {
+    let name = filtered
+        .id
+        .rsplit('.')
+        .next()
+        .unwrap_or(filtered.id.as_str());
+    match filtered.scope {
+        CommandScope::Process => name.to_string(),
+        CommandScope::Session => format!("/{name}"),
+    }
+}
+
+fn render_commands_report(
+    surface: CommandReportSurfaceSelection,
+    model_override: Option<&str>,
+    profile_override: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let setup = load_setup_context(
+        SetupMode::Config,
+        model_override,
+        profile_override,
+        default_permission_mode(),
+        None,
+    )?;
+    let snapshot = build_command_registry_snapshot(&command_registry_context(&setup, surface), &[]);
+    let actionable_filtered = snapshot
+        .filtered_out_commands
+        .iter()
+        .filter(|command| command.reason != "disabled")
+        .collect::<Vec<_>>();
+
+    let mut lines = vec![
+        "Commands".to_string(),
+        format!("  Active profile    {}", setup.active_profile.profile_name),
+        format!(
+            "  Selected via      {}",
+            setup.active_profile.profile_source.label()
+        ),
+        format!("  Surface           {}", surface.label()),
+        format!("  Safety profile    {}", snapshot.safety_profile),
+        format!(
+            "  Supports tools    {}",
+            setup.active_profile.profile.supports_tools
+        ),
+        format!(
+            "  Supports stream   {}",
+            setup.active_profile.profile.supports_streaming
+        ),
+        format!("  Process commands  {}", snapshot.process_commands.len()),
+        format!("  Session commands  {}", snapshot.session_commands.len()),
+        format!("  Filtered commands {}", actionable_filtered.len()),
+    ];
+
+    lines.push("Process commands".to_string());
+    for descriptor in &snapshot.process_commands {
+        lines.push(format!(
+            "  {:<34} {}",
+            command_descriptor_usage(descriptor),
+            descriptor.description
+        ));
+    }
+
+    lines.push(String::new());
+    lines.push("Session commands".to_string());
+    for descriptor in &snapshot.session_commands {
+        lines.push(format!(
+            "  {:<34} {}",
+            command_descriptor_usage(descriptor),
+            descriptor.description
+        ));
+    }
+
+    if !actionable_filtered.is_empty() {
+        lines.push(String::new());
+        lines.push("Filtered".to_string());
+        for filtered in actionable_filtered {
+            lines.push(format!(
+                "  {:<34} {}",
+                filtered_command_usage(filtered),
+                filtered.reason
+            ));
+        }
+    }
+
+    Ok(lines.join("\n"))
 }
 
 fn render_doctor_report(
@@ -5390,16 +5592,23 @@ fn collect_prompt_cache_events(summary: &runtime::TurnSummary) -> Vec<serde_json
 
 fn slash_command_completion_candidates_with_sessions(
     model: &str,
+    profile_supports_tools: bool,
     active_session_id: Option<&str>,
     recent_session_ids: Vec<String>,
 ) -> Vec<String> {
     let mut completions = BTreeSet::new();
-    let snapshot = build_command_registry_snapshot(&CommandRegistryContext::cli_local(), &[]);
+    let snapshot = build_command_registry_snapshot(
+        &CommandRegistryContext::for_surface(CommandSurface::CliLocal, profile_supports_tools),
+        &[],
+    );
+    let mut visible_commands = BTreeSet::new();
 
     for descriptor in &snapshot.session_commands {
         completions.insert(format!("/{}", descriptor.name));
+        visible_commands.insert(format!("/{}", descriptor.name));
         for alias in &descriptor.aliases {
             completions.insert(format!("/{alias}"));
+            visible_commands.insert(format!("/{alias}"));
         }
     }
 
@@ -5439,17 +5648,24 @@ fn slash_command_completion_candidates_with_sessions(
         "/mcp help",
         "/skills help",
     ] {
-        completions.insert(candidate.to_string());
+        let base = candidate.split_whitespace().next().unwrap_or(candidate);
+        if visible_commands.contains(base) {
+            completions.insert(candidate.to_string());
+        }
     }
 
-    if !model.trim().is_empty() {
+    if visible_commands.contains("/model") && !model.trim().is_empty() {
         completions.insert(format!("/model {}", resolve_model_alias(model)));
         completions.insert(format!("/model {model}"));
     }
 
     if let Some(active_session_id) = active_session_id.filter(|value| !value.trim().is_empty()) {
-        completions.insert(format!("/resume {active_session_id}"));
-        completions.insert(format!("/session switch {active_session_id}"));
+        if visible_commands.contains("/resume") {
+            completions.insert(format!("/resume {active_session_id}"));
+        }
+        if visible_commands.contains("/session") {
+            completions.insert(format!("/session switch {active_session_id}"));
+        }
     }
 
     for session_id in recent_session_ids
@@ -5457,8 +5673,12 @@ fn slash_command_completion_candidates_with_sessions(
         .filter(|value| !value.trim().is_empty())
         .take(10)
     {
-        completions.insert(format!("/resume {session_id}"));
-        completions.insert(format!("/session switch {session_id}"));
+        if visible_commands.contains("/resume") {
+            completions.insert(format!("/resume {session_id}"));
+        }
+        if visible_commands.contains("/session") {
+            completions.insert(format!("/session switch {session_id}"));
+        }
     }
 
     completions.into_iter().collect()
@@ -6121,6 +6341,7 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "  {CLI_NAME} agents")?;
     writeln!(out, "  {CLI_NAME} mcp")?;
     writeln!(out, "  {CLI_NAME} skills")?;
+    writeln!(out, "  {CLI_NAME} commands [show [local|bridge]]")?;
     writeln!(out, "  {CLI_NAME} profile [list|show [name]]")?;
     writeln!(out, "  {CLI_NAME} system-prompt [--cwd PATH] [--date YYYY-MM-DD]")?;
     writeln!(out, "  {CLI_NAME} login")?;
@@ -6200,6 +6421,7 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     )?;
     writeln!(out, "  {CLI_NAME} agents")?;
     writeln!(out, "  {CLI_NAME} mcp show my-server")?;
+    writeln!(out, "  {CLI_NAME} commands show bridge")?;
     writeln!(out, "  {CLI_NAME} profile show nvidia")?;
     writeln!(out, "  {CLI_NAME} profile list")?;
     writeln!(out, "  {CLI_NAME} /skills")?;
@@ -6226,13 +6448,15 @@ mod tests {
         format_ultraplan_report, format_unknown_slash_command,
         format_unknown_slash_command_message, normalize_permission_mode, parse_args,
         parse_git_status_branch, parse_git_status_metadata_for, parse_git_workspace_summary,
-        permission_policy, print_help_to, push_output_block, render_config_report,
-        render_diff_report, render_doctor_report_from_setup, render_memory_report,
-        render_repl_help, render_resume_usage, resolve_model_alias, resolve_session_reference,
-        response_to_events, resume_supported_slash_commands, run_resume_command,
+        permission_policy, print_help_to, push_output_block, render_commands_report,
+        render_config_report, render_diff_report, render_doctor_report_from_setup,
+        render_memory_report, render_repl_help, render_repl_help_for_profile,
+        render_resume_usage, resolve_model_alias, resolve_session_reference, response_to_events,
+        resume_supported_slash_commands, run_resume_command,
         slash_command_completion_candidates_with_sessions, status_context, validate_no_args,
-        CliAction, CliOutputFormat, GitWorkspaceSummary, InternalPromptProgressEvent,
-        InternalPromptProgressState, LiveCli, SlashCommand, StatusUsage, DEFAULT_MODEL,
+        CliAction, CliOutputFormat, CommandReportSurfaceSelection, GitWorkspaceSummary,
+        InternalPromptProgressEvent, InternalPromptProgressState, LiveCli, SlashCommand,
+        StatusUsage, DEFAULT_MODEL,
     };
     use api::{MessageResponse, OutputContentBlock, Usage};
     use plugins::{
@@ -6698,6 +6922,16 @@ mod tests {
             }
         );
         assert_eq!(
+            parse_args(&["commands".to_string(), "show".to_string(), "bridge".to_string()])
+                .expect("commands show bridge should parse"),
+            CliAction::Commands {
+                surface: CommandReportSurfaceSelection::Bridge,
+                model: DEFAULT_MODEL.to_string(),
+                model_explicit: false,
+                profile: None,
+            }
+        );
+        assert_eq!(
             parse_args(&["agents".to_string()]).expect("agents should parse"),
             CliAction::Agents { args: None }
         );
@@ -6741,6 +6975,15 @@ mod tests {
         assert_eq!(
             parse_args(&["sandbox".to_string()]).expect("sandbox should parse"),
             CliAction::Sandbox
+        );
+        assert_eq!(
+            parse_args(&["commands".to_string()]).expect("commands should parse"),
+            CliAction::Commands {
+                surface: CommandReportSurfaceSelection::Local,
+                model: DEFAULT_MODEL.to_string(),
+                model_explicit: false,
+                profile: None,
+            }
         );
     }
 
@@ -7018,9 +7261,20 @@ mod tests {
     }
 
     #[test]
+    fn repl_help_hides_tool_commands_when_profile_disables_tools() {
+        let help = render_repl_help_for_profile(false);
+        assert!(help.contains("Start here        /doctor, /config, /status, /memory"));
+        assert!(!help.contains("/mcp [list|show <server>|help]"));
+        assert!(!help.contains(
+            "/plugin [list|install <path>|enable <name>|disable <name>|uninstall <id>|update <id>]"
+        ));
+    }
+
+    #[test]
     fn completion_candidates_include_workflow_shortcuts_and_dynamic_sessions() {
         let completions = slash_command_completion_candidates_with_sessions(
             "sonnet",
+            true,
             Some("session-current"),
             vec!["session-old".to_string()],
         );
@@ -7031,6 +7285,21 @@ mod tests {
         assert!(completions.contains(&"/session switch session-current".to_string()));
         assert!(completions.contains(&"/resume session-old".to_string()));
         assert!(completions.contains(&"/mcp list".to_string()));
+    }
+
+    #[test]
+    fn completion_candidates_hide_tool_commands_when_profile_disables_tools() {
+        let completions = slash_command_completion_candidates_with_sessions(
+            "sonnet",
+            false,
+            Some("session-current"),
+            vec!["session-old".to_string()],
+        );
+
+        assert!(!completions.contains(&"/mcp".to_string()));
+        assert!(!completions.contains(&"/mcp list".to_string()));
+        assert!(!completions.contains(&"/plugin list".to_string()));
+        assert!(completions.contains(&"/session list".to_string()));
     }
 
     #[test]
@@ -7061,6 +7330,52 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup temp dir");
         std::env::remove_var("KCODE_BASE_URL");
         std::env::remove_var("KCODE_API_KEY");
+    }
+
+    #[test]
+    fn commands_report_reflects_bridge_surface_and_profile_capability() {
+        let _guard = env_lock();
+        let root = temp_dir();
+        let config_home = root.join("home").join(".kcode");
+        fs::create_dir_all(&config_home).expect("config home");
+        fs::write(
+            config_home.join("config.toml"),
+            r#"
+profile = "bridge"
+model = "gpt-4.1-mini"
+
+[profiles.bridge]
+default_model = "gpt-4.1-mini"
+base_url_env = "BRIDGE_BASE_URL"
+api_key_env = "BRIDGE_API_KEY"
+supports_tools = false
+supports_streaming = false
+"#,
+        )
+        .expect("write config");
+        let previous_config_home = std::env::var_os("KCODE_CONFIG_HOME");
+        std::env::set_var("KCODE_CONFIG_HOME", &config_home);
+
+        let report = with_current_dir(&root, || {
+            render_commands_report(CommandReportSurfaceSelection::Bridge, None, None)
+                .expect("commands report should render")
+        });
+
+        match previous_config_home {
+            Some(value) => std::env::set_var("KCODE_CONFIG_HOME", value),
+            None => std::env::remove_var("KCODE_CONFIG_HOME"),
+        }
+
+        assert!(report.contains("Commands"));
+        assert!(report.contains("Surface           bridge"));
+        assert!(report.contains("Safety profile    bridge-safe"));
+        assert!(report.contains("Supports tools    false"));
+        assert!(report.contains("Supports stream   false"));
+        assert!(report.contains("Filtered"));
+        assert!(report.contains("/mcp"));
+        assert!(report.contains("active profile does not expose tool-capable commands"));
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
     }
 
     #[test]
@@ -7160,6 +7475,7 @@ mod tests {
         assert!(help.contains("kcode init"));
         assert!(help.contains("kcode agents"));
         assert!(help.contains("kcode mcp"));
+        assert!(help.contains("kcode commands [show [local|bridge]]"));
         assert!(help.contains("kcode skills"));
         assert!(help.contains("kcode /skills"));
     }
