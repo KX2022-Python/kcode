@@ -14,8 +14,11 @@ pub use prompt_cache::{
     CacheBreakEvent, PromptCache, PromptCacheConfig, PromptCachePaths, PromptCacheRecord,
     PromptCacheStats,
 };
-pub use providers::anthropic::{AnthropicClient, AnthropicClient as ApiClient, AuthSource};
+pub use providers::anthropic::{AnthropicClient, AuthSource};
 pub use providers::openai_compat::{OpenAiCompatClient, OpenAiCompatConfig};
+/// Default API client alias. Kcode uses OpenAI-compatible as the standard interface.
+/// AnthropicClient is available for explicit opt-in only.
+pub use providers::openai_compat::OpenAiCompatClient as ApiClient;
 pub use providers::{
     detect_provider_kind, max_tokens_for_model, resolve_model_alias, ProviderKind,
 };

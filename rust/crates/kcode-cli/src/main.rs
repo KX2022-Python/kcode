@@ -6802,7 +6802,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("time should be after epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("rusty-claude-cli-{nanos}"))
+        std::env::temp_dir().join(format!("kcode-cli-{nanos}"))
     }
 
     fn git(args: &[&str], cwd: &Path) {
@@ -8313,7 +8313,7 @@ UU conflicted.rs",
         fs::create_dir_all(&root).expect("root dir");
         git(&["init", "--quiet"], &root);
         git(&["config", "user.email", "tests@example.com"], &root);
-        git(&["config", "user.name", "Rusty Claude Tests"], &root);
+        git(&["config", "user.name", "Kcode Tests"], &root);
         fs::write(root.join("tracked.txt"), "hello\n").expect("write file");
         git(&["add", "tracked.txt"], &root);
         git(&["commit", "-m", "init", "--quiet"], &root);
@@ -8333,7 +8333,7 @@ UU conflicted.rs",
         fs::create_dir_all(&root).expect("root dir");
         git(&["init", "--quiet"], &root);
         git(&["config", "user.email", "tests@example.com"], &root);
-        git(&["config", "user.name", "Rusty Claude Tests"], &root);
+        git(&["config", "user.name", "Kcode Tests"], &root);
         fs::write(root.join("tracked.txt"), "hello\n").expect("write file");
         git(&["add", "tracked.txt"], &root);
         git(&["commit", "-m", "init", "--quiet"], &root);
@@ -8360,7 +8360,7 @@ UU conflicted.rs",
         fs::create_dir_all(&root).expect("root dir");
         git(&["init", "--quiet"], &root);
         git(&["config", "user.email", "tests@example.com"], &root);
-        git(&["config", "user.name", "Rusty Claude Tests"], &root);
+        git(&["config", "user.name", "Kcode Tests"], &root);
         fs::write(root.join(".gitignore"), ".omx/\nignored.txt\n").expect("write gitignore");
         fs::write(root.join("tracked.txt"), "hello\n").expect("write tracked");
         git(&["add", ".gitignore", "tracked.txt"], &root);
@@ -8387,7 +8387,7 @@ UU conflicted.rs",
         fs::create_dir_all(&root).expect("root dir");
         git(&["init", "--quiet"], &root);
         git(&["config", "user.email", "tests@example.com"], &root);
-        git(&["config", "user.name", "Rusty Claude Tests"], &root);
+        git(&["config", "user.name", "Kcode Tests"], &root);
         fs::write(root.join("tracked.txt"), "hello\n").expect("write tracked");
         git(&["add", "tracked.txt"], &root);
         git(&["commit", "-m", "init", "--quiet"], &root);
@@ -8747,7 +8747,7 @@ UU conflicted.rs",
             task_label: "ship plugin progress".to_string(),
             step: 3,
             phase: "running read_file".to_string(),
-            detail: Some("reading rust/crates/rusty-claude-cli/src/main.rs".to_string()),
+            detail: Some("reading rust/crates/kcode-cli/src/main.rs".to_string()),
             saw_final_text: false,
         };
 
@@ -8794,8 +8794,8 @@ UU conflicted.rs",
             "reading src/main.rs"
         );
         assert!(
-            describe_tool_progress("bash", r#"{"command":"cargo test -p rusty-claude-cli"}"#)
-                .contains("cargo test -p rusty-claude-cli")
+            describe_tool_progress("bash", r#"{"command":"cargo test -p kcode-cli"}"#)
+                .contains("cargo test -p kcode-cli")
         );
         assert_eq!(
             describe_tool_progress("grep_search", r#"{"pattern":"ultraplan","path":"rust"}"#),

@@ -244,7 +244,7 @@ impl ProviderLauncher {
 
         Ok(ProviderLaunchConfig {
             profile_name: resolved.profile_name.clone(),
-            provider_label: "openai-compatible".to_string(),
+            provider_label: resolved.profile_name.clone(),
             base_url,
             api_key,
             model: resolved.model.clone(),

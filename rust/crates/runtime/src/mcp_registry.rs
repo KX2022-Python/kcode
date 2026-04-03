@@ -360,6 +360,58 @@ fn parse_mcp_servers_from_json(
 }
 
 fn parse_single_server_config(value: &serde_json::Value) -> Option<ScopedMcpServerConfig> {
+    // Check for URL-based transports first (SSE/HTTP/WS)
+    if let Some(url) = value.get("url").and_then(|v| v.as_str()) {
+        let transport_type = value
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("sse")
+            .to_lowercase();
+
+        let headers = value
+            .get("headers")
+            .and_then(|v| v.as_object())
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let headers_helper = value
+            .get("headersHelper")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
+        let oauth = parse_optional_mcp_oauth(value);
+
+        let config = match transport_type.as_str() {
+            "http" => McpServerConfig::Http(crate::config::McpRemoteServerConfig {
+                url: url.to_string(),
+                headers,
+                headers_helper,
+                oauth,
+            }),
+            "ws" | "websocket" => McpServerConfig::Ws(crate::config::McpWebSocketServerConfig {
+                url: url.to_string(),
+                headers,
+                headers_helper,
+            }),
+            _ => McpServerConfig::Sse(crate::config::McpRemoteServerConfig {
+                url: url.to_string(),
+                headers,
+                headers_helper,
+                oauth,
+            }),
+        };
+
+        return Some(ScopedMcpServerConfig {
+            scope: ConfigSource::User,
+            config,
+        });
+    }
+
+    // Fall back to stdio transport
     let command = value.get("command").and_then(|v| v.as_str())?;
     let args = value
         .get("args")
@@ -381,14 +433,36 @@ fn parse_single_server_config(value: &serde_json::Value) -> Option<ScopedMcpServ
         })
         .unwrap_or_default();
 
+    let timeout = value
+        .get("toolCallTimeoutMs")
+        .or_else(|| value.get("tool_call_timeout_ms"))
+        .and_then(|v| v.as_u64());
+
     Some(ScopedMcpServerConfig {
         scope: ConfigSource::User,
         config: McpServerConfig::Stdio(crate::config::McpStdioServerConfig {
             command: command.to_string(),
             args,
             env,
-            tool_call_timeout_ms: None,
+            tool_call_timeout_ms: timeout,
         }),
+    })
+}
+
+fn parse_optional_mcp_oauth(value: &serde_json::Value) -> Option<crate::config::McpOAuthConfig> {
+    let oauth = value.get("oauth")?;
+    let client_id = oauth.get("clientId").or_else(|| oauth.get("client_id")).and_then(|v| v.as_str()).map(String::from);
+    let callback_port = oauth.get("callbackPort").or_else(|| oauth.get("callback_port")).and_then(|v| v.as_u64()).map(|v| v as u16);
+    let auth_server_metadata_url = oauth.get("authorizationUrl")
+        .or_else(|| oauth.get("authServerMetadataUrl"))
+        .or_else(|| oauth.get("auth_server_metadata_url"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    Some(crate::config::McpOAuthConfig {
+        client_id,
+        callback_port,
+        auth_server_metadata_url,
+        xaa: None,
     })
 }
 
@@ -489,5 +563,27 @@ mod tests {
         let snapshot = McpRegistrySnapshot::default();
         let summary = snapshot.render_summary();
         assert!(summary.contains("No MCP servers configured"));
+    }
+
+    #[test]
+    fn parses_sse_server_from_json() {
+        let json = serde_json::json!({
+            "mcpServers": {
+                "remote-mcp": {
+                    "type": "sse",
+                    "url": "https://mcp.example.com/sse",
+                    "headers": {"Authorization": "Bearer token"}
+                }
+            }
+        });
+        let servers = parse_mcp_servers_from_json(&json).expect("parse should succeed");
+        assert_eq!(servers.len(), 1);
+        match &servers[0].config {
+            McpServerConfig::Sse(cfg) => {
+                assert_eq!(cfg.url, "https://mcp.example.com/sse");
+                assert_eq!(cfg.headers.get("Authorization"), Some(&"Bearer token".to_string()));
+            }
+            _ => panic!("expected SSE config"),
+        }
     }
 }
