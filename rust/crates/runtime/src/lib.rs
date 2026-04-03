@@ -7,6 +7,7 @@ mod file_ops;
 mod hooks;
 mod json;
 mod memory;
+mod memory_extraction;
 mod mcp;
 mod mcp_client;
 mod mcp_registry;
@@ -63,6 +64,10 @@ pub use memory::{
     create_memory, default_memory_dir, default_memory_index, ensure_memory_dir,
     ensure_memory_index, list_memories, load_user_memories, read_memory, render_memory_summary,
     MemoryEntry, MemoryError, MemoryIndexEntry, MemoryType,
+};
+pub use memory_extraction::{
+    extract_memory_from_session, MemoryExtractionState,
+    MEMORY_EXTRACTION_TOKEN_THRESHOLD, MEMORY_EXTRACTION_TOOL_CALL_THRESHOLD,
 };
 pub use mcp_registry::{
     load_mcp_config_file, McpPolicy, McpPolicyRule, McpRegistryAssembler, McpRegistrySnapshot,

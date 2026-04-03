@@ -10,10 +10,14 @@ use crate::compact::{
 };
 use crate::config::RuntimeFeatureConfig;
 use crate::hooks::{HookAbortSignal, HookProgressReporter, HookRunResult, HookRunner};
+use crate::memory::default_memory_dir;
+use crate::memory_extraction::{
+    extract_memory_from_session, MemoryExtractionState,
+};
 use crate::permissions::{
     PermissionContext, PermissionOutcome, PermissionPolicy, PermissionPrompter,
 };
-use crate::session::{ContentBlock, ConversationMessage, Session};
+use crate::session::{ContentBlock, ConversationMessage, MessageRole, Session};
 use crate::usage::{TokenUsage, UsageTracker};
 
 const DEFAULT_AUTO_COMPACTION_INPUT_TOKENS_THRESHOLD: u32 = 100_000;
@@ -108,6 +112,7 @@ pub struct TurnSummary {
     pub usage: TokenUsage,
     pub auto_compaction: Option<AutoCompactionEvent>,
     pub compaction_circuit_tripped: bool,
+    pub memory_extracted: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,6 +134,7 @@ pub struct ConversationRuntime<C, T> {
     hook_progress_reporter: Option<Box<dyn HookProgressReporter>>,
     session_tracer: Option<SessionTracer>,
     compaction_failure_tracker: CompactionFailureTracker,
+    memory_extraction_state: MemoryExtractionState,
 }
 
 impl<C, T> ConversationRuntime<C, T>
@@ -179,6 +185,7 @@ where
             hook_progress_reporter: None,
             session_tracer: None,
             compaction_failure_tracker: CompactionFailureTracker::new(),
+            memory_extraction_state: MemoryExtractionState::new(),
         }
     }
 
@@ -466,6 +473,27 @@ where
         let auto_compaction = self.maybe_auto_compact();
         let compaction_circuit_tripped = self.compaction_failure_tracker.is_tripped();
 
+        // Track usage for memory extraction
+        let turn_input_tokens = self.usage_tracker.cumulative_usage().input_tokens
+            - self.memory_extraction_state.input_tokens_since_extraction;
+        let turn_tool_calls = self
+            .session
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::Tool)
+            .count();
+        self.memory_extraction_state.record_turn(
+            turn_input_tokens,
+            turn_tool_calls,
+            self.session.messages.len(),
+        );
+
+        let memory_extracted = if self.memory_extraction_state.should_extract() {
+            self.maybe_extract_memory()
+        } else {
+            None
+        };
+
         let summary = TurnSummary {
             assistant_messages,
             tool_results,
@@ -474,6 +502,7 @@ where
             usage: self.usage_tracker.cumulative_usage(),
             auto_compaction,
             compaction_circuit_tripped,
+            memory_extracted,
         };
         self.record_turn_completed(&summary);
 
@@ -498,6 +527,28 @@ where
     /// Returns whether the auto-compaction circuit breaker is tripped.
     pub fn compaction_circuit_is_tripped(&self) -> bool {
         self.compaction_failure_tracker.is_tripped()
+    }
+
+    /// Attempt background memory extraction. Returns the memory name if extracted.
+    fn maybe_extract_memory(&mut self) -> Option<String> {
+        let memory_dir = default_memory_dir();
+        match extract_memory_from_session(
+            &self.session.messages,
+            &memory_dir,
+            &self.session.session_id,
+        ) {
+            Ok(result) => {
+                if result.is_some() {
+                    self.memory_extraction_state.reset();
+                }
+                result
+            }
+            Err(error) => {
+                // Log but don't fail the turn
+                eprintln!("warning: memory extraction failed: {error}");
+                None
+            }
+        }
     }
 
     #[must_use]
