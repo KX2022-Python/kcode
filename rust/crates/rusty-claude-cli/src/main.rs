@@ -125,7 +125,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
     match parse_args(&args)? {
         CliAction::Agents { args } => LiveCli::print_agents(args.as_deref())?,
-        CliAction::Mcp { args } => LiveCli::print_mcp(args.as_deref())?,
+        CliAction::Mcp { args } => {
+            ensure_process_command_available("mcp", None, None)?;
+            LiveCli::print_mcp(args.as_deref())?
+        }
         CliAction::Skills { args } => LiveCli::print_skills(args.as_deref())?,
         CliAction::PrintSystemPrompt { cwd, date } => print_system_prompt(cwd, date),
         CliAction::Version => print_version(),
@@ -1754,10 +1757,23 @@ fn run_resume_command(
     session: &Session,
     command: &SlashCommand,
 ) -> Result<ResumeCommandOutcome, Box<dyn std::error::Error>> {
+    let resume_setup = load_setup_context(
+        SetupMode::Resume,
+        None,
+        None,
+        default_permission_mode(),
+        Some(&session.session_id),
+    )
+    .ok();
     match command {
         SlashCommand::Help => Ok(ResumeCommandOutcome {
             session: session.clone(),
-            message: Some(render_repl_help()),
+            message: Some(match &resume_setup {
+                Some(setup) => {
+                    render_repl_help_for_profile(setup.active_profile.profile.supports_tools)
+                }
+                None => render_repl_help(),
+            }),
         }),
         SlashCommand::Compact => {
             let result = runtime::compact_session(
@@ -1803,13 +1819,7 @@ fn run_resume_command(
         SlashCommand::Status => {
             let tracker = UsageTracker::from_session(session);
             let usage = tracker.cumulative_usage();
-            let setup = load_setup_context(
-                SetupMode::Resume,
-                None,
-                None,
-                default_permission_mode(),
-                Some(&session.session_id),
-            )?;
+            let setup = resume_setup.ok_or("missing resume setup context")?;
             Ok(ResumeCommandOutcome {
                 session: session.clone(),
                 message: Some(format_status_report(
@@ -1855,6 +1865,16 @@ fn run_resume_command(
             message: Some(render_config_report(section.as_deref(), None, None)?),
         }),
         SlashCommand::Mcp { action, target } => {
+            if let Some(setup) = &resume_setup {
+                if let Err(message) =
+                    ensure_session_command_available_for_profile("mcp", &setup.active_profile)
+                {
+                    return Ok(ResumeCommandOutcome {
+                        session: session.clone(),
+                        message: Some(message),
+                    });
+                }
+            }
             let cwd = env::current_dir()?;
             let args = match (action.as_deref(), target.as_deref()) {
                 (None, None) => None,
@@ -2457,6 +2477,12 @@ impl LiveCli {
                 false
             }
             SlashCommand::Mcp { action, target } => {
+                if let Err(message) =
+                    ensure_session_command_available_for_profile("mcp", &self.active_profile)
+                {
+                    eprintln!("{message}");
+                    return Ok(false);
+                }
                 let args = match (action.as_deref(), target.as_deref()) {
                     (None, None) => None,
                     (Some(action), None) => Some(action.to_string()),
@@ -2494,6 +2520,12 @@ impl LiveCli {
                 self.handle_session_command(action.as_deref(), target.as_deref())?
             }
             SlashCommand::Plugins { action, target } => {
+                if let Err(message) =
+                    ensure_session_command_available_for_profile("plugin", &self.active_profile)
+                {
+                    eprintln!("{message}");
+                    return Ok(false);
+                }
                 self.handle_plugins_command(action.as_deref(), target.as_deref())?
             }
             SlashCommand::Agents { args } => {
@@ -3690,6 +3722,95 @@ fn filtered_command_usage(filtered: &FilteredCommand) -> String {
         CommandScope::Process => name.to_string(),
         CommandScope::Session => format!("/{name}"),
     }
+}
+
+fn filtered_command_name(filtered: &FilteredCommand) -> &str {
+    filtered
+        .id
+        .rsplit('.')
+        .next()
+        .unwrap_or(filtered.id.as_str())
+}
+
+fn local_command_block_reason(
+    profile: &ResolvedProviderProfile,
+    scope: CommandScope,
+    name: &str,
+) -> Option<String> {
+    let snapshot = build_command_registry_snapshot(
+        &CommandRegistryContext::for_surface(
+            CommandSurface::CliLocal,
+            profile.profile.supports_tools,
+        ),
+        &[],
+    );
+    snapshot
+        .filtered_out_commands
+        .iter()
+        .find(|command| {
+            command.scope == scope
+                && filtered_command_name(command) == name
+                && command.reason == "active profile does not expose tool-capable commands"
+        })
+        .map(|command| command.reason.clone())
+}
+
+fn command_blocked_message(
+    scope: CommandScope,
+    name: &str,
+    profile_name: &str,
+    reason: &str,
+) -> String {
+    let rendered_name = match scope {
+        CommandScope::Process => name.to_string(),
+        CommandScope::Session => format!("/{name}"),
+    };
+    format!(
+        "command `{rendered_name}` is unavailable for active profile `{profile_name}`: {reason}\nRun `{CLI_NAME} commands show local` to inspect the current command surface."
+    )
+}
+
+fn ensure_process_command_available(
+    name: &str,
+    model_override: Option<&str>,
+    profile_override: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Ok(setup) = load_setup_context(
+        SetupMode::Config,
+        model_override,
+        profile_override,
+        default_permission_mode(),
+        None,
+    ) else {
+        return Ok(());
+    };
+    if let Some(reason) =
+        local_command_block_reason(&setup.active_profile, CommandScope::Process, name)
+    {
+        return Err(command_blocked_message(
+            CommandScope::Process,
+            name,
+            &setup.active_profile.profile_name,
+            &reason,
+        )
+        .into());
+    }
+    Ok(())
+}
+
+fn ensure_session_command_available_for_profile(
+    command_name: &str,
+    profile: &ResolvedProviderProfile,
+) -> Result<(), String> {
+    if let Some(reason) = local_command_block_reason(profile, CommandScope::Session, command_name) {
+        return Err(command_blocked_message(
+            CommandScope::Session,
+            command_name,
+            &profile.profile_name,
+            &reason,
+        ));
+    }
+    Ok(())
 }
 
 fn render_commands_report(
@@ -6454,9 +6575,9 @@ mod tests {
         render_resume_usage, resolve_model_alias, resolve_session_reference, response_to_events,
         resume_supported_slash_commands, run_resume_command,
         slash_command_completion_candidates_with_sessions, status_context, validate_no_args,
-        CliAction, CliOutputFormat, CommandReportSurfaceSelection, GitWorkspaceSummary,
-        InternalPromptProgressEvent, InternalPromptProgressState, LiveCli, SlashCommand,
-        StatusUsage, DEFAULT_MODEL,
+        ensure_session_command_available_for_profile, CliAction, CliOutputFormat,
+        CommandReportSurfaceSelection, GitWorkspaceSummary, InternalPromptProgressEvent,
+        InternalPromptProgressState, LiveCli, SlashCommand, StatusUsage, DEFAULT_MODEL,
     };
     use api::{MessageResponse, OutputContentBlock, Usage};
     use plugins::{
@@ -7376,6 +7497,39 @@ supports_streaming = false
         assert!(report.contains("active profile does not expose tool-capable commands"));
 
         fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn session_command_availability_rejects_tool_commands_for_toolless_profile() {
+        let profile = ResolvedProviderProfile {
+            profile_name: "bridge".to_string(),
+            profile_source: ResolutionSource::Config("config.profile"),
+            model: "gpt-4.1-mini".to_string(),
+            model_source: ResolutionSource::Config("config.model"),
+            base_url: None,
+            base_url_source: ResolutionSource::Missing,
+            credential: CredentialResolution {
+                source: CredentialSource::Missing,
+                env_name: "BRIDGE_API_KEY".to_string(),
+                api_key: None,
+            },
+            profile: ProviderProfile {
+                name: "bridge".to_string(),
+                base_url_env: "BRIDGE_BASE_URL".to_string(),
+                base_url: String::new(),
+                api_key_env: "BRIDGE_API_KEY".to_string(),
+                default_model: "gpt-4.1-mini".to_string(),
+                supports_tools: false,
+                supports_streaming: false,
+                request_timeout_ms: 120_000,
+                max_retries: 2,
+            },
+        };
+
+        let error = ensure_session_command_available_for_profile("mcp", &profile)
+            .expect_err("mcp should be blocked");
+        assert!(error.contains("command `/mcp` is unavailable"));
+        assert!(error.contains("active profile `bridge`"));
     }
 
     #[test]

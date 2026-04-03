@@ -291,6 +291,129 @@ supports_streaming = false
     fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
 }
 
+#[test]
+fn mcp_command_is_blocked_when_profile_disables_tools() {
+    let temp_dir = unique_temp_dir("mcp-blocked");
+    let config_home = temp_dir.join("home").join(".kcode");
+    fs::create_dir_all(&config_home).expect("config home should exist");
+    fs::write(
+        config_home.join("config.toml"),
+        r#"
+profile = "bridge"
+model = "gpt-4.1-mini"
+
+[profiles.bridge]
+default_model = "gpt-4.1-mini"
+base_url_env = "BRIDGE_BASE_URL"
+api_key_env = "BRIDGE_API_KEY"
+supports_tools = false
+supports_streaming = false
+"#,
+    )
+    .expect("write config");
+
+    let output = command_in(&temp_dir)
+        .env("KCODE_CONFIG_HOME", &config_home)
+        .arg("mcp")
+        .output()
+        .expect("kcode should launch");
+
+    assert!(
+        !output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+    assert!(stderr.contains("command `mcp` is unavailable"));
+    assert!(stderr.contains("active profile `bridge`"));
+
+    fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
+}
+
+#[test]
+fn resumed_mcp_command_reports_unavailable_when_profile_disables_tools() {
+    let temp_dir = unique_temp_dir("resume-mcp-blocked");
+    let config_home = temp_dir.join("home").join(".kcode");
+    fs::create_dir_all(&config_home).expect("config home should exist");
+    fs::write(
+        config_home.join("config.toml"),
+        r#"
+profile = "bridge"
+model = "gpt-4.1-mini"
+
+[profiles.bridge]
+default_model = "gpt-4.1-mini"
+base_url_env = "BRIDGE_BASE_URL"
+api_key_env = "BRIDGE_API_KEY"
+supports_tools = false
+supports_streaming = false
+"#,
+    )
+    .expect("write config");
+    let session_path = write_session(&temp_dir, "resume-mcp-blocked");
+
+    let output = command_in(&temp_dir)
+        .env("KCODE_CONFIG_HOME", &config_home)
+        .args([
+            "--resume",
+            session_path.to_str().expect("utf8 path"),
+            "/mcp",
+        ])
+        .output()
+        .expect("kcode should launch");
+
+    assert_success(&output);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    assert!(stdout.contains("command `/mcp` is unavailable"));
+    assert!(stdout.contains("active profile `bridge`"));
+
+    fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
+}
+
+#[test]
+fn resumed_help_hides_tool_commands_when_profile_disables_tools() {
+    let temp_dir = unique_temp_dir("resume-help-blocked");
+    let config_home = temp_dir.join("home").join(".kcode");
+    fs::create_dir_all(&config_home).expect("config home should exist");
+    fs::write(
+        config_home.join("config.toml"),
+        r#"
+profile = "bridge"
+model = "gpt-4.1-mini"
+
+[profiles.bridge]
+default_model = "gpt-4.1-mini"
+base_url_env = "BRIDGE_BASE_URL"
+api_key_env = "BRIDGE_API_KEY"
+supports_tools = false
+supports_streaming = false
+"#,
+    )
+    .expect("write config");
+    let session_path = write_session(&temp_dir, "resume-help-blocked");
+
+    let output = command_in(&temp_dir)
+        .env("KCODE_CONFIG_HOME", &config_home)
+        .args([
+            "--resume",
+            session_path.to_str().expect("utf8 path"),
+            "/help",
+        ])
+        .output()
+        .expect("kcode should launch");
+
+    assert_success(&output);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    assert!(stdout.contains("Start here        /doctor, /config, /status, /memory"));
+    assert!(!stdout.contains("/mcp [list|show <server>|help]"));
+    assert!(!stdout.contains(
+        "/plugin [list|install <path>|enable <name>|disable <name>|uninstall <id>|update <id>]"
+    ));
+
+    fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
+}
+
 fn command_in(cwd: &Path) -> Command {
     let home = cwd.join("__home");
     fs::create_dir_all(&home).expect("isolated home should exist");
