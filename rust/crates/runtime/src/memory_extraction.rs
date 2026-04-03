@@ -1,10 +1,14 @@
 //! Background memory extraction — periodically extracts session insights
 //! into the memory file system, following CC Source Map principles.
+//! Implements auto-dream: non-blocking background extraction using tokio::spawn.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::memory::{
-    create_memory, ensure_memory_dir, list_memories, read_memory, update_memory, MemoryType,
+    create_memory, default_memory_dir, ensure_memory_dir, list_memories, read_memory, update_memory,
+    MemoryType,
 };
 use crate::session::{ContentBlock, ConversationMessage, MessageRole};
 
@@ -450,4 +454,110 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+// ============================================================================
+// Auto-Dream: Background Memory Extraction (CC Source Map principle)
+// ============================================================================
+
+/// Auto-dream state for background extraction tracking.
+pub struct AutoDreamState {
+    extraction_running: AtomicBool,
+    last_dream_timestamp: std::sync::atomic::AtomicU64,
+}
+
+impl AutoDreamState {
+    pub fn new() -> Self {
+        Self {
+            extraction_running: AtomicBool::new(false),
+            last_dream_timestamp: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+
+    /// Try to start a background extraction. Returns false if already running.
+    pub fn try_start_dream(&self) -> bool {
+        self.extraction_running
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+            .is_ok()
+    }
+
+    /// Mark extraction as complete.
+    pub fn finish_dream(&self, timestamp: u64) {
+        self.last_dream_timestamp.store(timestamp, Ordering::Release);
+        self.extraction_running.store(false, Ordering::Release);
+    }
+
+    /// Check if extraction is currently running.
+    pub fn is_dreaming(&self) -> bool {
+        self.extraction_running.load(Ordering::Acquire)
+    }
+
+    /// Get the last extraction timestamp.
+    pub fn last_dream(&self) -> u64 {
+        self.last_dream_timestamp.load(Ordering::Acquire)
+    }
+}
+
+impl Default for AutoDreamState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Trigger auto-dream: spawn background memory extraction without blocking.
+/// This matches CC Source Map's principle: extraction runs in a forked subagent
+/// (simulated here via tokio::spawn) so the REPL is never blocked.
+pub fn trigger_auto_dream(
+    dream_state: Arc<AutoDreamState>,
+    messages: Vec<ConversationMessage>,
+    session_id: String,
+    memory_dir: Option<PathBuf>,
+) {
+    if !dream_state.try_start_dream() {
+        return; // Already running
+    }
+
+    let dir = memory_dir.unwrap_or_else(default_memory_dir);
+
+    // Try to spawn on tokio runtime; if no runtime (e.g., in tests),
+    // run synchronously on a background thread.
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            handle.spawn(async move {
+                // Simulate background analysis delay (CC: subagent startup time)
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+                run_extraction(&dream_state, &messages, &dir, &session_id);
+            });
+        }
+        Err(_) => {
+            // No tokio runtime: run synchronously for tests
+            run_extraction(&dream_state, &messages, &dir, &session_id);
+        }
+    }
+}
+
+fn run_extraction(
+    dream_state: &AutoDreamState,
+    messages: &[ConversationMessage],
+    dir: &Path,
+    session_id: &str,
+) {
+    match extract_memory_from_session(messages, dir, session_id) {
+        Ok(result) => {
+            if let Some(name) = result {
+                eprintln!("[auto-dream] Extracted memory: {}", name);
+            }
+        }
+        Err(e) => {
+            eprintln!("[auto-dream] Extraction failed: {e}");
+        }
+    }
+
+    dream_state.finish_dream(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    );
 }

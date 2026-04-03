@@ -13,10 +13,7 @@ use crate::compact::{
 };
 use crate::config::RuntimeFeatureConfig;
 use crate::hooks::{HookAbortSignal, HookProgressReporter, HookRunResult, HookRunner};
-use crate::memory::default_memory_dir;
-use crate::memory_extraction::{
-    extract_memory_from_session, MemoryExtractionState,
-};
+use crate::memory_extraction::MemoryExtractionState;
 use crate::permissions::{
     PermissionContext, PermissionOutcome, PermissionPolicy, PermissionPrompter,
 };
@@ -138,6 +135,7 @@ pub struct ConversationRuntime<C, T> {
     session_tracer: Option<SessionTracer>,
     compaction_failure_tracker: CompactionFailureTracker,
     memory_extraction_state: MemoryExtractionState,
+    auto_dream_state: std::sync::Arc<crate::memory_extraction::AutoDreamState>,
 }
 
 impl<C, T> ConversationRuntime<C, T>
@@ -189,6 +187,7 @@ where
             session_tracer: None,
             compaction_failure_tracker: CompactionFailureTracker::new(),
             memory_extraction_state: MemoryExtractionState::new(),
+            auto_dream_state: std::sync::Arc::new(crate::memory_extraction::AutoDreamState::new()),
         }
     }
 
@@ -536,23 +535,30 @@ where
             .filter(|m| m.role == MessageRole::Tool)
             .count();
 
-        let memory_extracted = if self.memory_extraction_state.should_extract(
+        // Auto-dream: trigger background extraction without blocking REPL
+        if self.memory_extraction_state.should_extract(
             cumulative_input_tokens,
             cumulative_tool_calls,
         ) {
-            let result = self.maybe_extract_memory();
-            if result.is_some() {
-                self.memory_extraction_state
-                    .reset(cumulative_input_tokens, cumulative_tool_calls);
-            }
-            result
-        } else {
-            None
-        };
+            crate::memory_extraction::trigger_auto_dream(
+                self.auto_dream_state.clone(),
+                self.session.messages.clone(),
+                self.session.session_id.clone(),
+                None,
+            );
+            self.memory_extraction_state
+                .reset(cumulative_input_tokens, cumulative_tool_calls);
+        }
 
         // Record the current snapshot for tracking
         self.memory_extraction_state
             .record_turn(cumulative_input_tokens, cumulative_tool_calls);
+
+        let memory_extracted = if self.auto_dream_state.is_dreaming() {
+            Some("auto-dream running".to_string())
+        } else {
+            None
+        };
 
         let summary = TurnSummary {
             assistant_messages,
@@ -624,22 +630,6 @@ where
     /// Returns whether the auto-compaction circuit breaker is tripped.
     pub fn compaction_circuit_is_tripped(&self) -> bool {
         self.compaction_failure_tracker.is_tripped()
-    }
-
-    /// Attempt background memory extraction. Returns the memory name if extracted.
-    fn maybe_extract_memory(&mut self) -> Option<String> {
-        let memory_dir = default_memory_dir();
-        match extract_memory_from_session(
-            &self.session.messages,
-            &memory_dir,
-            &self.session.session_id,
-        ) {
-            Ok(result) => result,
-            Err(error) => {
-                eprintln!("warning: memory extraction failed: {error}");
-                None
-            }
-        }
     }
 
     #[must_use]

@@ -66,7 +66,7 @@ pub use memory::{
     update_memory, MemoryEntry, MemoryError, MemoryIndexEntry, MemoryType,
 };
 pub use memory_extraction::{
-    extract_memory_from_session, MemoryExtractionState,
+    extract_memory_from_session, trigger_auto_dream, AutoDreamState, MemoryExtractionState,
     MEMORY_EXTRACTION_TOKEN_THRESHOLD, MEMORY_EXTRACTION_TOOL_CALL_THRESHOLD,
 };
 pub use mcp_registry::{

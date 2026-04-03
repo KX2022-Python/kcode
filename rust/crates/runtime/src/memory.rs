@@ -1,6 +1,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const MEMORY_DIR_NAME: &str = "memory";
 const MEMORY_INDEX_NAME: &str = "MEMORY.md";
@@ -42,6 +43,8 @@ pub struct MemoryEntry {
     pub memory_type: MemoryType,
     pub body: String,
     pub file_path: PathBuf,
+    pub created_at: u64,
+    pub updated_at: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +53,8 @@ pub struct MemoryIndexEntry {
     pub description: String,
     pub memory_type: MemoryType,
     pub file_name: String,
+    pub created_at: u64,
+    pub updated_at: u64,
 }
 
 #[derive(Debug)]
@@ -133,6 +138,8 @@ pub fn list_memories(dir: &Path) -> Result<Vec<MemoryIndexEntry>, MemoryError> {
                         .unwrap_or_default()
                         .to_string_lossy()
                         .to_string(),
+                    created_at: parsed.created_at,
+                    updated_at: parsed.updated_at,
                 });
             }
         }
@@ -151,6 +158,8 @@ pub fn read_memory(path: &Path) -> Result<MemoryEntry, MemoryError> {
         memory_type: frontmatter.memory_type,
         body: frontmatter.body,
         file_path: path.to_path_buf(),
+        created_at: frontmatter.created_at,
+        updated_at: frontmatter.updated_at,
     })
 }
 
@@ -164,14 +173,15 @@ pub fn create_memory(
 ) -> Result<PathBuf, MemoryError> {
     ensure_memory_dir(dir)?;
 
+    let now = current_timestamp();
     let file_name = format!("{name}.{MEMORY_FILE_EXT}");
     let file_path = dir.join(&file_name);
 
-    let content = format_memory_file(name, description, &memory_type, body);
+    let content = format_memory_file(name, description, &memory_type, body, now, now);
     atomic_write(&file_path, &content)?;
     set_file_permissions(&file_path, 0o600)?;
 
-    update_memory_index(dir, name, description, &memory_type, &file_name)?;
+    update_memory_index(dir, name, description, &memory_type, &file_name, now, now)?;
 
     Ok(file_path)
 }
@@ -189,19 +199,20 @@ pub fn update_memory(
     let file_name = format!("{name}.{MEMORY_FILE_EXT}");
     let file_path = dir.join(&file_name);
 
-    // If exists, read current type to preserve it
-    let memory_type = if file_path.exists() {
+    // If exists, read current type and created_at to preserve them
+    let (memory_type, created_at) = if file_path.exists() {
         let existing = parse_memory_frontmatter(&file_path)?;
-        existing.memory_type
+        (existing.memory_type, existing.created_at)
     } else {
-        MemoryType::Project
+        (MemoryType::Project, current_timestamp())
     };
 
-    let content = format_memory_file(name, description, &memory_type, body);
+    let now = current_timestamp();
+    let content = format_memory_file(name, description, &memory_type, body, created_at, now);
     atomic_write(&file_path, &content)?;
     set_file_permissions(&file_path, 0o600)?;
 
-    update_memory_index(dir, name, description, &memory_type, &file_name)?;
+    update_memory_index(dir, name, description, &memory_type, &file_name, created_at, now)?;
 
     Ok(file_path)
 }
@@ -240,13 +251,15 @@ fn update_memory_index(
     description: &str,
     memory_type: &MemoryType,
     file_name: &str,
+    created_at: u64,
+    updated_at: u64,
 ) -> Result<(), MemoryError> {
     let index_path = dir.join(MEMORY_INDEX_NAME);
     ensure_memory_index(&index_path)?;
 
     let existing = fs::read_to_string(&index_path).unwrap_or_default();
     let new_line = format!(
-        "- [{name}]({file_name}) ({}) — {description}",
+        "- [{name}]({file_name}) ({}) — {description} [created: {created_at}, updated: {updated_at}]",
         memory_type.as_str()
     );
 
@@ -286,6 +299,8 @@ fn parse_memory_content(path: &Path, content: &str) -> Result<MemoryEntry, Memor
     let mut name = None;
     let mut description = None;
     let mut memory_type = None;
+    let mut created_at = None;
+    let mut updated_at = None;
 
     for line in frontmatter.lines() {
         let line = line.trim();
@@ -299,6 +314,12 @@ fn parse_memory_content(path: &Path, content: &str) -> Result<MemoryEntry, Memor
                     if let Some(mt) = MemoryType::from_str(value) {
                         memory_type = Some(mt);
                     }
+                }
+                "created_at" => {
+                    created_at = value.parse::<u64>().ok();
+                }
+                "updated_at" => {
+                    updated_at = value.parse::<u64>().ok();
                 }
                 _ => {}
             }
@@ -314,19 +335,25 @@ fn parse_memory_content(path: &Path, content: &str) -> Result<MemoryEntry, Memor
     let description = description.unwrap_or_default();
     let memory_type = memory_type.unwrap_or(MemoryType::User);
 
+    // Fall back to file timestamps if not in frontmatter
+    let created_at = created_at.unwrap_or_else(|| file_created_timestamp(path));
+    let updated_at = updated_at.unwrap_or_else(|| file_modified_timestamp(path));
+
     Ok(MemoryEntry {
         name,
         description,
         memory_type,
         body,
         file_path: path.to_path_buf(),
+        created_at,
+        updated_at,
     })
 }
 
-/// Format a memory file content string.
-fn format_memory_file(name: &str, description: &str, memory_type: &MemoryType, body: &str) -> String {
+/// Format a memory file content string with timestamps.
+fn format_memory_file(name: &str, description: &str, memory_type: &MemoryType, body: &str, created_at: u64, updated_at: u64) -> String {
     format!(
-        "---\nname: {name}\ndescription: {description}\ntype: {}\n---\n\n{body}\n",
+        "---\nname: {name}\ndescription: {description}\ntype: {}\ncreated_at: {created_at}\nupdated_at: {updated_at}\n---\n\n{body}\n",
         memory_type.as_str()
     )
 }
@@ -355,14 +382,32 @@ pub fn render_memory_summary(entries: &[MemoryIndexEntry]) -> String {
 
     let mut lines = vec![format!("Memory files ({}):", entries.len())];
     for entry in entries {
+        let created = format_timestamp(entry.created_at);
+        let updated = format_timestamp(entry.updated_at);
         lines.push(format!(
             "  - {} ({}) — {}",
             entry.name,
             entry.memory_type.as_str(),
             entry.description
         ));
+        lines.push(format!("    created: {created}, updated: {updated}"));
     }
     lines.join("\n")
+}
+
+/// Format a Unix timestamp as a human-readable date string.
+fn format_timestamp(ts: u64) -> String {
+    // Simple formatting: YYYY-MM-DD HH:MM:SS UTC
+    let secs = ts % 60;
+    let mins = (ts / 60) % 60;
+    let hours = (ts / 3600) % 24;
+    let days = ts / 86400;
+    // Days since epoch (1970-01-01)
+    let year = 1970 + days / 365;
+    let day_of_year = days % 365;
+    let month = (day_of_year * 12 / 365) + 1;
+    let day = day_of_year - (month - 1) * 365 / 12 + 1;
+    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", year, month, day, hours, mins, secs)
 }
 
 // --- File permission helpers ---
@@ -408,7 +453,31 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), MemoryError> {
     Ok(())
 }
 
-/// Get home directory in a cross-platform way.
+/// Get current Unix timestamp in seconds.
+fn current_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Get file modification time as Unix timestamp.
+fn file_modified_timestamp(path: &Path) -> u64 {
+    fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .map(|t| t.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0))
+        .unwrap_or(0)
+}
+
+/// Get file creation time as Unix timestamp (falls back to modified time).
+fn file_created_timestamp(path: &Path) -> u64 {
+    fs::metadata(path)
+        .ok()
+        .and_then(|m| m.created().ok().or_else(|| m.modified().ok()))
+        .map(|t| t.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0))
+        .unwrap_or(0)
+}
 fn home_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("."))
 }
