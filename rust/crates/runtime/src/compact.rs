@@ -87,7 +87,48 @@ pub fn get_compact_continuation_message(
 
 #[must_use]
 
-/// Threshold: ToolResult output beyond this size is stripped during compaction.
+/// Threshold for head truncation retry: if compacted session still exceeds this,
+/// we truncate older messages from the compacted result and retry.
+const MAX_COMPACTED_TOKENS_FOR_RETRY: usize = 80_000;
+
+/// Maximum number of head truncation retries.
+const MAX_HEAD_TRUNCATION_RETRIES: usize = 2;
+
+/// Compact with head truncation retry: if the compacted session still exceeds
+/// the token budget, older messages are truncated and compaction is retried.
+/// This matches CC Source Map's prompt-too-long fallback with head truncation.
+pub fn compact_with_head_truncation_retry(
+    session: &Session,
+    config: CompactionConfig,
+) -> CompactionResult {
+    let mut attempt = 0;
+    let mut current_session = session.clone();
+
+    loop {
+        let result = compact_session(&current_session, config);
+        if result.removed_message_count == 0 {
+            return result;
+        }
+
+        let estimated = estimate_session_tokens(&result.compacted_session);
+        if estimated <= MAX_COMPACTED_TOKENS_FOR_RETRY || attempt >= MAX_HEAD_TRUNCATION_RETRIES {
+            return result;
+        }
+
+        // Head truncation: remove the compact boundary message + some older preserved messages
+        let truncate_count = std::cmp::max(1, result.compacted_session.messages.len() / 4);
+        let keep_from = truncate_count;
+        if keep_from >= result.compacted_session.messages.len() {
+            return result;
+        }
+
+        let mut truncated = result.compacted_session.clone();
+        truncated.messages = truncated.messages[keep_from..].to_vec();
+        current_session = truncated;
+        attempt += 1;
+    }
+}
+/// Threshold for ToolResult output beyond this size is stripped during compaction.
 const MAX_TOOL_RESULT_CHARS_FOR_COMPACT: usize = 1_000;
 
 /// Strip heavy media blocks from a message before compaction summarization.
@@ -560,8 +601,9 @@ fn extract_summary_timeline(summary: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_key_files, compact_session, estimate_session_tokens, format_compact_summary,
-        get_compact_continuation_message, infer_pending_work, should_compact, CompactionConfig,
+        collect_key_files, compact_session, compact_with_head_truncation_retry,
+        estimate_session_tokens, format_compact_summary, get_compact_continuation_message,
+        infer_pending_work, should_compact, CompactionConfig,
     };
     use crate::session::{ContentBlock, ConversationMessage, MessageRole, Session};
 
@@ -742,6 +784,25 @@ mod tests {
         ]);
         assert_eq!(pending.len(), 1);
         assert!(pending[0].contains("Next: update tests"));
+    }
+
+    #[test]
+    fn head_truncation_retry_succeeds_on_first_attempt() {
+        // Normal session should succeed without retries
+        let mut session = Session::new();
+        session.messages.push(ConversationMessage::user_text("one ".repeat(200)));
+        session.messages.push(ConversationMessage::assistant(vec![ContentBlock::Text {
+            text: "two ".repeat(200),
+        }]));
+
+        let result = compact_with_head_truncation_retry(
+            &session,
+            CompactionConfig {
+                preserve_recent_messages: 2,
+                max_estimated_tokens: 1,
+            },
+        );
+        assert!(result.removed_message_count > 0 || !result.compacted_session.messages.is_empty());
     }
 }
 

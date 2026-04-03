@@ -8,8 +8,8 @@ use std::thread;
 use std::time::Duration;
 
 use crate::compact::{
-    compact_session, estimate_session_tokens, CompactionConfig, CompactionFailureTracker,
-    CompactionResult,
+    compact_session, compact_with_head_truncation_retry, estimate_session_tokens, CompactionConfig,
+    CompactionFailureTracker, CompactionResult,
 };
 use crate::config::RuntimeFeatureConfig;
 use crate::hooks::{HookAbortSignal, HookProgressReporter, HookRunResult, HookRunner};
@@ -577,8 +577,10 @@ where
     /// Compact the session and track success/failure for the circuit breaker.
     /// After compaction, reinjects loaded memories as attachments so the model
     /// retains access to long-term context that was lost during compaction.
+    /// Uses head truncation retry to ensure compaction succeeds even with
+    /// very long sessions (CC Source Map prompt-too-long fallback).
     pub fn compact_with_tracking(&mut self, config: CompactionConfig) -> CompactionResult {
-        let result = compact_session(&self.session, config);
+        let result = compact_with_head_truncation_retry(&self.session, config);
         if result.removed_message_count > 0 {
             self.compaction_failure_tracker.record_success();
         }

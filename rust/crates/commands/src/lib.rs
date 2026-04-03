@@ -91,6 +91,8 @@ pub struct CommandRegistryContext {
     pub surface: CommandSurface,
     pub include_local_ui: bool,
     pub profile_supports_tools: bool,
+    /// Command name patterns to deny (substring match).
+    pub denied_commands: Vec<String>,
 }
 
 impl CommandRegistryContext {
@@ -100,7 +102,14 @@ impl CommandRegistryContext {
             surface,
             include_local_ui: matches!(surface, CommandSurface::CliLocal),
             profile_supports_tools,
+            denied_commands: Vec::new(),
         }
+    }
+
+    #[must_use]
+    pub fn with_denied_commands(mut self, patterns: Vec<String>) -> Self {
+        self.denied_commands = patterns;
+        self
     }
 
     #[must_use]
@@ -1603,8 +1612,16 @@ fn build_snapshot_inner(
         let tools_allowed = context.profile_supports_tools
             || !matches!(descriptor.name.as_str(), "mcp" | "plugin" | "plugins");
 
+        // Check deny rules (substring match against command name)
+        let denied_by_rule = context
+            .denied_commands
+            .iter()
+            .any(|pattern| descriptor.name.contains(pattern));
+
         let filtered_reason = if !descriptor.enabled {
             Some("disabled".to_string())
+        } else if denied_by_rule {
+            Some("denied by command policy".to_string())
         } else if !allowed_by_surface {
             Some(match context.surface {
                 CommandSurface::CliLocal => "hidden on local CLI surface".to_string(),
@@ -3141,6 +3158,7 @@ fn config_source_label(source: ConfigSource) -> &'static str {
         ConfigSource::User => "user",
         ConfigSource::Project => "project",
         ConfigSource::Local => "local",
+        ConfigSource::Managed => "managed",
     }
 }
 

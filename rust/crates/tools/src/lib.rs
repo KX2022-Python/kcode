@@ -62,9 +62,13 @@ pub struct ToolSpec {
 mod tool_contract;
 pub use tool_contract::{ToolPoolAssembler, ToolUseContext};
 
+/// Tools allowed in simple mode (CC Source Map: Bash/Read/Edit only).
+const SIMPLE_MODE_TOOLS: &[&str] = &["bash", "read_file", "write_file", "edit_file"];
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlobalToolRegistry {
     include_builtin_tools: bool,
+    simple_mode: bool,
     plugin_tools: Vec<PluginTool>,
 }
 
@@ -79,6 +83,7 @@ impl GlobalToolRegistry {
     pub fn builtin() -> Self {
         Self {
             include_builtin_tools: true,
+            simple_mode: false,
             plugin_tools: Vec::new(),
         }
     }
@@ -87,8 +92,16 @@ impl GlobalToolRegistry {
     pub fn empty() -> Self {
         Self {
             include_builtin_tools: false,
+            simple_mode: false,
             plugin_tools: Vec::new(),
         }
+    }
+
+    /// Enable simple mode: only exposes bash, read_file, write_file, edit_file.
+    #[must_use]
+    pub fn simple_mode(mut self) -> Self {
+        self.simple_mode = true;
+        self
     }
 
     pub fn with_plugin_tools(plugin_tools: Vec<PluginTool>) -> Result<Self, String> {
@@ -112,6 +125,7 @@ impl GlobalToolRegistry {
 
         Ok(Self {
             include_builtin_tools: true,
+            simple_mode: false,
             plugin_tools,
         })
     }
@@ -183,7 +197,13 @@ impl GlobalToolRegistry {
             .then(mvp_tool_specs)
             .into_iter()
             .flatten()
-            .filter(|spec| allowed_tools.is_none_or(|allowed| allowed.contains(spec.name)))
+            .filter(|spec| {
+                // In simple mode, only allow bash/read_file/write_file/edit_file
+                if self.simple_mode && !SIMPLE_MODE_TOOLS.contains(&spec.name) {
+                    return false;
+                }
+                allowed_tools.is_none_or(|allowed| allowed.contains(spec.name))
+            })
             .map(|spec| ToolDefinition {
                 name: spec.name.to_string(),
                 description: Some(spec.description.to_string()),
@@ -193,6 +213,10 @@ impl GlobalToolRegistry {
             .plugin_tools
             .iter()
             .filter(|tool| {
+                // In simple mode, exclude plugin tools
+                if self.simple_mode {
+                    return false;
+                }
                 allowed_tools
                     .is_none_or(|allowed| allowed.contains(tool.definition().name.as_str()))
             })
@@ -4159,7 +4183,7 @@ mod tests {
         agent_permission_policy, allowed_tools_for_subagent, execute_agent_with_spawn,
         execute_tool, final_assistant_text, mvp_tool_specs, permission_mode_from_plugin,
         persist_agent_terminal_state, push_output_block, AgentInput, AgentJob,
-        SubagentToolExecutor,
+        GlobalToolRegistry, SubagentToolExecutor,
     };
     use api::OutputContentBlock;
     use runtime::{ApiRequest, AssistantEvent, ConversationRuntime, RuntimeError, Session};
@@ -5667,6 +5691,22 @@ printf 'pwsh:%s' "$1"
         let _ = std::fs::remove_dir_all(empty_dir);
 
         assert!(err.contains("PowerShell executable not found"));
+    }
+
+    #[test]
+    fn simple_mode_only_exposes_core_tools() {
+        let registry = GlobalToolRegistry::builtin().simple_mode();
+        let defs = registry.definitions(None);
+        let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
+
+        assert!(names.contains(&"bash"));
+        assert!(names.contains(&"read_file"));
+        assert!(names.contains(&"write_file"));
+        assert!(names.contains(&"edit_file"));
+        assert!(!names.contains(&"glob_search"));
+        assert!(!names.contains(&"grep_search"));
+        assert!(!names.contains(&"WebFetch"));
+        assert_eq!(defs.len(), 4);
     }
 
     struct TestServer {

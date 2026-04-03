@@ -29,11 +29,11 @@ pub use bootstrap::{
     DiagnosticStatus, ResolvedConfig, SetupContext, SetupMode, StdioMode, TrustPolicyContext,
 };
 pub use compact::{
-    collect_reinjectable_attachments, compact_session, estimate_session_tokens,
-    format_compact_summary, format_reinjected_attachments, get_compact_continuation_message,
-    should_compact, AutoCompactionOutcome, CompactionConfig, CompactionFailureTracker,
-    CompactionResult, ReinjectionAttachment, ReinjectionAttachmentKind,
-    MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES,
+    collect_reinjectable_attachments, compact_session, compact_with_head_truncation_retry,
+    estimate_session_tokens, format_compact_summary, format_reinjected_attachments,
+    get_compact_continuation_message, should_compact, AutoCompactionOutcome, CompactionConfig,
+    CompactionFailureTracker, CompactionResult, ReinjectionAttachment,
+    ReinjectionAttachmentKind, MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES,
 };
 pub use config::{
     ConfigEntry, ConfigError, ConfigLoader, ConfigSource, McpConfigCollection,

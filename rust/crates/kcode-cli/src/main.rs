@@ -4391,6 +4391,7 @@ fn render_config_report(
             ConfigSource::User => "user",
             ConfigSource::Project => "project",
             ConfigSource::Local => "local",
+            ConfigSource::Managed => "managed",
         };
         let status = if runtime_config
             .loaded_entries()
