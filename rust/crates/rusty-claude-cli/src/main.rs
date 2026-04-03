@@ -435,7 +435,10 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                     model_explicit,
                     profile: profile.clone(),
                     output_format,
-                    allowed_tools: normalize_allowed_tools(&allowed_tool_values)?,
+                    allowed_tools: normalize_allowed_tools(
+                        &allowed_tool_values,
+                        profile.as_deref(),
+                    )?,
                     permission_mode,
                 });
             }
@@ -486,7 +489,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
         return Ok(CliAction::Version);
     }
 
-    let allowed_tools = normalize_allowed_tools(&allowed_tool_values)?;
+    let allowed_tools = normalize_allowed_tools(&allowed_tool_values, profile.as_deref())?;
 
     if rest.is_empty() {
         return Ok(CliAction::Repl {
@@ -866,19 +869,40 @@ fn resolve_model_alias(model: &str) -> &str {
     }
 }
 
-fn normalize_allowed_tools(values: &[String]) -> Result<Option<AllowedToolSet>, String> {
-    current_tool_registry()?.normalize_allowed_tools(values)
+fn normalize_allowed_tools(
+    values: &[String],
+    profile_override: Option<&str>,
+) -> Result<Option<AllowedToolSet>, String> {
+    if values.is_empty() {
+        return Ok(None);
+    }
+
+    let (active_profile, tool_registry) = current_tool_registry(profile_override)?;
+    if !active_profile.profile.supports_tools {
+        return Err(format!(
+            "`--allowedTools` is unavailable because active profile `{}` disables tools",
+            active_profile.profile_name
+        ));
+    }
+
+    tool_registry.normalize_allowed_tools(values)
 }
 
-fn current_tool_registry() -> Result<GlobalToolRegistry, String> {
+fn current_tool_registry(
+    profile_override: Option<&str>,
+) -> Result<(ResolvedProviderProfile, GlobalToolRegistry), String> {
     let cwd = env::current_dir().map_err(|error| error.to_string())?;
     let loader = ConfigLoader::default_for(&cwd);
     let runtime_config = loader.load().map_err(|error| error.to_string())?;
+    let active_profile = ProfileResolver::resolve(&runtime_config, profile_override, None)
+        .map_err(|error| error.to_string())?;
     let plugin_manager = build_plugin_manager(&cwd, &loader, &runtime_config);
     let plugin_tools = plugin_manager
         .aggregated_tools()
         .map_err(|error| error.to_string())?;
-    GlobalToolRegistry::with_plugin_tools(plugin_tools)
+    let tool_registry =
+        GlobalToolRegistry::with_plugin_tools(plugin_tools).map_err(|error| error.to_string())?;
+    Ok((active_profile, tool_registry))
 }
 
 fn parse_permission_mode_arg(value: &str) -> Result<PermissionMode, String> {
@@ -7012,6 +7036,114 @@ mod tests {
                         .map(str::to_string)
                         .collect()
                 ),
+                permission_mode,
+            }
+        );
+    }
+
+    #[test]
+    fn rejects_allowed_tools_when_active_profile_disables_tools() {
+        let _guard = env_lock();
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let config_home = root.join("config-home");
+        std::fs::create_dir_all(&cwd).expect("cwd should exist");
+        std::fs::create_dir_all(&config_home).expect("config home should exist");
+        std::fs::write(
+            config_home.join("config.toml"),
+            r#"
+profile = "bridge"
+
+[profiles.bridge]
+default_model = "gpt-4.1-mini"
+base_url_env = "BRIDGE_BASE_URL"
+api_key_env = "BRIDGE_API_KEY"
+supports_tools = false
+supports_streaming = false
+"#,
+        )
+        .expect("config should write");
+
+        let original_config_home = std::env::var("KCODE_CONFIG_HOME").ok();
+        let original_profile = std::env::var("KCODE_PROFILE").ok();
+        std::env::set_var("KCODE_CONFIG_HOME", &config_home);
+        std::env::remove_var("KCODE_PROFILE");
+
+        let error = with_current_dir(&cwd, || {
+            parse_args(&["--allowedTools".to_string(), "read".to_string()])
+        })
+        .expect_err("tool-less profile should reject allowed tools");
+
+        match original_config_home {
+            Some(value) => std::env::set_var("KCODE_CONFIG_HOME", value),
+            None => std::env::remove_var("KCODE_CONFIG_HOME"),
+        }
+        match original_profile {
+            Some(value) => std::env::set_var("KCODE_PROFILE", value),
+            None => std::env::remove_var("KCODE_PROFILE"),
+        }
+        std::fs::remove_dir_all(root).expect("temp config root should clean up");
+
+        assert!(error.contains("`--allowedTools` is unavailable"));
+        assert!(error.contains("active profile `bridge`"));
+    }
+
+    #[test]
+    fn allowed_tools_use_cli_profile_override_when_default_profile_is_toolless() {
+        let _guard = env_lock();
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let config_home = root.join("config-home");
+        std::fs::create_dir_all(&cwd).expect("cwd should exist");
+        std::fs::create_dir_all(&config_home).expect("config home should exist");
+        std::fs::write(
+            config_home.join("config.toml"),
+            r#"
+profile = "bridge"
+
+[profiles.bridge]
+default_model = "gpt-4.1-mini"
+base_url_env = "BRIDGE_BASE_URL"
+api_key_env = "BRIDGE_API_KEY"
+supports_tools = false
+supports_streaming = false
+"#,
+        )
+        .expect("config should write");
+
+        let original_config_home = std::env::var("KCODE_CONFIG_HOME").ok();
+        let original_profile = std::env::var("KCODE_PROFILE").ok();
+        std::env::set_var("KCODE_CONFIG_HOME", &config_home);
+        std::env::remove_var("KCODE_PROFILE");
+
+        let permission_mode = with_current_dir(&cwd, super::default_permission_mode);
+        let action = with_current_dir(&cwd, || {
+            parse_args(&[
+                "--profile".to_string(),
+                "cliproxyapi".to_string(),
+                "--allowedTools".to_string(),
+                "read".to_string(),
+            ])
+        })
+        .expect("tool-capable profile should accept allowed tools");
+
+        match original_config_home {
+            Some(value) => std::env::set_var("KCODE_CONFIG_HOME", value),
+            None => std::env::remove_var("KCODE_CONFIG_HOME"),
+        }
+        match original_profile {
+            Some(value) => std::env::set_var("KCODE_PROFILE", value),
+            None => std::env::remove_var("KCODE_PROFILE"),
+        }
+        std::fs::remove_dir_all(root).expect("temp config root should clean up");
+
+        assert_eq!(
+            action,
+            CliAction::Repl {
+                model: DEFAULT_MODEL.to_string(),
+                model_explicit: false,
+                profile: Some("cliproxyapi".to_string()),
+                allowed_tools: Some(["read_file"].into_iter().map(str::to_string).collect()),
                 permission_mode,
             }
         );

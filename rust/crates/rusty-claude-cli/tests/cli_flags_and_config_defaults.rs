@@ -332,6 +332,90 @@ supports_streaming = false
 }
 
 #[test]
+fn allowed_tools_flag_is_blocked_when_profile_disables_tools() {
+    let temp_dir = unique_temp_dir("allowed-tools-blocked");
+    let config_home = temp_dir.join("home").join(".kcode");
+    fs::create_dir_all(&config_home).expect("config home should exist");
+    fs::write(
+        config_home.join("config.toml"),
+        r#"
+profile = "bridge"
+model = "gpt-4.1-mini"
+
+[profiles.bridge]
+default_model = "gpt-4.1-mini"
+base_url_env = "BRIDGE_BASE_URL"
+api_key_env = "BRIDGE_API_KEY"
+supports_tools = false
+supports_streaming = false
+"#,
+    )
+    .expect("write config");
+
+    let output = command_in(&temp_dir)
+        .env("KCODE_CONFIG_HOME", &config_home)
+        .env_remove("KCODE_PROFILE")
+        .args(["--allowedTools", "read", "status"])
+        .output()
+        .expect("kcode should launch");
+
+    assert!(
+        !output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be utf8");
+    assert!(stderr.contains("`--allowedTools` is unavailable"));
+    assert!(stderr.contains("active profile `bridge`"));
+
+    fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
+}
+
+#[test]
+fn cli_profile_override_reenables_allowed_tools_for_tool_capable_profiles() {
+    let temp_dir = unique_temp_dir("allowed-tools-override");
+    let config_home = temp_dir.join("home").join(".kcode");
+    fs::create_dir_all(&config_home).expect("config home should exist");
+    fs::write(
+        config_home.join("config.toml"),
+        r#"
+profile = "bridge"
+model = "gpt-4.1-mini"
+
+[profiles.bridge]
+default_model = "gpt-4.1-mini"
+base_url_env = "BRIDGE_BASE_URL"
+api_key_env = "BRIDGE_API_KEY"
+supports_tools = false
+supports_streaming = false
+"#,
+    )
+    .expect("write config");
+
+    let output = command_in(&temp_dir)
+        .env("KCODE_CONFIG_HOME", &config_home)
+        .env_remove("KCODE_PROFILE")
+        .args([
+            "--profile",
+            "cliproxyapi",
+            "--allowedTools",
+            "read",
+            "status",
+        ])
+        .output()
+        .expect("kcode should launch");
+
+    assert_success(&output);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    assert!(stdout.contains("Status"));
+    assert!(stdout.contains("Profile          cliproxyapi"));
+    assert!(stdout.contains("Profile source   cli"));
+
+    fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
+}
+
+#[test]
 fn resumed_mcp_command_reports_unavailable_when_profile_disables_tools() {
     let temp_dir = unique_temp_dir("resume-mcp-blocked");
     let config_home = temp_dir.join("home").join(".kcode");
