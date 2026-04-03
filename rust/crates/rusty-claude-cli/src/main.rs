@@ -34,7 +34,6 @@ use commands::{
     handle_skills_slash_command, render_slash_command_help, resume_supported_slash_commands,
     slash_command_specs, validate_slash_command_input, SlashCommand,
 };
-use compat_harness::{extract_manifest, UpstreamPaths};
 use init::initialize_repo;
 use plugins::{PluginHooks, PluginManager, PluginManagerConfig, PluginRegistry};
 use render::{MarkdownStreamState, Spinner, TerminalRenderer};
@@ -105,8 +104,6 @@ Run `claw --help` for usage."
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
     match parse_args(&args)? {
-        CliAction::DumpManifests => dump_manifests(),
-        CliAction::BootstrapPlan => print_bootstrap_plan(),
         CliAction::Agents { args } => LiveCli::print_agents(args.as_deref())?,
         CliAction::Mcp { args } => LiveCli::print_mcp(args.as_deref())?,
         CliAction::Skills { args } => LiveCli::print_skills(args.as_deref())?,
@@ -144,8 +141,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CliAction {
-    DumpManifests,
-    BootstrapPlan,
     Agents {
         args: Option<String>,
     },
@@ -342,8 +337,6 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
     }
 
     match rest[0].as_str() {
-        "dump-manifests" => Ok(CliAction::DumpManifests),
-        "bootstrap-plan" => Ok(CliAction::BootstrapPlan),
         "agents" => Ok(CliAction::Agents {
             args: join_optional_args(&rest[1..]),
         }),
@@ -405,9 +398,7 @@ fn parse_single_word_command_alias(
 fn bare_slash_command_guidance(command_name: &str) -> Option<String> {
     if matches!(
         command_name,
-        "dump-manifests"
-            | "bootstrap-plan"
-            | "agents"
+        "agents"
             | "mcp"
             | "skills"
             | "system-prompt"
@@ -747,28 +738,6 @@ fn looks_like_slash_command_token(token: &str) -> bool {
     slash_command_specs()
         .iter()
         .any(|spec| spec.name == name || spec.aliases.contains(&name))
-}
-
-fn dump_manifests() {
-    let workspace_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let paths = UpstreamPaths::from_workspace_dir(&workspace_dir);
-    match extract_manifest(&paths) {
-        Ok(manifest) => {
-            println!("commands: {}", manifest.commands.entries().len());
-            println!("tools: {}", manifest.tools.entries().len());
-            println!("bootstrap phases: {}", manifest.bootstrap.phases().len());
-        }
-        Err(error) => {
-            eprintln!("failed to extract manifests: {error}");
-            std::process::exit(1);
-        }
-    }
-}
-
-fn print_bootstrap_plan() {
-    for phase in runtime::BootstrapPlan::claude_code_default().phases() {
-        println!("- {phase:?}");
-    }
 }
 
 fn default_oauth_config() -> OAuthConfig {
@@ -5088,8 +5057,6 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     )?;
     writeln!(out, "  claw sandbox")?;
     writeln!(out, "      Show the current sandbox isolation snapshot")?;
-    writeln!(out, "  claw dump-manifests")?;
-    writeln!(out, "  claw bootstrap-plan")?;
     writeln!(out, "  claw agents")?;
     writeln!(out, "  claw mcp")?;
     writeln!(out, "  claw skills")?;

@@ -118,15 +118,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "compat-harness"
-version = "0.1.0"
-dependencies = [
- "commands",
- "runtime",
- "tools",
-]
-
-[[package]]
 name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1192,7 +1183,6 @@ version = "0.1.0"
 dependencies = [
  "api",
  "commands",
- "compat-harness",
  "crossterm",
  "plugins",
  "pulldown-cmark",
