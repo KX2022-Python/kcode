@@ -19,6 +19,7 @@ mod remote;
 pub mod sandbox;
 mod session;
 mod sse;
+mod tool_permission_context;
 mod usage;
 
 pub use bash::{execute_bash, BashCommandInput, BashCommandOutput};
@@ -88,8 +89,9 @@ pub use oauth::{
 };
 pub use permissions::{
     PermissionContext, PermissionMode, PermissionOutcome, PermissionOverride, PermissionPolicy,
-    PermissionPromptDecision, PermissionPrompter, PermissionRequest, ToolPermissionContext,
+    PermissionPromptDecision, PermissionPrompter, PermissionRequest,
 };
+pub use tool_permission_context::ToolPermissionContext;
 pub use provider_profile::{
     builtin_profiles, CredentialResolution, CredentialResolver, CredentialSource, ProfileResolver,
     ProviderLaunchConfig, ProviderLauncher, ProviderProfile, ProviderProfileError,

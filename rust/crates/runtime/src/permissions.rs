@@ -39,38 +39,6 @@ pub struct PermissionContext {
     override_reason: Option<String>,
 }
 
-/// Tool-specific permission context.
-/// Wraps `PermissionContext` with additional tool execution metadata.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct ToolPermissionContext {
-    pub tool_name: String,
-    pub tool_input: String,
-    pub base: PermissionContext,
-}
-
-impl ToolPermissionContext {
-    pub fn new(tool_name: String, tool_input: String) -> Self {
-        Self {
-            tool_name,
-            tool_input,
-            base: PermissionContext::default(),
-        }
-    }
-
-    pub fn with_override(
-        tool_name: String,
-        tool_input: String,
-        override_decision: PermissionOverride,
-        reason: String,
-    ) -> Self {
-        Self {
-            tool_name,
-            tool_input,
-            base: PermissionContext::new(Some(override_decision), Some(reason)),
-        }
-    }
-}
-
 impl PermissionContext {
     #[must_use]
     pub fn new(
