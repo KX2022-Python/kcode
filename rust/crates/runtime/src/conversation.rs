@@ -474,25 +474,31 @@ where
         let compaction_circuit_tripped = self.compaction_failure_tracker.is_tripped();
 
         // Track usage for memory extraction
-        let turn_input_tokens = self.usage_tracker.cumulative_usage().input_tokens
-            - self.memory_extraction_state.input_tokens_since_extraction;
-        let turn_tool_calls = self
+        let cumulative_input_tokens = self.usage_tracker.cumulative_usage().input_tokens;
+        let cumulative_tool_calls = self
             .session
             .messages
             .iter()
             .filter(|m| m.role == MessageRole::Tool)
             .count();
-        self.memory_extraction_state.record_turn(
-            turn_input_tokens,
-            turn_tool_calls,
-            self.session.messages.len(),
-        );
 
-        let memory_extracted = if self.memory_extraction_state.should_extract() {
-            self.maybe_extract_memory()
+        let memory_extracted = if self.memory_extraction_state.should_extract(
+            cumulative_input_tokens,
+            cumulative_tool_calls,
+        ) {
+            let result = self.maybe_extract_memory();
+            if result.is_some() {
+                self.memory_extraction_state
+                    .reset(cumulative_input_tokens, cumulative_tool_calls);
+            }
+            result
         } else {
             None
         };
+
+        // Record the current snapshot for tracking
+        self.memory_extraction_state
+            .record_turn(cumulative_input_tokens, cumulative_tool_calls);
 
         let summary = TurnSummary {
             assistant_messages,
@@ -537,14 +543,8 @@ where
             &memory_dir,
             &self.session.session_id,
         ) {
-            Ok(result) => {
-                if result.is_some() {
-                    self.memory_extraction_state.reset();
-                }
-                result
-            }
+            Ok(result) => result,
             Err(error) => {
-                // Log but don't fail the turn
                 eprintln!("warning: memory extraction failed: {error}");
                 None
             }

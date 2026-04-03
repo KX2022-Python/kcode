@@ -13,11 +13,13 @@ pub const MEMORY_EXTRACTION_TOKEN_THRESHOLD: u32 = 50_000;
 pub const MEMORY_EXTRACTION_TOOL_CALL_THRESHOLD: usize = 10;
 
 /// Tracks usage since last memory extraction.
+/// Uses cumulative usage snapshots for threshold comparison.
 #[derive(Debug, Clone, Default)]
 pub struct MemoryExtractionState {
-    pub input_tokens_since_extraction: u32,
-    tool_calls_since_extraction: usize,
-    last_extraction_turn: usize,
+    /// Cumulative input tokens at the point of last extraction (0 = never extracted).
+    cumulative_input_tokens_at_last_extraction: u32,
+    /// Cumulative tool call count at the point of last extraction.
+    cumulative_tool_calls_at_last_extraction: usize,
 }
 
 impl MemoryExtractionState {
@@ -25,35 +27,26 @@ impl MemoryExtractionState {
         Self::default()
     }
 
-    pub fn record_turn(
-        &mut self,
-        input_tokens: u32,
-        tool_call_count: usize,
-        turn_number: usize,
-    ) {
-        self.input_tokens_since_extraction += input_tokens;
-        self.tool_calls_since_extraction += tool_call_count;
-        self.last_extraction_turn = turn_number;
+    /// Record the current cumulative usage snapshot.
+    /// Called at the end of each turn.
+    pub fn record_turn(&mut self, cumulative_input_tokens: u32, cumulative_tool_calls: usize) {
+        self.cumulative_input_tokens_at_last_extraction = cumulative_input_tokens;
+        self.cumulative_tool_calls_at_last_extraction = cumulative_tool_calls;
     }
 
     /// Check if memory extraction should be triggered.
-    pub fn should_extract(&self) -> bool {
-        self.input_tokens_since_extraction >= MEMORY_EXTRACTION_TOKEN_THRESHOLD
-            || self.tool_calls_since_extraction >= MEMORY_EXTRACTION_TOOL_CALL_THRESHOLD
+    pub fn should_extract(&self, cumulative_input_tokens: u32, cumulative_tool_calls: usize) -> bool {
+        let token_delta = cumulative_input_tokens.saturating_sub(self.cumulative_input_tokens_at_last_extraction);
+        let tool_call_delta = cumulative_tool_calls.saturating_sub(self.cumulative_tool_calls_at_last_extraction);
+
+        token_delta >= MEMORY_EXTRACTION_TOKEN_THRESHOLD
+            || tool_call_delta >= MEMORY_EXTRACTION_TOOL_CALL_THRESHOLD
     }
 
     /// Reset counters after extraction.
-    pub fn reset(&mut self) {
-        self.input_tokens_since_extraction = 0;
-        self.tool_calls_since_extraction = 0;
-    }
-
-    pub fn input_tokens_since_extraction(&self) -> u32 {
-        self.input_tokens_since_extraction
-    }
-
-    pub fn tool_calls_since_extraction(&self) -> usize {
-        self.tool_calls_since_extraction
+    pub fn reset(&mut self, cumulative_input_tokens: u32, cumulative_tool_calls: usize) {
+        self.cumulative_input_tokens_at_last_extraction = cumulative_input_tokens;
+        self.cumulative_tool_calls_at_last_extraction = cumulative_tool_calls;
     }
 }
 
@@ -156,23 +149,34 @@ mod tests {
     #[test]
     fn extraction_state_tracks_usage() {
         let mut state = MemoryExtractionState::new();
-        assert!(!state.should_extract());
+        assert!(!state.should_extract(30_000, 5));
 
-        state.record_turn(30_000, 5, 1);
-        assert!(!state.should_extract());
+        // Record first turn
+        state.record_turn(30_000, 5);
+        // Not yet at threshold (delta = 0 from snapshot)
+        assert!(!state.should_extract(30_000, 5));
 
-        state.record_turn(25_000, 6, 2);
-        assert!(state.should_extract());
+        // After accumulating 25k more tokens (total 55k, delta = 25k from last extraction)
+        // Still below 50k token threshold
+        assert!(!state.should_extract(55_000, 5));
 
-        state.reset();
-        assert!(!state.should_extract());
+        // Now delta = 75k - 30k = 45k, still below 50k
+        assert!(!state.should_extract(75_000, 5));
+
+        // Delta = 80k - 30k = 50k, hits threshold
+        assert!(state.should_extract(80_000, 5));
+
+        // After reset at current cumulative
+        state.reset(80_000, 5);
+        assert!(!state.should_extract(80_000, 5));
     }
 
     #[test]
     fn extraction_state_triggers_on_tool_calls() {
         let mut state = MemoryExtractionState::new();
-        state.record_turn(100, 12, 1);
-        assert!(state.should_extract());
+        state.record_turn(100, 0);
+        // Delta = 12 - 0 = 12, above tool call threshold of 10
+        assert!(state.should_extract(100, 12));
     }
 
     #[test]
