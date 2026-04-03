@@ -1961,6 +1961,21 @@ fn run_resume_command(
             session: session.clone(),
             message: Some(render_memory_report()?),
         }),
+        SlashCommand::Tasks { args } => {
+            let summary = match args.as_deref() {
+                None | Some("list") => {
+                    "Tasks\n  Background tasks are managed through the Agent tool.\n  Use /help Agent to see how to create and manage tasks.".to_string()
+                }
+                Some("help") => {
+                    "Tasks\n  Background tasks allow running multiple agent sessions in parallel.\n\n  Commands:\n    /tasks              List active tasks\n    /tasks help         Show this help\n\n  Task management is done through the Agent tool:\n    Agent(action=create, description='...')   Create a new task\n    Agent(action=list)                        List all tasks\n    Agent(action=stop, task_id='...')         Stop a running task\n    Agent(action=output, task_id='...')       Get task output".to_string()
+                }
+                other => format!("Unknown tasks argument: {}. Use /tasks help for usage.", other.unwrap_or("")),
+            };
+            Ok(ResumeCommandOutcome {
+                session: session.clone(),
+                message: Some(summary),
+            })
+        }
         SlashCommand::Init => Ok(ResumeCommandOutcome {
             session: session.clone(),
             message: Some(init_repo_kcode_md()?),
@@ -2037,7 +2052,6 @@ fn run_resume_command(
         | SlashCommand::PrivacySettings
         | SlashCommand::Plan { .. }
         | SlashCommand::Review { .. }
-        | SlashCommand::Tasks { .. }
         | SlashCommand::Theme { .. }
         | SlashCommand::Voice { .. }
         | SlashCommand::Usage { .. }
@@ -2540,6 +2554,10 @@ impl LiveCli {
                 self.compact()?;
                 false
             }
+            SlashCommand::Tasks { args } => {
+                self.print_tasks(args.as_deref())?;
+                false
+            }
             SlashCommand::Model { model } => self.set_model(model)?,
             SlashCommand::Permissions { mode } => self.set_permissions(mode)?,
             SlashCommand::Clear { confirm } => self.clear_session(confirm)?,
@@ -2635,7 +2653,6 @@ impl LiveCli {
             | SlashCommand::PrivacySettings
             | SlashCommand::Plan { .. }
             | SlashCommand::Review { .. }
-            | SlashCommand::Tasks { .. }
             | SlashCommand::Theme { .. }
             | SlashCommand::Voice { .. }
             | SlashCommand::Usage { .. }
@@ -2904,6 +2921,42 @@ impl LiveCli {
 
     fn print_memory() -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", render_memory_report()?);
+        Ok(())
+    }
+
+    fn print_tasks(&self, args: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+        match args {
+            None | Some("list") => {
+                println!(
+                    "Tasks
+  Background tasks are managed through the Agent tool.
+  Use /help Agent to see how to create and manage tasks.
+
+  To create a task: Use the Agent tool with action=create
+  To list tasks:   Use the Agent tool with action=list
+  To stop a task:  Use the Agent tool with action=stop"
+                );
+            }
+            Some("help") => {
+                println!(
+                    "Tasks
+  Background tasks allow running multiple agent sessions in parallel.
+
+  Commands:
+    /tasks              List active tasks
+    /tasks help         Show this help
+
+  Task management is done through the Agent tool:
+    Agent(action=create, description='...')   Create a new task
+    Agent(action=list)                        List all tasks
+    Agent(action=stop, task_id='...')         Stop a running task
+    Agent(action=output, task_id='...')       Get task output"
+                );
+            }
+            other => {
+                println!("Unknown tasks argument: {}. Use /tasks help for usage.", other.unwrap_or(""));
+            }
+        }
         Ok(())
     }
 

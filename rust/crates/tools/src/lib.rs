@@ -868,6 +868,26 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
             }),
             required_permission: PermissionMode::DangerFullAccess,
         },
+        ToolSpec {
+            name: "WebBrowser",
+            description: "Navigate to a URL, take a screenshot, or extract DOM content. Requires an external browser executor.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["navigate", "screenshot", "extract_dom", "click", "type_text", "scroll"]
+                    },
+                    "url": { "type": "string" },
+                    "selector": { "type": "string" },
+                    "text": { "type": "string" },
+                    "scroll_amount": { "type": "integer" }
+                },
+                "required": ["action"],
+                "additionalProperties": false
+            }),
+            required_permission: PermissionMode::DangerFullAccess,
+        },
     ]
 }
 
@@ -921,6 +941,7 @@ pub fn execute_tool(name: &str, input: &Value) -> Result<String, String> {
         "TestingPermission" => {
             from_value::<TestingPermissionInput>(input).and_then(run_testing_permission)
         }
+        "WebBrowser" => from_value::<WebBrowserInput>(input).and_then(run_web_browser),
         _ => Err(format!("unsupported tool: {name}")),
     }
 }
@@ -1126,6 +1147,59 @@ fn run_testing_permission(input: TestingPermissionInput) -> Result<String, Strin
         "message": "Testing permission tool stub"
     }))
 }
+
+#[allow(clippy::needless_pass_by_value)]
+fn run_web_browser(input: WebBrowserInput) -> Result<String, String> {
+    match input.action.as_str() {
+        "navigate" => {
+            let url = input.url.as_deref().ok_or("navigate requires a url")?;
+            to_pretty_json(WebBrowserOutput {
+                action: "navigate".into(),
+                status: "info".into(),
+                url: Some(url.into()),
+                page_title: None,
+                message: Some("WebBrowser tool: navigate action requires an external browser executor. Set WEB_BROWSER_EXECUTOR to enable.".into()),
+                dom_length: None,
+                screenshot: None,
+            })
+        }
+        "screenshot" => {
+            to_pretty_json(WebBrowserOutput {
+                action: "screenshot".into(),
+                status: "info".into(),
+                url: input.url.clone(),
+                page_title: None,
+                message: Some("WebBrowser tool: screenshot action requires an external browser executor. Set WEB_BROWSER_EXECUTOR to enable.".into()),
+                dom_length: None,
+                screenshot: None,
+            })
+        }
+        "extract_dom" => {
+            to_pretty_json(WebBrowserOutput {
+                action: "extract_dom".into(),
+                status: "info".into(),
+                url: input.url.clone(),
+                page_title: None,
+                message: Some("WebBrowser tool: extract_dom action requires an external browser executor. Set WEB_BROWSER_EXECUTOR to enable.".into()),
+                dom_length: None,
+                screenshot: None,
+            })
+        }
+        "click" | "type_text" | "scroll" => {
+            to_pretty_json(WebBrowserOutput {
+                action: input.action.clone(),
+                status: "info".into(),
+                url: input.url.clone(),
+                page_title: None,
+                message: Some(format!("WebBrowser tool: {} action requires an external browser executor. Set WEB_BROWSER_EXECUTOR to enable.", input.action)),
+                dom_length: None,
+                screenshot: None,
+            })
+        }
+        other => Err(format!("WebBrowser: unknown action '{}'. Expected one of: navigate, screenshot, extract_dom, click, type_text, scroll", other)),
+    }
+}
+
 fn from_value<T: for<'de> Deserialize<'de>>(input: &Value) -> Result<T, String> {
     serde_json::from_value(input.clone()).map_err(|error| error.to_string())
 }
@@ -1502,6 +1576,30 @@ struct McpToolInput {
 #[derive(Debug, Deserialize)]
 struct TestingPermissionInput {
     action: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct WebBrowserInput {
+    action: String,
+    url: Option<String>,
+    selector: Option<String>,
+    text: Option<String>,
+    scroll_amount: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+struct WebBrowserOutput {
+    action: String,
+    status: String,
+    url: Option<String>,
+    #[serde(rename = "pageTitle", skip_serializing_if = "Option::is_none")]
+    page_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+    #[serde(rename = "domLength", skip_serializing_if = "Option::is_none")]
+    dom_length: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    screenshot: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
