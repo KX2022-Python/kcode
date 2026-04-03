@@ -94,6 +94,7 @@ pub struct PermissionPolicy {
     allow_rules: Vec<PermissionRule>,
     deny_rules: Vec<PermissionRule>,
     ask_rules: Vec<PermissionRule>,
+    tool_use_disabled_reason: Option<String>,
 }
 
 impl PermissionPolicy {
@@ -105,6 +106,7 @@ impl PermissionPolicy {
             allow_rules: Vec::new(),
             deny_rules: Vec::new(),
             ask_rules: Vec::new(),
+            tool_use_disabled_reason: None,
         }
     }
 
@@ -140,6 +142,12 @@ impl PermissionPolicy {
     }
 
     #[must_use]
+    pub fn with_tool_use_disabled(mut self, reason: impl Into<String>) -> Self {
+        self.tool_use_disabled_reason = Some(reason.into());
+        self
+    }
+
+    #[must_use]
     pub fn active_mode(&self) -> PermissionMode {
         self.active_mode
     }
@@ -171,6 +179,12 @@ impl PermissionPolicy {
         context: &PermissionContext,
         prompter: Option<&mut dyn PermissionPrompter>,
     ) -> PermissionOutcome {
+        if let Some(reason) = &self.tool_use_disabled_reason {
+            return PermissionOutcome::Deny {
+                reason: reason.clone(),
+            };
+        }
+
         if let Some(rule) = Self::find_matching_rule(&self.deny_rules, tool_name, input) {
             return PermissionOutcome::Deny {
                 reason: format!(
@@ -555,6 +569,20 @@ mod tests {
             policy.authorize("bash", "echo hi", Some(&mut prompter)),
             PermissionOutcome::Deny { reason } if reason == "not now"
         ));
+    }
+
+    #[test]
+    fn disabled_tool_runtime_denies_all_tool_use() {
+        let policy = PermissionPolicy::new(PermissionMode::DangerFullAccess)
+            .with_tool_requirement("bash", PermissionMode::DangerFullAccess)
+            .with_tool_use_disabled("active profile disables tools");
+
+        assert_eq!(
+            policy.authorize("bash", "{}", None),
+            PermissionOutcome::Deny {
+                reason: "active profile disables tools".to_string(),
+            }
+        );
     }
 
     #[test]

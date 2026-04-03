@@ -30,11 +30,11 @@ use api::{
 };
 
 use commands::{
-    build_command_registry_snapshot, render_slash_command_help_for_context, CommandDescriptor,
-    CommandRegistryContext, CommandScope, CommandSurface, FilteredCommand,
-    handle_agents_slash_command, handle_mcp_slash_command, handle_plugins_slash_command,
-    handle_skills_slash_command, render_slash_command_help, resume_supported_slash_commands,
-    slash_command_specs, validate_slash_command_input, SlashCommand,
+    build_command_registry_snapshot, handle_agents_slash_command, handle_mcp_slash_command,
+    handle_plugins_slash_command, handle_skills_slash_command, render_slash_command_help,
+    render_slash_command_help_for_context, resume_supported_slash_commands, slash_command_specs,
+    validate_slash_command_input, CommandDescriptor, CommandRegistryContext, CommandScope,
+    CommandSurface, FilteredCommand, SlashCommand,
 };
 use init::{initialize_repo, initialize_user_config};
 use plugins::{PluginHooks, PluginManager, PluginManagerConfig, PluginRegistry};
@@ -44,13 +44,12 @@ use runtime::{
     load_system_prompt, parse_oauth_callback_request_target, resolve_sandbox_status,
     save_oauth_credentials, ApiClient, ApiRequest, AssistantEvent, BootstrapInputs,
     CompactionConfig, ConfigLoader, ConfigSource, ContentBlock, ConversationMessage,
-    ConversationRuntime, DiagnosticCheck, DiagnosticStatus, MessageRole,
-    OAuthAuthorizationRequest, OAuthConfig, OAuthTokenExchangeRequest, PermissionMode,
-    PermissionPolicy, ProfileResolver, ProjectContext, PromptCacheEvent, ProviderLaunchConfig,
-    ProviderLauncher, ProviderProfile, ProviderProfileError, ResolvedConfig,
-    ResolvedPermissionMode, ResolvedProviderProfile, ResolutionSource, RuntimeError, Session,
-    SetupContext, SetupMode, StdioMode, TokenUsage, ToolError, ToolExecutor,
-    TrustPolicyContext, UsageTracker,
+    ConversationRuntime, DiagnosticCheck, DiagnosticStatus, MessageRole, OAuthAuthorizationRequest,
+    OAuthConfig, OAuthTokenExchangeRequest, PermissionMode, PermissionPolicy, ProfileResolver,
+    ProjectContext, PromptCacheEvent, ProviderLaunchConfig, ProviderLauncher, ProviderProfile,
+    ProviderProfileError, ResolutionSource, ResolvedConfig, ResolvedPermissionMode,
+    ResolvedProviderProfile, RuntimeError, Session, SetupContext, SetupMode, StdioMode, TokenUsage,
+    ToolError, ToolExecutor, TrustPolicyContext, UsageTracker,
 };
 use serde_json::json;
 use tools::GlobalToolRegistry;
@@ -140,9 +139,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             model,
             model_explicit,
             profile,
-        } => {
-            print_doctor(model_explicit.then_some(model.as_str()), profile.as_deref())?
-        }
+        } => print_doctor(model_explicit.then_some(model.as_str()), profile.as_deref())?,
         CliAction::ConfigShow {
             section,
             model,
@@ -201,7 +198,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             allowed_tools,
             permission_mode,
         )?
-            .run_turn_with_output(&prompt, output_format)?,
+        .run_turn_with_output(&prompt, output_format)?,
         CliAction::Login => run_login()?,
         CliAction::Logout => run_logout()?,
         CliAction::Init => run_init()?,
@@ -211,7 +208,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             profile,
             allowed_tools,
             permission_mode,
-        } => run_repl(model, model_explicit, profile, allowed_tools, permission_mode)?,
+        } => run_repl(
+            model,
+            model_explicit,
+            profile,
+            allowed_tools,
+            permission_mode,
+        )?,
         CliAction::Help => print_help(),
     }
     Ok(())
@@ -294,9 +297,7 @@ enum CliAction {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ProfileCommandSelection {
     List,
-    Show {
-        profile_name: Option<String>,
-    },
+    Show { profile_name: Option<String> },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -505,8 +506,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
         model_explicit,
         profile.as_deref(),
         permission_mode,
-    )
-    {
+    ) {
         return action;
     }
 
@@ -694,7 +694,9 @@ fn parse_commands_args(
         [] => CommandReportSurfaceSelection::Local,
         [subcommand] if subcommand == "show" => CommandReportSurfaceSelection::Local,
         [surface] => CommandReportSurfaceSelection::parse(surface)?,
-        [subcommand, surface] if subcommand == "show" => CommandReportSurfaceSelection::parse(surface)?,
+        [subcommand, surface] if subcommand == "show" => {
+            CommandReportSurfaceSelection::parse(surface)?
+        }
         _ => return Err("usage: kcode commands [show [local|bridge]]".to_string()),
     };
 
@@ -1449,14 +1451,16 @@ fn load_setup_context(
     let config_home = loader.config_home().to_path_buf();
     let session_dir = resolve_setup_session_dir(&cwd, &runtime_config);
     let oauth_credentials_present = runtime::load_oauth_credentials()?.is_some();
-    let legacy_paths = collect_legacy_paths(&discovered_entries, &project_context.instruction_files);
+    let legacy_paths =
+        collect_legacy_paths(&discovered_entries, &project_context.instruction_files);
     let resolved_config = ResolvedConfig {
         config_home: config_home.clone(),
         session_dir,
         discovered_entries,
         loaded_entries: runtime_config.loaded_entries().to_vec(),
         config_file_present: runtime_config.loaded_entries().iter().any(|entry| {
-            entry.path
+            entry
+                .path
                 .file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name == "config.toml")
@@ -1510,10 +1514,7 @@ fn read_non_empty_env(name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-fn config_string_value(
-    runtime_config: &runtime::RuntimeConfig,
-    keys: &[&str],
-) -> Option<String> {
+fn config_string_value(runtime_config: &runtime::RuntimeConfig, keys: &[&str]) -> Option<String> {
     keys.iter()
         .find_map(|key| runtime_config.get(key))
         .and_then(|value| value.as_str())
@@ -3492,7 +3493,9 @@ fn format_status_report(
             active_profile
                 .map(|profile| profile.profile_name.as_str())
                 .unwrap_or("unknown"),
-            usage.message_count, usage.turns, usage.estimated_tokens,
+            usage.message_count,
+            usage.turns,
+            usage.estimated_tokens,
         ),
         provider_section,
         format!(
@@ -3655,7 +3658,10 @@ fn print_doctor(
     model_override: Option<&str>,
     profile_override: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!("{}", render_doctor_report(model_override, profile_override)?);
+    println!(
+        "{}",
+        render_doctor_report(model_override, profile_override)?
+    );
     Ok(())
 }
 
@@ -3951,7 +3957,8 @@ fn doctor_checks(setup: &SetupContext) -> Vec<DiagnosticCheck> {
         .loaded_entries
         .iter()
         .find(|entry| {
-            entry.path
+            entry
+                .path
                 .file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name == "config.toml")
@@ -3988,8 +3995,7 @@ fn doctor_checks(setup: &SetupContext) -> Vec<DiagnosticCheck> {
             status: DiagnosticStatus::Fail,
             detail: format!(
                 "unset; export `{}` or `{}`",
-                PRIMARY_API_KEY_ENV,
-                setup.active_profile.credential.env_name
+                PRIMARY_API_KEY_ENV, setup.active_profile.credential.env_name
             ),
         }
     };
@@ -3997,7 +4003,8 @@ fn doctor_checks(setup: &SetupContext) -> Vec<DiagnosticCheck> {
     let legacy_detail = if setup.resolved_config.legacy_paths.is_empty() {
         "none detected".to_string()
     } else {
-        setup.resolved_config
+        setup
+            .resolved_config
             .legacy_paths
             .iter()
             .take(3)
@@ -4166,7 +4173,10 @@ fn render_resolved_profile_report(profile: &ResolvedProviderProfile) -> String {
         format!("  Supports stream   {}", profile.profile.supports_streaming),
         format!("  Timeout ms        {}", profile.profile.request_timeout_ms),
         format!("  Max retries       {}", profile.profile.max_retries),
-        format!("  Launch ready      {}", if launch.is_ok() { "yes" } else { "no" }),
+        format!(
+            "  Launch ready      {}",
+            if launch.is_ok() { "yes" } else { "no" }
+        ),
     ];
     if let Err(error) = launch {
         lines.push(format!("  Launch detail     {error}"));
@@ -4349,24 +4359,19 @@ fn render_config_report(
                         .map(|line| format!("  {line}")),
                 );
             }
-            "provider" => {
-                match ProviderLauncher::prepare(&setup.active_profile) {
-                    Ok(launch) => {
-                        lines.push(format!("  Profile          {}", launch.profile_name));
-                        lines.push(format!("  Provider         {}", launch.provider_label));
-                        lines.push(format!("  Base URL         {}", launch.base_url));
-                        lines.push(format!("  Model            {}", launch.model));
-                        lines.push(format!("  Timeout ms       {}", launch.request_timeout_ms));
-                        lines.push(format!("  Max retries      {}", launch.max_retries));
-                        lines.push(format!("  Supports tools   {}", launch.supports_tools));
-                        lines.push(format!(
-                            "  Supports stream  {}",
-                            launch.supports_streaming
-                        ));
-                    }
-                    Err(error) => lines.push(format!("  Launch error     {error}")),
+            "provider" => match ProviderLauncher::prepare(&setup.active_profile) {
+                Ok(launch) => {
+                    lines.push(format!("  Profile          {}", launch.profile_name));
+                    lines.push(format!("  Provider         {}", launch.provider_label));
+                    lines.push(format!("  Base URL         {}", launch.base_url));
+                    lines.push(format!("  Model            {}", launch.model));
+                    lines.push(format!("  Timeout ms       {}", launch.request_timeout_ms));
+                    lines.push(format!("  Max retries      {}", launch.max_retries));
+                    lines.push(format!("  Supports tools   {}", launch.supports_tools));
+                    lines.push(format!("  Supports stream  {}", launch.supports_streaming));
                 }
-            }
+                Err(error) => lines.push(format!("  Launch error     {error}")),
+            },
             other => {
                 lines.push(format!(
                     "  Unsupported config section '{other}'. Use env, hooks, model, plugins, profile, or provider."
@@ -4854,18 +4859,34 @@ fn build_system_prompt() -> Result<Vec<String>, Box<dyn std::error::Error>> {
     )?)
 }
 
-fn build_runtime_plugin_state() -> Result<RuntimePluginState, Box<dyn std::error::Error>> {
+fn build_runtime_plugin_state(
+    profile_supports_tools: bool,
+) -> Result<RuntimePluginState, Box<dyn std::error::Error>> {
     let cwd = env::current_dir()?;
     let loader = ConfigLoader::default_for(&cwd);
     let runtime_config = loader.load()?;
-    build_runtime_plugin_state_with_loader(&cwd, &loader, &runtime_config)
+    build_runtime_plugin_state_with_loader(&cwd, &loader, &runtime_config, profile_supports_tools)
 }
 
 fn build_runtime_plugin_state_with_loader(
     cwd: &Path,
     loader: &ConfigLoader,
     runtime_config: &runtime::RuntimeConfig,
+    profile_supports_tools: bool,
 ) -> Result<RuntimePluginState, Box<dyn std::error::Error>> {
+    if !profile_supports_tools {
+        let feature_config = runtime_config
+            .feature_config()
+            .clone()
+            .with_hooks(runtime::RuntimeHookConfig::default())
+            .with_plugins(runtime::RuntimePluginConfig::default());
+        return Ok(RuntimePluginState {
+            feature_config,
+            tool_registry: GlobalToolRegistry::empty(),
+            plugin_registry: PluginRegistry::new(Vec::new()),
+        });
+    }
+
     let plugin_manager = build_plugin_manager(cwd, loader, runtime_config);
     let plugin_registry = plugin_manager.plugin_registry()?;
     let plugin_hook_config =
@@ -5281,7 +5302,8 @@ fn build_runtime(
         Some(session_id),
     )?;
     ensure_setup_ready_for_runtime(&setup_context)?;
-    let runtime_plugin_state = build_runtime_plugin_state()?;
+    let runtime_plugin_state =
+        build_runtime_plugin_state(setup_context.active_profile.profile.supports_tools)?;
     build_runtime_with_plugin_state(
         session,
         session_id,
@@ -5331,8 +5353,13 @@ fn build_runtime_with_plugin_state(
             setup_context,
         )?,
         CliToolExecutor::new(allowed_tools.clone(), emit_output, tool_registry.clone()),
-        permission_policy(permission_mode, &feature_config, &tool_registry)
-            .map_err(std::io::Error::other)?,
+        permission_policy(
+            permission_mode,
+            &feature_config,
+            &tool_registry,
+            setup_context.active_profile.profile.supports_tools,
+        )
+        .map_err(std::io::Error::other)?,
         system_prompt,
         &feature_config,
     );
@@ -6377,9 +6404,18 @@ fn permission_policy(
     mode: PermissionMode,
     feature_config: &runtime::RuntimeFeatureConfig,
     tool_registry: &GlobalToolRegistry,
+    profile_supports_tools: bool,
 ) -> Result<PermissionPolicy, String> {
+    let policy =
+        PermissionPolicy::new(mode).with_permission_rules(feature_config.permission_rules());
+    if !profile_supports_tools {
+        return Ok(policy.with_tool_use_disabled(
+            "tool use is unavailable because the active profile disables tools",
+        ));
+    }
+
     Ok(tool_registry.permission_specs(None)?.into_iter().fold(
-        PermissionPolicy::new(mode).with_permission_rules(feature_config.permission_rules()),
+        policy,
         |policy, (name, required_permission)| {
             policy.with_tool_requirement(name, required_permission)
         },
@@ -6471,7 +6507,10 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "  {CLI_NAME} skills")?;
     writeln!(out, "  {CLI_NAME} commands [show [local|bridge]]")?;
     writeln!(out, "  {CLI_NAME} profile [list|show [name]]")?;
-    writeln!(out, "  {CLI_NAME} system-prompt [--cwd PATH] [--date YYYY-MM-DD]")?;
+    writeln!(
+        out,
+        "  {CLI_NAME} system-prompt [--cwd PATH] [--date YYYY-MM-DD]"
+    )?;
     writeln!(out, "  {CLI_NAME} login")?;
     writeln!(out, "  {CLI_NAME} logout")?;
     writeln!(out, "  {CLI_NAME} init")?;
@@ -6567,25 +6606,24 @@ fn print_help() {
 mod tests {
     use super::{
         build_runtime_plugin_state_with_loader, build_runtime_with_plugin_state,
-        create_managed_session_handle, describe_tool_progress, filter_tool_specs,
-        format_bughunter_report, format_commit_preflight_report, format_commit_skipped_report,
-        format_compact_report, format_cost_report, format_internal_prompt_progress_line,
-        format_issue_report, format_model_report, format_model_switch_report,
-        format_permissions_report, format_permissions_switch_report, format_pr_report,
-        format_resume_report, format_status_report, format_tool_call_start, format_tool_result,
-        format_ultraplan_report, format_unknown_slash_command,
-        format_unknown_slash_command_message, normalize_permission_mode, parse_args,
-        parse_git_status_branch, parse_git_status_metadata_for, parse_git_workspace_summary,
-        permission_policy, print_help_to, push_output_block, render_commands_report,
-        render_config_report, render_diff_report, render_doctor_report_from_setup,
-        render_memory_report, render_repl_help, render_repl_help_for_profile,
-        render_resume_usage, resolve_model_alias, resolve_session_reference, response_to_events,
-        resume_supported_slash_commands, run_resume_command,
-        slash_command_completion_candidates_with_sessions, status_context, validate_no_args,
-        ensure_session_command_available_for_profile, CliAction, CliOutputFormat,
-        CommandReportSurfaceSelection, GitWorkspaceSummary, InternalPromptProgressEvent,
-        InternalPromptProgressState, LiveCli, ProviderRuntimeClient, SlashCommand, StatusUsage,
-        DEFAULT_MODEL,
+        create_managed_session_handle, describe_tool_progress,
+        ensure_session_command_available_for_profile, filter_tool_specs, format_bughunter_report,
+        format_commit_preflight_report, format_commit_skipped_report, format_compact_report,
+        format_cost_report, format_internal_prompt_progress_line, format_issue_report,
+        format_model_report, format_model_switch_report, format_permissions_report,
+        format_permissions_switch_report, format_pr_report, format_resume_report,
+        format_status_report, format_tool_call_start, format_tool_result, format_ultraplan_report,
+        format_unknown_slash_command, format_unknown_slash_command_message,
+        normalize_permission_mode, parse_args, parse_git_status_branch,
+        parse_git_status_metadata_for, parse_git_workspace_summary, permission_policy,
+        print_help_to, push_output_block, render_commands_report, render_config_report,
+        render_diff_report, render_doctor_report_from_setup, render_memory_report,
+        render_repl_help, render_repl_help_for_profile, render_resume_usage, resolve_model_alias,
+        resolve_session_reference, response_to_events, resume_supported_slash_commands,
+        run_resume_command, slash_command_completion_candidates_with_sessions, status_context,
+        validate_no_args, CliAction, CliOutputFormat, CommandReportSurfaceSelection,
+        GitWorkspaceSummary, InternalPromptProgressEvent, InternalPromptProgressState, LiveCli,
+        ProviderRuntimeClient, SlashCommand, StatusUsage, DEFAULT_MODEL,
     };
     use api::{MessageResponse, OutputContentBlock, Usage};
     use plugins::{
@@ -6593,8 +6631,8 @@ mod tests {
     };
     use runtime::{
         AssistantEvent, ConfigLoader, ContentBlock, ConversationMessage, CredentialResolution,
-        CredentialSource, MessageRole, PermissionMode, ProviderProfile,
-        ResolvedProviderProfile, ResolutionSource, Session,
+        CredentialSource, MessageRole, PermissionMode, PermissionOutcome, ProviderProfile,
+        ResolutionSource, ResolvedProviderProfile, Session,
     };
     use serde_json::json;
     use std::fs;
@@ -7051,8 +7089,12 @@ mod tests {
             }
         );
         assert_eq!(
-            parse_args(&["commands".to_string(), "show".to_string(), "bridge".to_string()])
-                .expect("commands show bridge should parse"),
+            parse_args(&[
+                "commands".to_string(),
+                "show".to_string(),
+                "bridge".to_string()
+            ])
+            .expect("commands show bridge should parse"),
             CliAction::Commands {
                 surface: CommandReportSurfaceSelection::Bridge,
                 model: DEFAULT_MODEL.to_string(),
@@ -7377,10 +7419,31 @@ mod tests {
             PermissionMode::ReadOnly,
             &feature_config,
             &registry_with_plugin_tool(),
+            true,
         )
         .expect("permission policy should build");
         let required = policy.required_mode_for("plugin_echo");
         assert_eq!(required, PermissionMode::WorkspaceWrite);
+    }
+
+    #[test]
+    fn permission_policy_disables_tool_use_for_toolless_profiles() {
+        let feature_config = runtime::RuntimeFeatureConfig::default();
+        let policy = permission_policy(
+            PermissionMode::DangerFullAccess,
+            &feature_config,
+            &registry_with_plugin_tool(),
+            false,
+        )
+        .expect("permission policy should build");
+
+        assert_eq!(
+            policy.authorize("bash", "{}", None),
+            PermissionOutcome::Deny {
+                reason: "tool use is unavailable because the active profile disables tools"
+                    .to_string(),
+            }
+        );
     }
 
     #[test]
@@ -7582,22 +7645,8 @@ supports_streaming = false
         assert_eq!(
             names,
             vec![
-                "help",
-                "status",
-                "sandbox",
-                "compact",
-                "clear",
-                "cost",
-                "config",
-                "mcp",
-                "memory",
-                "init",
-                "diff",
-                "version",
-                "export",
-                "agents",
-                "skills",
-                "doctor",
+                "help", "status", "sandbox", "compact", "clear", "cost", "config", "mcp", "memory",
+                "init", "diff", "version", "export", "agents", "skills", "doctor",
             ]
         );
     }
@@ -8639,14 +8688,44 @@ UU conflicted.rs",
             .expect("plugin install should succeed");
         let loader = ConfigLoader::new(&workspace, &config_home);
         let runtime_config = loader.load().expect("runtime config should load");
-        let state = build_runtime_plugin_state_with_loader(&workspace, &loader, &runtime_config)
-            .expect("plugin state should load");
+        let state =
+            build_runtime_plugin_state_with_loader(&workspace, &loader, &runtime_config, true)
+                .expect("plugin state should load");
         let pre_hooks = state.feature_config.hooks().pre_tool_use();
         assert_eq!(pre_hooks.len(), 1);
         assert!(
             pre_hooks[0].ends_with("hooks/pre.sh"),
             "expected installed plugin hook path, got {pre_hooks:?}"
         );
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(workspace);
+        let _ = fs::remove_dir_all(source_root);
+    }
+
+    #[test]
+    fn build_runtime_plugin_state_strips_tool_runtime_for_toolless_profiles() {
+        let config_home = temp_dir();
+        let workspace = temp_dir();
+        let source_root = temp_dir();
+        fs::create_dir_all(&config_home).expect("config home");
+        fs::create_dir_all(&workspace).expect("workspace");
+        fs::create_dir_all(&source_root).expect("source root");
+        write_plugin_fixture(&source_root, "hook-runtime-demo", true, false);
+
+        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        manager
+            .install(source_root.to_str().expect("utf8 source path"))
+            .expect("plugin install should succeed");
+        let loader = ConfigLoader::new(&workspace, &config_home);
+        let runtime_config = loader.load().expect("runtime config should load");
+        let state =
+            build_runtime_plugin_state_with_loader(&workspace, &loader, &runtime_config, false)
+                .expect("plugin state should load");
+
+        assert!(state.feature_config.hooks().pre_tool_use().is_empty());
+        assert!(state.tool_registry.definitions(None).is_empty());
+        assert!(state.plugin_registry.plugins().is_empty());
 
         let _ = fs::remove_dir_all(config_home);
         let _ = fs::remove_dir_all(workspace);
@@ -8671,7 +8750,7 @@ UU conflicted.rs",
         let loader = ConfigLoader::new(&workspace, &config_home);
         let runtime_config = loader.load().expect("runtime config should load");
         let runtime_plugin_state =
-            build_runtime_plugin_state_with_loader(&workspace, &loader, &runtime_config)
+            build_runtime_plugin_state_with_loader(&workspace, &loader, &runtime_config, true)
                 .expect("plugin state should load");
         let mut setup = test_setup_context(&workspace);
         setup.resolved_config.base_url = Some("https://router.example.test/v1".to_string());
@@ -8711,6 +8790,70 @@ UU conflicted.rs",
         assert_eq!(
             fs::read_to_string(&log_path).expect("shutdown log should exist"),
             "init\nshutdown\n"
+        );
+
+        let _ = fs::remove_dir_all(config_home);
+        let _ = fs::remove_dir_all(workspace);
+        let _ = fs::remove_dir_all(source_root);
+    }
+
+    #[test]
+    fn build_runtime_skips_plugin_lifecycle_for_toolless_profiles() {
+        let config_home = temp_dir();
+        let workspace = temp_dir();
+        let source_root = temp_dir();
+        fs::create_dir_all(&config_home).expect("config home");
+        fs::create_dir_all(&workspace).expect("workspace");
+        fs::create_dir_all(&source_root).expect("source root");
+        write_plugin_fixture(&source_root, "lifecycle-runtime-demo", false, true);
+
+        let mut manager = PluginManager::new(PluginManagerConfig::new(&config_home));
+        let install = manager
+            .install(source_root.to_str().expect("utf8 source path"))
+            .expect("plugin install should succeed");
+        let log_path = install.install_path.join("lifecycle.log");
+        let loader = ConfigLoader::new(&workspace, &config_home);
+        let runtime_config = loader.load().expect("runtime config should load");
+        let runtime_plugin_state =
+            build_runtime_plugin_state_with_loader(&workspace, &loader, &runtime_config, false)
+                .expect("plugin state should load");
+        let mut setup = test_setup_context(&workspace);
+        setup.active_profile.profile.supports_tools = false;
+        setup.resolved_config.base_url = Some("https://router.example.test/v1".to_string());
+        setup.resolved_config.api_key_present = true;
+        setup.resolved_config.profile = Some("bridge".to_string());
+        setup.active_profile.base_url = Some("https://router.example.test/v1".to_string());
+        setup.active_profile.base_url_source = ResolutionSource::Env("KCODE_BASE_URL");
+        setup.active_profile.credential = CredentialResolution {
+            source: CredentialSource::PrimaryEnv,
+            env_name: "KCODE_API_KEY".to_string(),
+            api_key: Some("test-dummy-key-for-plugin-lifecycle".to_string()),
+        };
+
+        let mut runtime = build_runtime_with_plugin_state(
+            Session::new(),
+            "runtime-toolless-plugin-lifecycle",
+            DEFAULT_MODEL.to_string(),
+            vec!["test system prompt".to_string()],
+            true,
+            false,
+            None,
+            PermissionMode::DangerFullAccess,
+            None,
+            &setup,
+            runtime_plugin_state,
+        )
+        .expect("runtime should build");
+
+        assert!(!log_path.exists(), "plugin lifecycle should not run");
+
+        runtime
+            .shutdown_plugins()
+            .expect("plugin shutdown should succeed");
+
+        assert!(
+            !log_path.exists(),
+            "plugin shutdown should stay inactive for toolless profiles"
         );
 
         let _ = fs::remove_dir_all(config_home);

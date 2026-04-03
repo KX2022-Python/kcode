@@ -58,13 +58,29 @@ pub struct ToolSpec {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlobalToolRegistry {
+    include_builtin_tools: bool,
     plugin_tools: Vec<PluginTool>,
+}
+
+impl Default for GlobalToolRegistry {
+    fn default() -> Self {
+        Self::builtin()
+    }
 }
 
 impl GlobalToolRegistry {
     #[must_use]
     pub fn builtin() -> Self {
         Self {
+            include_builtin_tools: true,
+            plugin_tools: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn empty() -> Self {
+        Self {
+            include_builtin_tools: false,
             plugin_tools: Vec::new(),
         }
     }
@@ -88,7 +104,10 @@ impl GlobalToolRegistry {
             }
         }
 
-        Ok(Self { plugin_tools })
+        Ok(Self {
+            include_builtin_tools: true,
+            plugin_tools,
+        })
     }
 
     pub fn normalize_allowed_tools(
@@ -99,7 +118,11 @@ impl GlobalToolRegistry {
             return Ok(None);
         }
 
-        let builtin_specs = mvp_tool_specs();
+        let builtin_specs = if self.include_builtin_tools {
+            mvp_tool_specs()
+        } else {
+            Vec::new()
+        };
         let canonical_names = builtin_specs
             .iter()
             .map(|spec| spec.name.to_string())
@@ -109,6 +132,9 @@ impl GlobalToolRegistry {
                     .map(|tool| tool.definition().name.clone()),
             )
             .collect::<Vec<_>>();
+        if canonical_names.is_empty() {
+            return Err("the current tool registry does not expose any tools".to_string());
+        }
         let mut name_map = canonical_names
             .iter()
             .map(|name| (normalize_tool_name(name), name.clone()))
@@ -146,8 +172,11 @@ impl GlobalToolRegistry {
 
     #[must_use]
     pub fn definitions(&self, allowed_tools: Option<&BTreeSet<String>>) -> Vec<ToolDefinition> {
-        let builtin = mvp_tool_specs()
+        let builtin = self
+            .include_builtin_tools
+            .then(mvp_tool_specs)
             .into_iter()
+            .flatten()
             .filter(|spec| allowed_tools.is_none_or(|allowed| allowed.contains(spec.name)))
             .map(|spec| ToolDefinition {
                 name: spec.name.to_string(),
@@ -173,8 +202,11 @@ impl GlobalToolRegistry {
         &self,
         allowed_tools: Option<&BTreeSet<String>>,
     ) -> Result<Vec<(String, PermissionMode)>, String> {
-        let builtin = mvp_tool_specs()
+        let builtin = self
+            .include_builtin_tools
+            .then(mvp_tool_specs)
             .into_iter()
+            .flatten()
             .filter(|spec| allowed_tools.is_none_or(|allowed| allowed.contains(spec.name)))
             .map(|spec| (spec.name.to_string(), spec.required_permission));
         let plugin = self
@@ -193,7 +225,7 @@ impl GlobalToolRegistry {
     }
 
     pub fn execute(&self, name: &str, input: &Value) -> Result<String, String> {
-        if mvp_tool_specs().iter().any(|spec| spec.name == name) {
+        if self.include_builtin_tools && mvp_tool_specs().iter().any(|spec| spec.name == name) {
             return execute_tool(name, input);
         }
         self.plugin_tools
