@@ -1526,6 +1526,54 @@ pub fn build_command_registry_snapshot(
     context: &CommandRegistryContext,
     extra_descriptors: &[CommandDescriptor],
 ) -> CommandRegistrySnapshot {
+    build_command_registry_snapshot_with_cwd(context, extra_descriptors, &std::env::current_dir().unwrap_or_default())
+}
+
+/// Build the command registry snapshot with skill discovery from a specific cwd.
+/// Dynamically injects commands for discovered skills.
+#[must_use]
+pub fn build_command_registry_snapshot_with_cwd(
+    context: &CommandRegistryContext,
+    extra_descriptors: &[CommandDescriptor],
+    cwd: &Path,
+) -> CommandRegistrySnapshot {
+    // Auto-discover skills and inject them as command descriptors
+    let skill_summaries = load_skills_from_roots(&discover_skill_roots(cwd)).unwrap_or_default();
+    let skill_descriptors: Vec<CommandDescriptor> = skill_summaries
+        .into_iter()
+        .map(|summary| CommandDescriptor {
+            id: format!("skill.{}.{}", summary.origin_label(), summary.name),
+            name: summary.name.clone(),
+            kind: CommandKind::Local,
+            source: CommandSource::Skills,
+            scope: CommandScope::Session,
+            availability: CommandAvailability {
+                cli_visible: true,
+                bridge_visible: false,
+            },
+            enabled: true,
+            remote_safe: false,
+            channel_safe: false,
+            aliases: vec![],
+            description: summary.description.clone().unwrap_or_default(),
+            argument_hint: None,
+            resume_supported: false,
+            visibility_tags: vec!["skill".to_string(), summary.origin_label()],
+        })
+        .collect();
+
+    let all_extras: Vec<CommandDescriptor> = skill_descriptors
+        .into_iter()
+        .chain(extra_descriptors.iter().cloned())
+        .collect();
+
+    build_snapshot_inner(context, &all_extras)
+}
+
+fn build_snapshot_inner(
+    context: &CommandRegistryContext,
+    extra_descriptors: &[CommandDescriptor],
+) -> CommandRegistrySnapshot {
     let mut snapshot = CommandRegistrySnapshot {
         safety_profile: match context.surface {
             CommandSurface::CliLocal => "cli-local".to_string(),
@@ -1945,6 +1993,15 @@ struct SkillSummary {
     origin: SkillOrigin,
 }
 
+impl SkillSummary {
+    fn origin_label(&self) -> String {
+        match self.source {
+            DefinitionSource::ProjectCodex | DefinitionSource::ProjectClaude => "project".to_string(),
+            DefinitionSource::UserCodexHome | DefinitionSource::UserCodex | DefinitionSource::UserClaude => "user".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SkillOrigin {
     SkillsDir,
@@ -2298,6 +2355,16 @@ fn discover_definition_roots(cwd: &Path, leaf: &str) -> Vec<(DefinitionSource, P
 fn discover_skill_roots(cwd: &Path) -> Vec<SkillRoot> {
     let mut roots = Vec::new();
 
+    // Kcode skill directories (highest priority — Kcode native)
+    for ancestor in cwd.ancestors() {
+        push_unique_skill_root(
+            &mut roots,
+            DefinitionSource::ProjectCodex,
+            ancestor.join(".kcode").join("skills"),
+            SkillOrigin::SkillsDir,
+        );
+    }
+
     for ancestor in cwd.ancestors() {
         push_unique_skill_root(
             &mut roots,
@@ -2343,6 +2410,13 @@ fn discover_skill_roots(cwd: &Path) -> Vec<SkillRoot> {
 
     if let Some(home) = env::var_os("HOME") {
         let home = PathBuf::from(home);
+        // Kcode user skills directory
+        push_unique_skill_root(
+            &mut roots,
+            DefinitionSource::UserCodex,
+            home.join(".kcode").join("skills"),
+            SkillOrigin::SkillsDir,
+        );
         push_unique_skill_root(
             &mut roots,
             DefinitionSource::UserCodex,

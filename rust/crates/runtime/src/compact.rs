@@ -86,6 +86,50 @@ pub fn get_compact_continuation_message(
 }
 
 #[must_use]
+
+/// Threshold: ToolResult output beyond this size is stripped during compaction.
+const MAX_TOOL_RESULT_CHARS_FOR_COMPACT: usize = 1_000;
+
+/// Strip heavy media blocks from a message before compaction summarization.
+/// Large ToolResult outputs are truncated to references; future Image/Document
+/// blocks would be replaced with placeholder references.
+fn strip_heavy_media(message: &ConversationMessage) -> ConversationMessage {
+    let stripped_blocks: Vec<ContentBlock> = message
+        .blocks
+        .iter()
+        .map(|block| match block {
+            ContentBlock::ToolResult {
+                tool_use_id,
+                tool_name,
+                output,
+                is_error,
+            } => {
+                if output.len() > MAX_TOOL_RESULT_CHARS_FOR_COMPACT {
+                    let char_count = output.chars().count();
+                    ContentBlock::ToolResult {
+                        tool_use_id: tool_use_id.clone(),
+                        tool_name: tool_name.clone(),
+                        output: format!(
+                            "[{} chars stripped; tool={} error={}]",
+                            char_count, tool_name, is_error
+                        ),
+                        is_error: *is_error,
+                    }
+                } else {
+                    block.clone()
+                }
+            }
+            other => other.clone(),
+        })
+        .collect();
+
+    ConversationMessage {
+        role: message.role,
+        blocks: stripped_blocks,
+        usage: message.usage.clone(),
+    }
+}
+
 pub fn compact_session(session: &Session, config: CompactionConfig) -> CompactionResult {
     if !should_compact(session, config) {
         return CompactionResult {
@@ -95,6 +139,16 @@ pub fn compact_session(session: &Session, config: CompactionConfig) -> Compactio
             removed_message_count: 0,
         };
     }
+
+    // Strip heavy media blocks from messages before summarization to save tokens.
+    // Heavy blocks (large tool results, images, documents) are replaced with references
+    // so the summarizer doesn't waste tokens on them. References are preserved for
+    // post-compact reinjection.
+    let messages_for_summary: Vec<ConversationMessage> = session
+        .messages
+        .iter()
+        .map(strip_heavy_media)
+        .collect();
 
     let existing_summary = session
         .messages
@@ -107,8 +161,11 @@ pub fn compact_session(session: &Session, config: CompactionConfig) -> Compactio
         .saturating_sub(config.preserve_recent_messages);
     let removed = &session.messages[compacted_prefix_len..keep_from];
     let preserved = session.messages[keep_from..].to_vec();
+
+    // Summarize with heavy blocks stripped to save tokens
+    let stripped_for_summary = &messages_for_summary[compacted_prefix_len..keep_from];
     let summary =
-        merge_compact_summaries(existing_summary.as_deref(), &summarize_messages(removed));
+        merge_compact_summaries(existing_summary.as_deref(), &summarize_messages(stripped_for_summary));
     let formatted_summary = format_compact_summary(&summary);
     let continuation = get_compact_continuation_message(&summary, true, !preserved.is_empty());
 
