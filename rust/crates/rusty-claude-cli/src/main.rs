@@ -125,8 +125,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
     match parse_args(&args)? {
         CliAction::Agents { args } => LiveCli::print_agents(args.as_deref())?,
-        CliAction::Mcp { args } => {
-            ensure_process_command_available("mcp", None, None)?;
+        CliAction::Mcp { args, profile } => {
+            ensure_process_command_available("mcp", None, profile.as_deref())?;
             LiveCli::print_mcp(args.as_deref())?
         }
         CliAction::Skills { args } => LiveCli::print_skills(args.as_deref())?,
@@ -224,6 +224,7 @@ enum CliAction {
     },
     Mcp {
         args: Option<String>,
+        profile: Option<String>,
     },
     Skills {
         args: Option<String>,
@@ -515,6 +516,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
         }),
         "mcp" => Ok(CliAction::Mcp {
             args: join_optional_args(&rest[1..]),
+            profile,
         }),
         "skills" => Ok(CliAction::Skills {
             args: join_optional_args(&rest[1..]),
@@ -546,7 +548,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                 permission_mode,
             })
         }
-        other if other.starts_with('/') => parse_direct_slash_cli_action(&rest),
+        other if other.starts_with('/') => parse_direct_slash_cli_action(&rest, profile.clone()),
         _other => Ok(CliAction::Prompt {
             prompt: rest.join(" "),
             model,
@@ -710,7 +712,10 @@ fn join_optional_args(args: &[String]) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-fn parse_direct_slash_cli_action(rest: &[String]) -> Result<CliAction, String> {
+fn parse_direct_slash_cli_action(
+    rest: &[String],
+    profile: Option<String>,
+) -> Result<CliAction, String> {
     let raw = rest.join(" ");
     match SlashCommand::parse(&raw) {
         Ok(Some(SlashCommand::Help)) => Ok(CliAction::Help),
@@ -722,6 +727,7 @@ fn parse_direct_slash_cli_action(rest: &[String]) -> Result<CliAction, String> {
                 (Some(action), Some(target)) => Some(format!("{action} {target}")),
                 (None, Some(target)) => Some(target),
             },
+            profile,
         }),
         Ok(Some(SlashCommand::Skills { args })) => Ok(CliAction::Skills { args }),
         Ok(Some(SlashCommand::Unknown(name))) => Err(format_unknown_direct_slash_command(&name)),
@@ -5447,6 +5453,7 @@ impl ProviderRuntimeClient {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let launch = ProviderLauncher::prepare(&setup_context.active_profile)
             .map_err(|error| std::io::Error::other(error.to_string()))?;
+        let tools_enabled = enable_tools && launch.supports_tools;
         Ok(Self {
             runtime: tokio::runtime::Runtime::new()?,
             client: OpenAiCompatClient::new(
@@ -5466,7 +5473,7 @@ impl ProviderRuntimeClient {
                 Duration::from_secs(2),
             ),
             model,
-            enable_tools,
+            enable_tools: tools_enabled,
             emit_output,
             allowed_tools,
             tool_registry,
@@ -6577,7 +6584,8 @@ mod tests {
         slash_command_completion_candidates_with_sessions, status_context, validate_no_args,
         ensure_session_command_available_for_profile, CliAction, CliOutputFormat,
         CommandReportSurfaceSelection, GitWorkspaceSummary, InternalPromptProgressEvent,
-        InternalPromptProgressState, LiveCli, SlashCommand, StatusUsage, DEFAULT_MODEL,
+        InternalPromptProgressState, LiveCli, ProviderRuntimeClient, SlashCommand, StatusUsage,
+        DEFAULT_MODEL,
     };
     use api::{MessageResponse, OutputContentBlock, Usage};
     use plugins::{
@@ -7058,7 +7066,10 @@ mod tests {
         );
         assert_eq!(
             parse_args(&["mcp".to_string()]).expect("mcp should parse"),
-            CliAction::Mcp { args: None }
+            CliAction::Mcp {
+                args: None,
+                profile: None,
+            }
         );
         assert_eq!(
             parse_args(&["skills".to_string()]).expect("skills should parse"),
@@ -7143,7 +7154,8 @@ mod tests {
             parse_args(&["/mcp".to_string(), "show".to_string(), "demo".to_string()])
                 .expect("/mcp show demo should parse"),
             CliAction::Mcp {
-                args: Some("show demo".to_string())
+                args: Some("show demo".to_string()),
+                profile: None,
             }
         );
         assert_eq!(
@@ -7172,6 +7184,35 @@ mod tests {
             .expect_err("/status should remain REPL-only when invoked directly");
         assert!(error.contains("interactive-only"));
         assert!(error.contains("kcode --resume SESSION.jsonl /status"));
+    }
+
+    #[test]
+    fn process_mcp_command_preserves_profile_override() {
+        assert_eq!(
+            parse_args(&[
+                "--profile".to_string(),
+                "bridge".to_string(),
+                "mcp".to_string(),
+            ])
+            .expect("mcp with profile should parse"),
+            CliAction::Mcp {
+                args: None,
+                profile: Some("bridge".to_string()),
+            }
+        );
+        assert_eq!(
+            parse_args(&[
+                "--profile".to_string(),
+                "bridge".to_string(),
+                "/mcp".to_string(),
+                "list".to_string(),
+            ])
+            .expect("direct /mcp with profile should parse"),
+            CliAction::Mcp {
+                args: Some("list".to_string()),
+                profile: Some("bridge".to_string()),
+            }
+        );
     }
 
     #[test]
@@ -8675,6 +8716,38 @@ UU conflicted.rs",
         let _ = fs::remove_dir_all(config_home);
         let _ = fs::remove_dir_all(workspace);
         let _ = fs::remove_dir_all(source_root);
+    }
+
+    #[test]
+    fn provider_runtime_client_disables_tools_for_toolless_profiles() {
+        let workspace = temp_dir();
+        fs::create_dir_all(&workspace).expect("workspace");
+
+        let mut setup = test_setup_context(&workspace);
+        setup.active_profile.profile.supports_tools = false;
+        setup.active_profile.base_url = Some("https://router.example.test/v1".to_string());
+        setup.active_profile.base_url_source = ResolutionSource::Env("KCODE_BASE_URL");
+        setup.active_profile.credential = CredentialResolution {
+            source: CredentialSource::PrimaryEnv,
+            env_name: "KCODE_API_KEY".to_string(),
+            api_key: Some("test-dummy-key-for-runtime".to_string()),
+        };
+
+        let client = ProviderRuntimeClient::new(
+            "runtime-toolless-profile",
+            DEFAULT_MODEL.to_string(),
+            true,
+            false,
+            None,
+            registry_with_plugin_tool(),
+            None,
+            &setup,
+        )
+        .expect("runtime client should build");
+
+        assert!(!client.enable_tools);
+
+        let _ = fs::remove_dir_all(workspace);
     }
 }
 
