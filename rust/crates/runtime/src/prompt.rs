@@ -201,6 +201,10 @@ fn discover_instruction_files(cwd: &Path) -> std::io::Result<Vec<ContextFile>> {
     let mut files = Vec::new();
     for dir in directories {
         for candidate in [
+            dir.join("KCODE.md"),
+            dir.join("KCODE.local.md"),
+            dir.join(".kcode").join("KCODE.md"),
+            dir.join(".kcode").join("instructions.md"),
             dir.join("CLAUDE.md"),
             dir.join("CLAUDE.local.md"),
             dir.join(".claw").join("CLAUDE.md"),
@@ -420,9 +424,7 @@ pub fn load_system_prompt(
 fn render_config_section(config: &RuntimeConfig) -> String {
     let mut lines = vec!["# Runtime config".to_string()];
     if config.loaded_entries().is_empty() {
-        lines.extend(prepend_bullets(vec![
-            "No Claw Code settings files loaded.".to_string()
-        ]));
+        lines.extend(prepend_bullets(vec!["No Kcode settings files loaded.".to_string()]));
         return lines.join("\n");
     }
 

@@ -50,6 +50,13 @@ use serde_json::json;
 use tools::GlobalToolRegistry;
 
 const DEFAULT_MODEL: &str = "claude-opus-4-6";
+const CLI_NAME: &str = "kcode";
+const PRIMARY_CONFIG_DIR_NAME: &str = ".kcode";
+const LEGACY_CONFIG_DIR_NAME: &str = ".claw";
+const PRIMARY_SESSION_DIR_ENV: &str = "KCODE_SESSION_DIR";
+const LEGACY_SESSION_DIR_ENV: &str = "CLAW_SESSION_DIR";
+const PRIMARY_PERMISSION_MODE_ENV: &str = "KCODE_PERMISSION_MODE";
+const LEGACY_PERMISSION_MODE_ENV: &str = "RUSTY_CLAUDE_PERMISSION_MODE";
 fn max_tokens_for_model(model: &str) -> u32 {
     if model.contains("opus") {
         32_000
@@ -88,13 +95,13 @@ type AllowedToolSet = BTreeSet<String>;
 fn main() {
     if let Err(error) = run() {
         let message = error.to_string();
-        if message.contains("`claw --help`") {
+        if message.contains(&format!("`{CLI_NAME} --help`")) {
             eprintln!("error: {message}");
         } else {
             eprintln!(
                 "error: {message}
 
-Run `claw --help` for usage."
+Run `{CLI_NAME} --help` for usage."
             );
         }
         std::process::exit(1);
@@ -414,11 +421,11 @@ fn bare_slash_command_guidance(command_name: &str) -> Option<String> {
         .find(|spec| spec.name == command_name)?;
     let guidance = if slash_command.resume_supported {
         format!(
-            "`claw {command_name}` is a slash command. Use `claw --resume SESSION.jsonl /{command_name}` or start `claw` and run `/{command_name}`."
+            "`{CLI_NAME} {command_name}` is a slash command. Use `{CLI_NAME} --resume SESSION.jsonl /{command_name}` or start `{CLI_NAME}` and run `/{command_name}`."
         )
     } else {
         format!(
-            "`claw {command_name}` is a slash command. Start `claw` and run `/{command_name}` inside the REPL."
+            "`{CLI_NAME} {command_name}` is a slash command. Start `{CLI_NAME}` and run `/{command_name}` inside the REPL."
         )
     };
     Some(guidance)
@@ -448,7 +455,7 @@ fn parse_direct_slash_cli_action(rest: &[String]) -> Result<CliAction, String> {
         Ok(Some(command)) => Err({
             let _ = command;
             format!(
-                "slash command {command_name} is interactive-only. Start `claw` and run it there, or use `claw --resume SESSION.jsonl {command_name}` / `claw --resume {latest} {command_name}` when the command is marked [resume] in /help.",
+                "slash command {command_name} is interactive-only. Start `{CLI_NAME}` and run it there, or use `{CLI_NAME} --resume SESSION.jsonl {command_name}` / `{CLI_NAME} --resume {latest} {command_name}` when the command is marked [resume] in /help.",
                 command_name = rest[0],
                 latest = LATEST_SESSION_REFERENCE,
             )
@@ -465,7 +472,7 @@ fn format_unknown_option(option: &str) -> String {
         message.push_str(suggestion);
         message.push('?');
     }
-    message.push_str("\nRun `claw --help` for usage.");
+    message.push_str(&format!("\nRun `{CLI_NAME} --help` for usage."));
     message
 }
 
@@ -476,7 +483,9 @@ fn format_unknown_direct_slash_command(name: &str) -> String {
         message.push('\n');
         message.push_str(&suggestions);
     }
-    message.push_str("\nRun `claw --help` for CLI usage, or start `claw` and use /help.");
+    message.push_str(&format!(
+        "\nRun `{CLI_NAME} --help` for CLI usage, or start `{CLI_NAME}` and use /help."
+    ));
     message
 }
 
@@ -619,8 +628,9 @@ fn permission_mode_from_resolved(mode: ResolvedPermissionMode) -> PermissionMode
 }
 
 fn default_permission_mode() -> PermissionMode {
-    env::var("RUSTY_CLAUDE_PERMISSION_MODE")
+    env::var(PRIMARY_PERMISSION_MODE_ENV)
         .ok()
+        .or_else(|| env::var(LEGACY_PERMISSION_MODE_ENV).ok())
         .as_deref()
         .and_then(normalize_permission_mode)
         .map(permission_mode_from_label)
@@ -1129,7 +1139,7 @@ fn render_resume_usage() -> String {
     format!(
         "Resume
   Usage            /resume <session-path|session-id|{LATEST_SESSION_REFERENCE}>
-  Auto-save        .claw/sessions/<session-id>.{PRIMARY_SESSION_EXTENSION}
+  Auto-save        .kcode/sessions/<session-id>.{PRIMARY_SESSION_EXTENSION}
   Tip              use /session list to inspect saved sessions"
     )
 }
@@ -1315,7 +1325,7 @@ fn run_resume_command(
             Ok(ResumeCommandOutcome {
                 session: cleared,
                 message: Some(format!(
-                    "Session cleared\n  Mode             resumed session reset\n  Previous session {previous_session_id}\n  Backup           {}\n  Resume previous  claw --resume {}\n  New session      {new_session_id}\n  Session file     {}",
+                    "Session cleared\n  Mode             resumed session reset\n  Previous session {previous_session_id}\n  Backup           {}\n  Resume previous  {CLI_NAME} --resume {}\n  New session      {new_session_id}\n  Session file     {}",
                     backup_path.display(),
                     backup_path.display(),
                     session_path.display()
@@ -1383,7 +1393,7 @@ fn run_resume_command(
         }),
         SlashCommand::Init => Ok(ResumeCommandOutcome {
             session: session.clone(),
-            message: Some(init_claude_md()?),
+            message: Some(init_kcode_md()?),
         }),
         SlashCommand::Diff => Ok(ResumeCommandOutcome {
             session: session.clone(),
@@ -1724,13 +1734,13 @@ impl LiveCli {
             |path| path.display().to_string(),
         );
         format!(
-            "\x1b[38;5;196m\
- ██████╗██╗      █████╗ ██╗    ██╗\n\
-██╔════╝██║     ██╔══██╗██║    ██║\n\
-██║     ██║     ███████║██║ █╗ ██║\n\
-██║     ██║     ██╔══██║██║███╗██║\n\
-╚██████╗███████╗██║  ██║╚███╔███╔╝\n\
- ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝\x1b[0m \x1b[38;5;208mCode\x1b[0m 🦞\n\n\
+            "\x1b[38;5;208m\
+██╗  ██╗ ██████╗ ██████╗ ██████╗ ███████╗\n\
+██║ ██╔╝██╔════╝██╔═══██╗██╔══██╗██╔════╝\n\
+█████╔╝ ██║     ██║   ██║██║  ██║█████╗\n\
+██╔═██╗ ██║     ██║   ██║██║  ██║██╔══╝\n\
+██║  ██╗╚██████╗╚██████╔╝██████╔╝███████╗\n\
+╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝\x1b[0m\n\n\
   \x1b[2mModel\x1b[0m            {}\n\
   \x1b[2mPermissions\x1b[0m      {}\n\
   \x1b[2mBranch\x1b[0m           {}\n\
@@ -2524,10 +2534,32 @@ impl LiveCli {
 }
 
 fn sessions_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let cwd = env::current_dir()?;
-    let path = cwd.join(".claw").join("sessions");
+    let path = primary_sessions_dir()?;
     fs::create_dir_all(&path)?;
     Ok(path)
+}
+
+fn primary_sessions_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let cwd = env::current_dir()?;
+    Ok(env::var_os(PRIMARY_SESSION_DIR_ENV)
+        .map(PathBuf::from)
+        .or_else(|| env::var_os(LEGACY_SESSION_DIR_ENV).map(PathBuf::from))
+        .unwrap_or_else(|| cwd.join(PRIMARY_CONFIG_DIR_NAME).join("sessions")))
+}
+
+fn legacy_sessions_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let cwd = env::current_dir()?;
+    Ok(cwd.join(LEGACY_CONFIG_DIR_NAME).join("sessions"))
+}
+
+fn session_search_dirs() -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
+    let mut dirs = Vec::new();
+    for path in [primary_sessions_dir()?, legacy_sessions_dir()?] {
+        if !dirs.iter().any(|candidate| candidate == &path) {
+            dirs.push(path);
+        }
+    }
+    Ok(dirs)
 }
 
 fn create_managed_session_handle(
@@ -2572,11 +2604,12 @@ fn resolve_session_reference(reference: &str) -> Result<SessionHandle, Box<dyn s
 }
 
 fn resolve_managed_session_path(session_id: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let directory = sessions_dir()?;
-    for extension in [PRIMARY_SESSION_EXTENSION, LEGACY_SESSION_EXTENSION] {
-        let path = directory.join(format!("{session_id}.{extension}"));
-        if path.exists() {
-            return Ok(path);
+    for directory in session_search_dirs()? {
+        for extension in [PRIMARY_SESSION_EXTENSION, LEGACY_SESSION_EXTENSION] {
+            let path = directory.join(format!("{session_id}.{extension}"));
+            if path.exists() {
+                return Ok(path);
+            }
         }
     }
     Err(format_missing_session_reference(session_id).into())
@@ -2592,55 +2625,60 @@ fn is_managed_session_file(path: &Path) -> bool {
 
 fn list_managed_sessions() -> Result<Vec<ManagedSessionSummary>, Box<dyn std::error::Error>> {
     let mut sessions = Vec::new();
-    for entry in fs::read_dir(sessions_dir()?)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !is_managed_session_file(&path) {
+    for directory in session_search_dirs()? {
+        let Ok(entries) = fs::read_dir(&directory) else {
             continue;
+        };
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+            if !is_managed_session_file(&path) {
+                continue;
+            }
+            let metadata = entry.metadata()?;
+            let modified_epoch_millis = metadata
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                .map(|duration| duration.as_millis())
+                .unwrap_or_default();
+            let (id, message_count, parent_session_id, branch_name) =
+                match Session::load_from_path(&path) {
+                    Ok(session) => {
+                        let parent_session_id = session
+                            .fork
+                            .as_ref()
+                            .map(|fork| fork.parent_session_id.clone());
+                        let branch_name = session
+                            .fork
+                            .as_ref()
+                            .and_then(|fork| fork.branch_name.clone());
+                        (
+                            session.session_id,
+                            session.messages.len(),
+                            parent_session_id,
+                            branch_name,
+                        )
+                    }
+                    Err(_) => (
+                        path.file_stem()
+                            .and_then(|value| value.to_str())
+                            .unwrap_or("unknown")
+                            .to_string(),
+                        0,
+                        None,
+                        None,
+                    ),
+                };
+            sessions.push(ManagedSessionSummary {
+                id,
+                path,
+                modified_epoch_millis,
+                message_count,
+                parent_session_id,
+                branch_name,
+            });
         }
-        let metadata = entry.metadata()?;
-        let modified_epoch_millis = metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .map(|duration| duration.as_millis())
-            .unwrap_or_default();
-        let (id, message_count, parent_session_id, branch_name) =
-            match Session::load_from_path(&path) {
-                Ok(session) => {
-                    let parent_session_id = session
-                        .fork
-                        .as_ref()
-                        .map(|fork| fork.parent_session_id.clone());
-                    let branch_name = session
-                        .fork
-                        .as_ref()
-                        .and_then(|fork| fork.branch_name.clone());
-                    (
-                        session.session_id,
-                        session.messages.len(),
-                        parent_session_id,
-                        branch_name,
-                    )
-                }
-                Err(_) => (
-                    path.file_stem()
-                        .and_then(|value| value.to_str())
-                        .unwrap_or("unknown")
-                        .to_string(),
-                    0,
-                    None,
-                    None,
-                ),
-            };
-        sessions.push(ManagedSessionSummary {
-            id,
-            path,
-            modified_epoch_millis,
-            message_count,
-            parent_session_id,
-            branch_name,
-        });
     }
     sessions.sort_by(|left, right| {
         right
@@ -2660,13 +2698,13 @@ fn latest_managed_session() -> Result<ManagedSessionSummary, Box<dyn std::error:
 
 fn format_missing_session_reference(reference: &str) -> String {
     format!(
-        "session not found: {reference}\nHint: managed sessions live in .claw/sessions/. Try `{LATEST_SESSION_REFERENCE}` for the most recent session or `/session list` in the REPL."
+        "session not found: {reference}\nHint: managed sessions live in .kcode/sessions/. Try `{LATEST_SESSION_REFERENCE}` for the most recent session or `/session list` in the REPL."
     )
 }
 
 fn format_no_managed_sessions() -> String {
     format!(
-        "no managed sessions found in .claw/sessions/\nStart `claw` to create a session, then rerun with `--resume {LATEST_SESSION_REFERENCE}`."
+        "no managed sessions found in .kcode/sessions/\nStart `{CLI_NAME}` to create a session, then rerun with `--resume {LATEST_SESSION_REFERENCE}`."
     )
 }
 
@@ -2757,7 +2795,7 @@ fn render_repl_help() -> String {
         "  Tab                  Complete commands, modes, and recent sessions".to_string(),
         "  Ctrl-C               Clear input (or exit on empty prompt)".to_string(),
         "  Shift+Enter/Ctrl+J   Insert a newline".to_string(),
-        "  Auto-save            .claw/sessions/<session-id>.jsonl".to_string(),
+        "  Auto-save            .kcode/sessions/<session-id>.jsonl".to_string(),
         "  Resume latest        /resume latest".to_string(),
         "  Browse sessions      /session list".to_string(),
         String::new(),
@@ -3056,7 +3094,7 @@ fn render_memory_report() -> Result<String, Box<dyn std::error::Error>> {
     if project_context.instruction_files.is_empty() {
         lines.push("Discovered files".to_string());
         lines.push(
-            "  No CLAUDE instruction files discovered in the current directory ancestry."
+            "  No KCODE instruction files discovered in the current directory ancestry."
                 .to_string(),
         );
     } else {
@@ -3082,13 +3120,13 @@ fn render_memory_report() -> Result<String, Box<dyn std::error::Error>> {
     ))
 }
 
-fn init_claude_md() -> Result<String, Box<dyn std::error::Error>> {
+fn init_kcode_md() -> Result<String, Box<dyn std::error::Error>> {
     let cwd = env::current_dir()?;
     Ok(initialize_repo(&cwd)?.render())
 }
 
 fn run_init() -> Result<(), Box<dyn std::error::Error>> {
-    println!("{}", init_claude_md()?);
+    println!("{}", init_kcode_md()?);
     Ok(())
 }
 
@@ -3404,7 +3442,7 @@ fn render_version_report() -> String {
     let git_sha = GIT_SHA.unwrap_or("unknown");
     let target = BUILD_TARGET.unwrap_or("unknown");
     format!(
-        "Claw Code\n  Version          {VERSION}\n  Git SHA          {git_sha}\n  Target           {target}\n  Build date       {DEFAULT_DATE}"
+        "Kcode\n  Version          {VERSION}\n  Git SHA          {git_sha}\n  Target           {target}\n  Build date       {DEFAULT_DATE}"
     )
 }
 
@@ -5020,50 +5058,50 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
 
 #[allow(clippy::too_many_lines)]
 fn print_help_to(out: &mut impl Write) -> io::Result<()> {
-    writeln!(out, "claw v{VERSION}")?;
+    writeln!(out, "{CLI_NAME} v{VERSION}")?;
     writeln!(out)?;
     writeln!(out, "Usage:")?;
     writeln!(
         out,
-        "  claw [--model MODEL] [--allowedTools TOOL[,TOOL...]]"
+        "  {CLI_NAME} [--model MODEL] [--allowedTools TOOL[,TOOL...]]"
     )?;
     writeln!(out, "      Start the interactive REPL")?;
     writeln!(
         out,
-        "  claw [--model MODEL] [--output-format text|json] prompt TEXT"
+        "  {CLI_NAME} [--model MODEL] [--output-format text|json] prompt TEXT"
     )?;
     writeln!(out, "      Send one prompt and exit")?;
     writeln!(
         out,
-        "  claw [--model MODEL] [--output-format text|json] TEXT"
+        "  {CLI_NAME} [--model MODEL] [--output-format text|json] TEXT"
     )?;
     writeln!(out, "      Shorthand non-interactive prompt mode")?;
     writeln!(
         out,
-        "  claw --resume [SESSION.jsonl|session-id|latest] [/status] [/compact] [...]"
+        "  {CLI_NAME} --resume [SESSION.jsonl|session-id|latest] [/status] [/compact] [...]"
     )?;
     writeln!(
         out,
         "      Inspect or maintain a saved session without entering the REPL"
     )?;
-    writeln!(out, "  claw help")?;
+    writeln!(out, "  {CLI_NAME} help")?;
     writeln!(out, "      Alias for --help")?;
-    writeln!(out, "  claw version")?;
+    writeln!(out, "  {CLI_NAME} version")?;
     writeln!(out, "      Alias for --version")?;
-    writeln!(out, "  claw status")?;
+    writeln!(out, "  {CLI_NAME} status")?;
     writeln!(
         out,
         "      Show the current local workspace status snapshot"
     )?;
-    writeln!(out, "  claw sandbox")?;
+    writeln!(out, "  {CLI_NAME} sandbox")?;
     writeln!(out, "      Show the current sandbox isolation snapshot")?;
-    writeln!(out, "  claw agents")?;
-    writeln!(out, "  claw mcp")?;
-    writeln!(out, "  claw skills")?;
-    writeln!(out, "  claw system-prompt [--cwd PATH] [--date YYYY-MM-DD]")?;
-    writeln!(out, "  claw login")?;
-    writeln!(out, "  claw logout")?;
-    writeln!(out, "  claw init")?;
+    writeln!(out, "  {CLI_NAME} agents")?;
+    writeln!(out, "  {CLI_NAME} mcp")?;
+    writeln!(out, "  {CLI_NAME} skills")?;
+    writeln!(out, "  {CLI_NAME} system-prompt [--cwd PATH] [--date YYYY-MM-DD]")?;
+    writeln!(out, "  {CLI_NAME} login")?;
+    writeln!(out, "  {CLI_NAME} logout")?;
+    writeln!(out, "  {CLI_NAME} init")?;
     writeln!(out)?;
     writeln!(out, "Flags:")?;
     writeln!(
@@ -5104,7 +5142,7 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "Session shortcuts:")?;
     writeln!(
         out,
-        "  REPL turns auto-save to .claw/sessions/<session-id>.{PRIMARY_SESSION_EXTENSION}"
+        "  REPL turns auto-save to .kcode/sessions/<session-id>.{PRIMARY_SESSION_EXTENSION}"
     )?;
     writeln!(
         out,
@@ -5115,25 +5153,25 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
         "  Use /session list in the REPL to browse managed sessions"
     )?;
     writeln!(out, "Examples:")?;
-    writeln!(out, "  claw --model claude-opus \"summarize this repo\"")?;
+    writeln!(out, "  {CLI_NAME} --model claude-opus \"summarize this repo\"")?;
     writeln!(
         out,
-        "  claw --output-format json prompt \"explain src/main.rs\""
+        "  {CLI_NAME} --output-format json prompt \"explain src/main.rs\""
     )?;
     writeln!(
         out,
-        "  claw --allowedTools read,glob \"summarize Cargo.toml\""
+        "  {CLI_NAME} --allowedTools read,glob \"summarize Cargo.toml\""
     )?;
-    writeln!(out, "  claw --resume {LATEST_SESSION_REFERENCE}")?;
+    writeln!(out, "  {CLI_NAME} --resume {LATEST_SESSION_REFERENCE}")?;
     writeln!(
         out,
-        "  claw --resume {LATEST_SESSION_REFERENCE} /status /diff /export notes.txt"
+        "  {CLI_NAME} --resume {LATEST_SESSION_REFERENCE} /status /diff /export notes.txt"
     )?;
-    writeln!(out, "  claw agents")?;
-    writeln!(out, "  claw mcp show my-server")?;
-    writeln!(out, "  claw /skills")?;
-    writeln!(out, "  claw login")?;
-    writeln!(out, "  claw init")?;
+    writeln!(out, "  {CLI_NAME} agents")?;
+    writeln!(out, "  {CLI_NAME} mcp show my-server")?;
+    writeln!(out, "  {CLI_NAME} /skills")?;
+    writeln!(out, "  {CLI_NAME} login")?;
+    writeln!(out, "  {CLI_NAME} init")?;
     Ok(())
 }
 

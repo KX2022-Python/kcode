@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,6 +8,12 @@ use crate::json::JsonValue;
 use crate::sandbox::{FilesystemIsolationMode, SandboxConfig};
 
 pub const CLAW_SETTINGS_SCHEMA_NAME: &str = "SettingsSchema";
+const KCODE_CONFIG_HOME_ENV: &str = "KCODE_CONFIG_HOME";
+const CLAW_CONFIG_HOME_ENV: &str = "CLAW_CONFIG_HOME";
+const KCODE_CONFIG_DIR_NAME: &str = ".kcode";
+const CLAW_CONFIG_DIR_NAME: &str = ".claw";
+const KCODE_CONFIG_JSON_NAME: &str = ".kcode.json";
+const CLAW_CONFIG_JSON_NAME: &str = ".claw.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConfigSource {
@@ -205,32 +212,61 @@ impl ConfigLoader {
 
     #[must_use]
     pub fn discover(&self) -> Vec<ConfigEntry> {
-        let user_legacy_path = self.config_home.parent().map_or_else(
-            || PathBuf::from(".claw.json"),
-            |parent| parent.join(".claw.json"),
+        let legacy_config_home = legacy_config_home();
+        let mut entries = Vec::new();
+
+        push_unique_config_entry(
+            &mut entries,
+            ConfigSource::User,
+            config_json_path_for_home(&legacy_config_home),
         );
-        vec![
-            ConfigEntry {
-                source: ConfigSource::User,
-                path: user_legacy_path,
-            },
-            ConfigEntry {
-                source: ConfigSource::User,
-                path: self.config_home.join("settings.json"),
-            },
-            ConfigEntry {
-                source: ConfigSource::Project,
-                path: self.cwd.join(".claw.json"),
-            },
-            ConfigEntry {
-                source: ConfigSource::Project,
-                path: self.cwd.join(".claw").join("settings.json"),
-            },
-            ConfigEntry {
-                source: ConfigSource::Local,
-                path: self.cwd.join(".claw").join("settings.local.json"),
-            },
-        ]
+        push_unique_config_entry(
+            &mut entries,
+            ConfigSource::User,
+            legacy_config_home.join("settings.json"),
+        );
+        push_unique_config_entry(
+            &mut entries,
+            ConfigSource::User,
+            config_json_path_for_home(&self.config_home),
+        );
+        push_unique_config_entry(
+            &mut entries,
+            ConfigSource::User,
+            self.config_home.join("settings.json"),
+        );
+        push_unique_config_entry(
+            &mut entries,
+            ConfigSource::Project,
+            self.cwd.join(CLAW_CONFIG_JSON_NAME),
+        );
+        push_unique_config_entry(
+            &mut entries,
+            ConfigSource::Project,
+            self.cwd.join(CLAW_CONFIG_DIR_NAME).join("settings.json"),
+        );
+        push_unique_config_entry(
+            &mut entries,
+            ConfigSource::Project,
+            self.cwd.join(KCODE_CONFIG_JSON_NAME),
+        );
+        push_unique_config_entry(
+            &mut entries,
+            ConfigSource::Project,
+            self.cwd.join(KCODE_CONFIG_DIR_NAME).join("settings.json"),
+        );
+        push_unique_config_entry(
+            &mut entries,
+            ConfigSource::Local,
+            self.cwd.join(CLAW_CONFIG_DIR_NAME).join("settings.local.json"),
+        );
+        push_unique_config_entry(
+            &mut entries,
+            ConfigSource::Local,
+            self.cwd.join(KCODE_CONFIG_DIR_NAME).join("settings.local.json"),
+        );
+
+        entries
     }
 
     pub fn load(&self) -> Result<RuntimeConfig, ConfigError> {
@@ -441,10 +477,40 @@ impl RuntimePluginConfig {
 
 #[must_use]
 pub fn default_config_home() -> PathBuf {
-    std::env::var_os("CLAW_CONFIG_HOME")
+    std::env::var_os(KCODE_CONFIG_HOME_ENV)
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".claw")))
-        .unwrap_or_else(|| PathBuf::from(".claw"))
+        .or_else(|| std::env::var_os(CLAW_CONFIG_HOME_ENV).map(PathBuf::from))
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(KCODE_CONFIG_DIR_NAME))
+        })
+        .unwrap_or_else(|| PathBuf::from(KCODE_CONFIG_DIR_NAME))
+}
+
+fn legacy_config_home() -> PathBuf {
+    std::env::var_os(CLAW_CONFIG_HOME_ENV)
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(CLAW_CONFIG_DIR_NAME))
+        })
+        .unwrap_or_else(|| PathBuf::from(CLAW_CONFIG_DIR_NAME))
+}
+
+fn config_json_path_for_home(config_home: &Path) -> PathBuf {
+    let file_name = if config_home.file_name() == Some(OsStr::new(CLAW_CONFIG_DIR_NAME)) {
+        CLAW_CONFIG_JSON_NAME
+    } else {
+        KCODE_CONFIG_JSON_NAME
+    };
+    config_home
+        .parent()
+        .map_or_else(|| PathBuf::from(file_name), |parent| parent.join(file_name))
+}
+
+fn push_unique_config_entry(entries: &mut Vec<ConfigEntry>, source: ConfigSource, path: PathBuf) {
+    if entries.iter().any(|entry| entry.path == path) {
+        return;
+    }
+    entries.push(ConfigEntry { source, path });
 }
 
 impl RuntimeHookConfig {
