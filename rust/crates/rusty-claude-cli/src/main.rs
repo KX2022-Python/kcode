@@ -9,6 +9,8 @@
 mod init;
 mod input;
 mod render;
+mod render_semantic;
+mod render_theme;
 
 use std::collections::BTreeSet;
 use std::env;
@@ -39,6 +41,8 @@ use commands::{
 use init::{initialize_repo, initialize_user_config};
 use plugins::{PluginHooks, PluginManager, PluginManagerConfig, PluginRegistry};
 use render::{MarkdownStreamState, Spinner, TerminalRenderer};
+use render_semantic::{RenderIntent, RenderPolicy, SemanticRole};
+use render_theme::{render_intents, render_with_palette, ThemePalette};
 use runtime::{
     builtin_profiles, clear_oauth_credentials, default_memory_dir, ensure_memory_dir,
     ensure_memory_index, generate_pkce_pair, generate_state, list_memories,
@@ -5927,7 +5931,7 @@ fn format_tool_call_start(name: &str, input: &str) -> String {
         "bash" | "Bash" => format_bash_call(&parsed),
         "read_file" | "Read" => {
             let path = extract_tool_path(&parsed);
-            format!("\x1b[2m📄 Reading {path}…\x1b[0m")
+            format!("📄 Reading {path}…")
         }
         "write_file" | "Write" => {
             let path = extract_tool_path(&parsed);
@@ -5935,7 +5939,7 @@ fn format_tool_call_start(name: &str, input: &str) -> String {
                 .get("content")
                 .and_then(|value| value.as_str())
                 .map_or(0, |content| content.lines().count());
-            format!("\x1b[1;32m✏️ Writing {path}\x1b[0m \x1b[2m({lines} lines)\x1b[0m")
+            format!("✏️ Writing {path} ({lines} lines)")
         }
         "edit_file" | "Edit" => {
             let path = extract_tool_path(&parsed);
@@ -5950,7 +5954,7 @@ fn format_tool_call_start(name: &str, input: &str) -> String {
                 .and_then(|value| value.as_str())
                 .unwrap_or_default();
             format!(
-                "\x1b[1;33m📝 Editing {path}\x1b[0m{}",
+                "📝 Editing {path}{}",
                 format_patch_preview(old_value, new_value)
                     .map(|preview| format!("\n{preview}"))
                     .unwrap_or_default()
@@ -5966,42 +5970,44 @@ fn format_tool_call_start(name: &str, input: &str) -> String {
         _ => summarize_tool_payload(input),
     };
 
+    let palette = ThemePalette::default_terminal();
     let border = "─".repeat(name.len() + 8);
+    let name_colored = render_with_palette(&palette, name, SemanticRole::Tool, true, true);
     format!(
-        "\x1b[38;5;245m╭─ \x1b[1;36m{name}\x1b[0;38;5;245m ─╮\x1b[0m\n\x1b[38;5;245m│\x1b[0m {detail}\n\x1b[38;5;245m╰{border}╯\x1b[0m"
+        "╭─ {name_colored} ─╮\n│ {detail}\n╰{border}╯"
     )
 }
 
 fn format_tool_result(name: &str, output: &str, is_error: bool) -> String {
-    let icon = if is_error {
-        "\x1b[1;31m✗\x1b[0m"
-    } else {
-        "\x1b[1;32m✓\x1b[0m"
-    };
+    let palette = ThemePalette::default_terminal();
+    let role = if is_error { SemanticRole::Error } else { SemanticRole::Success };
+    let icon = render_with_palette(&palette, if is_error { "✗" } else { "✓" }, role, true, true);
+
     if is_error {
         let summary = truncate_for_summary(output.trim(), 160);
         return if summary.is_empty() {
-            format!("{icon} \x1b[38;5;245m{name}\x1b[0m")
+            format!("{icon} {name}")
         } else {
-            format!("{icon} \x1b[38;5;245m{name}\x1b[0m\n\x1b[38;5;203m{summary}\x1b[0m")
+            let summary_colored = render_with_palette(&palette, &summary, SemanticRole::Error, true, false);
+            format!("{icon} {name}\n{summary_colored}")
         };
     }
 
     let parsed: serde_json::Value =
         serde_json::from_str(output).unwrap_or(serde_json::Value::String(output.to_string()));
     match name {
-        "bash" | "Bash" => format_bash_result(icon, &parsed),
-        "read_file" | "Read" => format_read_result(icon, &parsed),
-        "write_file" | "Write" => format_write_result(icon, &parsed),
-        "edit_file" | "Edit" => format_edit_result(icon, &parsed),
-        "glob_search" | "Glob" => format_glob_result(icon, &parsed),
-        "grep_search" | "Grep" => format_grep_result(icon, &parsed),
-        _ => format_generic_tool_result(icon, name, &parsed),
+        "bash" | "Bash" => format_bash_result(&icon, &parsed),
+        "read_file" | "Read" => format_read_result(&icon, &parsed),
+        "write_file" | "Write" => format_write_result(&icon, &parsed),
+        "edit_file" | "Edit" => format_edit_result(&icon, &parsed),
+        "glob_search" | "Glob" => format_glob_result(&icon, &parsed),
+        "grep_search" | "Grep" => format_grep_result(&icon, &parsed),
+        _ => format_generic_tool_result(&icon, name, &parsed),
     }
 }
 
 const DISPLAY_TRUNCATION_NOTICE: &str =
-    "\x1b[2m… output truncated for display; full result preserved in session.\x1b[0m";
+    "… output truncated for display; full result preserved in session.";
 const READ_DISPLAY_MAX_LINES: usize = 80;
 const READ_DISPLAY_MAX_CHARS: usize = 6_000;
 const TOOL_OUTPUT_DISPLAY_MAX_LINES: usize = 60;
@@ -6026,7 +6032,7 @@ fn format_search_start(label: &str, parsed: &serde_json::Value) -> String {
         .get("path")
         .and_then(|value| value.as_str())
         .unwrap_or(".");
-    format!("{label} {pattern}\n\x1b[2min {scope}\x1b[0m")
+    format!("{label} {pattern}\nin {scope}")
 }
 
 fn format_patch_preview(old_value: &str, new_value: &str) -> Option<String> {
@@ -6034,7 +6040,7 @@ fn format_patch_preview(old_value: &str, new_value: &str) -> Option<String> {
         return None;
     }
     Some(format!(
-        "\x1b[38;5;203m- {}\x1b[0m\n\x1b[38;5;70m+ {}\x1b[0m",
+        "- {}\n+ {}",
         truncate_for_summary(first_visible_line(old_value), 72),
         truncate_for_summary(first_visible_line(new_value), 72)
     ))
