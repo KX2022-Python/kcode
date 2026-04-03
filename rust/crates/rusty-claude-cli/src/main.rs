@@ -13,7 +13,7 @@ mod render;
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::net::TcpListener;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
@@ -34,17 +34,18 @@ use commands::{
     handle_skills_slash_command, render_slash_command_help, resume_supported_slash_commands,
     slash_command_specs, validate_slash_command_input, SlashCommand,
 };
-use init::initialize_repo;
+use init::{initialize_repo, initialize_user_config};
 use plugins::{PluginHooks, PluginManager, PluginManagerConfig, PluginRegistry};
 use render::{MarkdownStreamState, Spinner, TerminalRenderer};
 use runtime::{
     clear_oauth_credentials, generate_pkce_pair, generate_state, load_system_prompt,
     parse_oauth_callback_request_target, resolve_sandbox_status, save_oauth_credentials, ApiClient,
-    ApiRequest, AssistantEvent, CompactionConfig, ConfigLoader, ConfigSource, ContentBlock,
-    ConversationMessage, ConversationRuntime, MessageRole, OAuthAuthorizationRequest, OAuthConfig,
-    OAuthTokenExchangeRequest, PermissionMode, PermissionPolicy, ProjectContext, PromptCacheEvent,
-    ResolvedPermissionMode, RuntimeError, Session, TokenUsage, ToolError, ToolExecutor,
-    UsageTracker,
+    ApiRequest, AssistantEvent, BootstrapInputs, CompactionConfig, ConfigLoader, ConfigSource,
+    ContentBlock, ConversationMessage, ConversationRuntime, DiagnosticCheck, DiagnosticStatus,
+    MessageRole, OAuthAuthorizationRequest, OAuthConfig, OAuthTokenExchangeRequest,
+    PermissionMode, PermissionPolicy, ProjectContext, PromptCacheEvent, ResolvedConfig,
+    ResolvedPermissionMode, RuntimeError, Session, SetupContext, SetupMode, StdioMode,
+    TokenUsage, ToolError, ToolExecutor, TrustPolicyContext, UsageTracker,
 };
 use serde_json::json;
 use tools::GlobalToolRegistry;
@@ -57,6 +58,12 @@ const PRIMARY_SESSION_DIR_ENV: &str = "KCODE_SESSION_DIR";
 const LEGACY_SESSION_DIR_ENV: &str = "CLAW_SESSION_DIR";
 const PRIMARY_PERMISSION_MODE_ENV: &str = "KCODE_PERMISSION_MODE";
 const LEGACY_PERMISSION_MODE_ENV: &str = "RUSTY_CLAUDE_PERMISSION_MODE";
+const PRIMARY_MODEL_ENV: &str = "KCODE_MODEL";
+const PRIMARY_BASE_URL_ENV: &str = "KCODE_BASE_URL";
+const PRIMARY_API_KEY_ENV: &str = "KCODE_API_KEY";
+const PRIMARY_PROFILE_ENV: &str = "KCODE_PROFILE";
+const PRIMARY_CONFIG_HOME_ENV: &str = "KCODE_CONFIG_HOME";
+const LEGACY_CONFIG_HOME_ENV: &str = "CLAW_CONFIG_HOME";
 fn max_tokens_for_model(model: &str) -> u32 {
     if model.contains("opus") {
         32_000
@@ -120,6 +127,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             session_path,
             commands,
         } => resume_session(&session_path, &commands),
+        CliAction::Doctor => print_doctor()?,
+        CliAction::ConfigShow { section } => print_config_show(section.as_deref())?,
         CliAction::Status {
             model,
             permission_mode,
@@ -165,6 +174,10 @@ enum CliAction {
     ResumeSession {
         session_path: PathBuf,
         commands: Vec<String>,
+    },
+    Doctor,
+    ConfigShow {
+        section: Option<String>,
     },
     Status {
         model: String,
@@ -354,6 +367,8 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             args: join_optional_args(&rest[1..]),
         }),
         "system-prompt" => parse_system_prompt_args(&rest[1..]),
+        "doctor" => Ok(CliAction::Doctor),
+        "config" => parse_config_args(&rest[1..]),
         "login" => Ok(CliAction::Login),
         "logout" => Ok(CliAction::Logout),
         "init" => Ok(CliAction::Init),
@@ -393,6 +408,7 @@ fn parse_single_word_command_alias(
     match rest[0].as_str() {
         "help" => Some(Ok(CliAction::Help)),
         "version" => Some(Ok(CliAction::Version)),
+        "doctor" => Some(Ok(CliAction::Doctor)),
         "status" => Some(Ok(CliAction::Status {
             model: model.to_string(),
             permission_mode,
@@ -409,6 +425,8 @@ fn bare_slash_command_guidance(command_name: &str) -> Option<String> {
             | "mcp"
             | "skills"
             | "system-prompt"
+            | "doctor"
+            | "config"
             | "login"
             | "logout"
             | "init"
@@ -429,6 +447,17 @@ fn bare_slash_command_guidance(command_name: &str) -> Option<String> {
         )
     };
     Some(guidance)
+}
+
+fn parse_config_args(args: &[String]) -> Result<CliAction, String> {
+    match args {
+        [] => Ok(CliAction::ConfigShow { section: None }),
+        [subcommand] if subcommand == "show" => Ok(CliAction::ConfigShow { section: None }),
+        [subcommand, section] if subcommand == "show" => Ok(CliAction::ConfigShow {
+            section: Some(section.clone()),
+        }),
+        _ => Err("usage: kcode config show [section]".to_string()),
+    }
 }
 
 fn join_optional_args(args: &[String]) -> Option<String> {
@@ -1144,6 +1173,220 @@ fn render_resume_usage() -> String {
     )
 }
 
+fn load_setup_context(
+    mode: SetupMode,
+    model_override: Option<&str>,
+    permission_mode: PermissionMode,
+    session_id: Option<&str>,
+) -> Result<SetupContext, Box<dyn std::error::Error>> {
+    let cwd = env::current_dir()?;
+    let loader = ConfigLoader::default_for(&cwd);
+    let discovered_entries = loader.discover();
+    let runtime_config = loader.load()?;
+    let project_context = ProjectContext::discover_with_git(&cwd, DEFAULT_DATE)?;
+    let git_root = find_git_root_in(&cwd).ok();
+    let project_root = git_root.clone().unwrap_or_else(|| cwd.clone());
+    let config_home = loader.config_home().to_path_buf();
+    let session_dir = resolve_setup_session_dir(&cwd, &runtime_config);
+    let oauth_credentials_present = runtime::load_oauth_credentials()?.is_some();
+    let legacy_paths = collect_legacy_paths(&discovered_entries, &project_context.instruction_files);
+    let resolved_config = ResolvedConfig {
+        config_home: config_home.clone(),
+        session_dir,
+        discovered_entries,
+        loaded_entries: runtime_config.loaded_entries().to_vec(),
+        config_file_present: runtime_config.loaded_entries().iter().any(|entry| {
+            entry.path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == "config.toml")
+        }),
+        model: resolve_setup_model(model_override, &runtime_config),
+        base_url: resolve_setup_base_url(&runtime_config),
+        api_key_env: resolve_setup_api_key_env(&runtime_config),
+        api_key_present: resolve_setup_api_key_present(&runtime_config),
+        oauth_credentials_present,
+        profile: config_string_value(&runtime_config, &["profile"]),
+        legacy_paths,
+    };
+    let trust_policy = TrustPolicyContext {
+        permission_mode: permission_mode.as_str().to_string(),
+        workspace_writeable: path_or_parent_writeable(&cwd),
+        config_home_writeable: path_or_parent_writeable(&config_home),
+        trusted_workspace: path_or_parent_writeable(&cwd),
+    };
+
+    Ok(SetupContext {
+        inputs: BootstrapInputs {
+            argv: env::args().collect(),
+            cwd: cwd.clone(),
+            platform: env::consts::OS.to_string(),
+            stdio_mode: current_stdio_mode(),
+            invocation_kind: mode,
+        },
+        session_id: session_id.map(ToOwned::to_owned),
+        cwd,
+        project_root,
+        git_root,
+        resolved_config,
+        trust_policy,
+        mode,
+    })
+}
+
+fn current_stdio_mode() -> StdioMode {
+    if io::stdin().is_terminal() && io::stdout().is_terminal() {
+        StdioMode::Interactive
+    } else {
+        StdioMode::NonInteractive
+    }
+}
+
+fn read_non_empty_env(name: &str) -> Option<String> {
+    env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn config_string_value(
+    runtime_config: &runtime::RuntimeConfig,
+    keys: &[&str],
+) -> Option<String> {
+    keys.iter()
+        .find_map(|key| runtime_config.get(key))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn resolve_setup_model(model_override: Option<&str>, runtime_config: &runtime::RuntimeConfig) -> String {
+    model_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(resolve_model_alias)
+        .map(ToOwned::to_owned)
+        .or_else(|| read_non_empty_env(PRIMARY_MODEL_ENV).map(|value| resolve_model_alias(&value).to_string()))
+        .or_else(|| config_string_value(runtime_config, &["model"]).map(|value| resolve_model_alias(&value).to_string()))
+        .unwrap_or_else(|| DEFAULT_MODEL.to_string())
+}
+
+fn resolve_setup_base_url(runtime_config: &runtime::RuntimeConfig) -> Option<String> {
+    read_non_empty_env(PRIMARY_BASE_URL_ENV)
+        .or_else(|| config_string_value(runtime_config, &["base_url", "baseUrl"]))
+        .or_else(|| read_non_empty_env("ANTHROPIC_BASE_URL"))
+}
+
+fn resolve_setup_api_key_env(runtime_config: &runtime::RuntimeConfig) -> String {
+    config_string_value(runtime_config, &["api_key_env", "apiKeyEnv"])
+        .unwrap_or_else(|| PRIMARY_API_KEY_ENV.to_string())
+}
+
+fn resolve_setup_api_key_present(runtime_config: &runtime::RuntimeConfig) -> bool {
+    let resolved_env = resolve_setup_api_key_env(runtime_config);
+    read_non_empty_env(PRIMARY_API_KEY_ENV).is_some()
+        || read_non_empty_env(&resolved_env).is_some()
+        || read_non_empty_env("ANTHROPIC_API_KEY").is_some()
+        || read_non_empty_env("ANTHROPIC_AUTH_TOKEN").is_some()
+}
+
+fn resolve_setup_session_dir(cwd: &Path, runtime_config: &runtime::RuntimeConfig) -> PathBuf {
+    env::var_os(PRIMARY_SESSION_DIR_ENV)
+        .map(PathBuf::from)
+        .or_else(|| env::var_os(LEGACY_SESSION_DIR_ENV).map(PathBuf::from))
+        .or_else(|| {
+            config_string_value(runtime_config, &["session_dir", "sessionDir"]).map(|value| {
+                let path = PathBuf::from(value);
+                if path.is_absolute() {
+                    path
+                } else {
+                    cwd.join(path)
+                }
+            })
+        })
+        .unwrap_or_else(|| cwd.join(PRIMARY_CONFIG_DIR_NAME).join("sessions"))
+}
+
+fn collect_legacy_paths(
+    discovered_entries: &[runtime::ConfigEntry],
+    instruction_files: &[runtime::ContextFile],
+) -> Vec<PathBuf> {
+    let mut legacy_paths = discovered_entries
+        .iter()
+        .map(|entry| entry.path.clone())
+        .filter(|path| {
+            let rendered = path.display().to_string();
+            rendered.contains(".claw") || rendered.contains(".claude")
+        })
+        .collect::<Vec<_>>();
+
+    for file in instruction_files {
+        let rendered = file.path.display().to_string();
+        if (rendered.contains(".claw")
+            || rendered.contains(".claude")
+            || rendered.ends_with("CLAUDE.md"))
+            && !legacy_paths.iter().any(|path| path == &file.path)
+        {
+            legacy_paths.push(file.path.clone());
+        }
+    }
+
+    legacy_paths
+}
+
+fn path_or_parent_writeable(path: &Path) -> bool {
+    let mut current = Some(path);
+    while let Some(candidate) = current {
+        if candidate.exists() {
+            return runtime::is_path_effectively_writeable(candidate);
+        }
+        current = candidate.parent();
+    }
+    false
+}
+
+fn has_explicit_bootstrap_inputs(setup: &SetupContext) -> bool {
+    setup.resolved_config.config_file_present
+        || setup.resolved_config.base_url.is_some()
+        || setup.resolved_config.api_key_present
+        || setup.resolved_config.oauth_credentials_present
+}
+
+fn ensure_setup_ready_for_runtime(setup: &SetupContext) -> Result<(), Box<dyn std::error::Error>> {
+    if !has_explicit_bootstrap_inputs(setup) {
+        return Err(format!(
+            "Kcode is not initialized yet.\nRun `{CLI_NAME} init` to create `~/.kcode/config.toml`, then run `{CLI_NAME} doctor`."
+        )
+        .into());
+    }
+    if setup
+        .resolved_config
+        .base_url
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        return Err(format!(
+            "missing base URL.\nSet `{PRIMARY_BASE_URL_ENV}` or `base_url` in `~/.kcode/config.toml`, then rerun `{CLI_NAME} doctor`."
+        )
+        .into());
+    }
+    if !setup.resolved_config.api_key_present && !setup.resolved_config.oauth_credentials_present {
+        return Err(format!(
+            "missing API credentials.\nSet `{PRIMARY_API_KEY_ENV}` or the env named by `api_key_env`, then rerun `{CLI_NAME} doctor`."
+        )
+        .into());
+    }
+    if !path_or_parent_writeable(&setup.resolved_config.session_dir) {
+        return Err(format!(
+            "session directory is not writeable: {}\nAdjust `session_dir` or `{PRIMARY_SESSION_DIR_ENV}` before continuing.",
+            setup.resolved_config.session_dir.display()
+        )
+        .into());
+    }
+    Ok(())
+}
+
 fn format_compact_report(removed: usize, resulting_messages: usize, skipped: bool) -> String {
     if skipped {
         format!(
@@ -1370,6 +1613,10 @@ fn run_resume_command(
                 message: Some(format_cost_report(usage)),
             })
         }
+        SlashCommand::Doctor => Ok(ResumeCommandOutcome {
+            session: session.clone(),
+            message: Some(render_doctor_report()?),
+        }),
         SlashCommand::Config { section } => Ok(ResumeCommandOutcome {
             session: session.clone(),
             message: Some(render_config_report(section.as_deref())?),
@@ -1393,7 +1640,7 @@ fn run_resume_command(
         }),
         SlashCommand::Init => Ok(ResumeCommandOutcome {
             session: session.clone(),
-            message: Some(init_kcode_md()?),
+            message: Some(init_repo_kcode_md()?),
         }),
         SlashCommand::Diff => Ok(ResumeCommandOutcome {
             session: session.clone(),
@@ -1444,7 +1691,6 @@ fn run_resume_command(
         | SlashCommand::Permissions { .. }
         | SlashCommand::Session { .. }
         | SlashCommand::Plugins { .. }
-        | SlashCommand::Doctor
         | SlashCommand::Login
         | SlashCommand::Logout
         | SlashCommand::Vim
@@ -1959,8 +2205,12 @@ impl LiveCli {
                 Self::print_memory()?;
                 false
             }
+            SlashCommand::Doctor => {
+                Self::print_doctor()?;
+                false
+            }
             SlashCommand::Init => {
-                run_init()?;
+                println!("{}", init_repo_kcode_md()?);
                 false
             }
             SlashCommand::Diff => {
@@ -1989,8 +2239,7 @@ impl LiveCli {
                 Self::print_skills(args.as_deref())?;
                 false
             }
-            SlashCommand::Doctor
-            | SlashCommand::Login
+            SlashCommand::Login
             | SlashCommand::Logout
             | SlashCommand::Vim
             | SlashCommand::Upgrade
@@ -2258,6 +2507,11 @@ impl LiveCli {
 
     fn print_memory() -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", render_memory_report()?);
+        Ok(())
+    }
+
+    fn print_doctor() -> Result<(), Box<dyn std::error::Error>> {
+        println!("{}", render_doctor_report()?);
         Ok(())
     }
 
@@ -3002,9 +3256,229 @@ fn print_sandbox_status_snapshot() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn print_doctor() -> Result<(), Box<dyn std::error::Error>> {
+    println!("{}", render_doctor_report()?);
+    Ok(())
+}
+
+fn print_config_show(section: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    println!("{}", render_config_report(section)?);
+    Ok(())
+}
+
+fn render_doctor_report() -> Result<String, Box<dyn std::error::Error>> {
+    let setup = load_setup_context(SetupMode::Doctor, None, default_permission_mode(), None)?;
+    Ok(render_doctor_report_from_setup(&setup))
+}
+
+fn render_doctor_report_from_setup(setup: &SetupContext) -> String {
+    let checks = doctor_checks(setup);
+    let runtime_ready = !checks
+        .iter()
+        .any(|check| check.status == DiagnosticStatus::Fail);
+    let mut lines = vec![format!(
+        "Doctor
+  Working directory {}
+  Config home      {}
+  Session dir      {}
+  Runtime ready    {}",
+        setup.cwd.display(),
+        setup.resolved_config.config_home.display(),
+        setup.resolved_config.session_dir.display(),
+        if runtime_ready { "yes" } else { "no" }
+    )];
+
+    lines.push("Checks".to_string());
+    for check in checks {
+        lines.push(format!(
+            "  [{:<4}] {:<16} {}",
+            check.status.label(),
+            check.name,
+            check.detail
+        ));
+    }
+
+    lines.push(format!(
+        "Next step        {}",
+        doctor_next_step(setup, runtime_ready)
+    ));
+    lines.join("\n")
+}
+
+fn doctor_checks(setup: &SetupContext) -> Vec<DiagnosticCheck> {
+    let config_file_path = setup.resolved_config.config_home.join("config.toml");
+    let loaded_config_path = setup
+        .resolved_config
+        .loaded_entries
+        .iter()
+        .find(|entry| {
+            entry.path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == "config.toml")
+        })
+        .map(|entry| entry.path.clone())
+        .unwrap_or(config_file_path);
+
+    let credentials_path = runtime::credentials_path().ok();
+    let credential_detail = if setup.resolved_config.api_key_present {
+        DiagnosticCheck {
+            name: "api credentials".to_string(),
+            status: DiagnosticStatus::Ok,
+            detail: format!(
+                "env `{}` is available",
+                setup.resolved_config.api_key_env
+            ),
+        }
+    } else if setup.resolved_config.oauth_credentials_present {
+        DiagnosticCheck {
+            name: "api credentials".to_string(),
+            status: DiagnosticStatus::Warn,
+            detail: format!(
+                "legacy OAuth credentials detected{}",
+                credentials_path
+                    .as_ref()
+                    .map(|path| format!(" at {}", path.display()))
+                    .unwrap_or_default()
+            ),
+        }
+    } else {
+        DiagnosticCheck {
+            name: "api credentials".to_string(),
+            status: DiagnosticStatus::Fail,
+            detail: format!(
+                "unset; export `{}` or the env named by `api_key_env`",
+                PRIMARY_API_KEY_ENV
+            ),
+        }
+    };
+
+    let legacy_detail = if setup.resolved_config.legacy_paths.is_empty() {
+        "none detected".to_string()
+    } else {
+        setup.resolved_config
+            .legacy_paths
+            .iter()
+            .take(3)
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
+    vec![
+        DiagnosticCheck {
+            name: "config file".to_string(),
+            status: if setup.resolved_config.config_file_present {
+                DiagnosticStatus::Ok
+            } else {
+                DiagnosticStatus::Fail
+            },
+            detail: if setup.resolved_config.config_file_present {
+                format!("loaded {}", loaded_config_path.display())
+            } else {
+                format!(
+                    "missing {}; run `{CLI_NAME} init` first",
+                    loaded_config_path.display()
+                )
+            },
+        },
+        DiagnosticCheck {
+            name: "model".to_string(),
+            status: DiagnosticStatus::Ok,
+            detail: setup.resolved_config.model.clone(),
+        },
+        DiagnosticCheck {
+            name: "base url".to_string(),
+            status: if setup
+                .resolved_config
+                .base_url
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            {
+                DiagnosticStatus::Ok
+            } else {
+                DiagnosticStatus::Fail
+            },
+            detail: setup
+                .resolved_config
+                .base_url
+                .clone()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| {
+                    format!(
+                        "unset; set `{PRIMARY_BASE_URL_ENV}` or `base_url` in `~/.kcode/config.toml`"
+                    )
+                }),
+        },
+        credential_detail,
+        DiagnosticCheck {
+            name: "session dir".to_string(),
+            status: if path_or_parent_writeable(&setup.resolved_config.session_dir) {
+                DiagnosticStatus::Ok
+            } else {
+                DiagnosticStatus::Fail
+            },
+            detail: if path_or_parent_writeable(&setup.resolved_config.session_dir) {
+                format!("writeable {}", setup.resolved_config.session_dir.display())
+            } else {
+                format!(
+                    "not writeable {}; adjust `session_dir` or `{PRIMARY_SESSION_DIR_ENV}`",
+                    setup.resolved_config.session_dir.display()
+                )
+            },
+        },
+        DiagnosticCheck {
+            name: "permission mode".to_string(),
+            status: DiagnosticStatus::Ok,
+            detail: setup.trust_policy.permission_mode.clone(),
+        },
+        DiagnosticCheck {
+            name: "legacy residue".to_string(),
+            status: if setup.resolved_config.legacy_paths.is_empty() {
+                DiagnosticStatus::Ok
+            } else {
+                DiagnosticStatus::Warn
+            },
+            detail: legacy_detail,
+        },
+    ]
+}
+
+fn doctor_next_step(setup: &SetupContext, runtime_ready: bool) -> String {
+    if !setup.resolved_config.config_file_present {
+        return format!(
+            "run `{CLI_NAME} init`, fill `config.toml`, then rerun `{CLI_NAME} doctor`"
+        );
+    }
+    if setup
+        .resolved_config
+        .base_url
+        .as_deref()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        return format!(
+            "set `{PRIMARY_BASE_URL_ENV}` or `base_url` in `~/.kcode/config.toml`, then rerun `{CLI_NAME} doctor`"
+        );
+    }
+    if !setup.resolved_config.api_key_present && !setup.resolved_config.oauth_credentials_present {
+        return format!(
+            "export `{PRIMARY_API_KEY_ENV}` or the env named by `api_key_env`, then rerun `{CLI_NAME} doctor`"
+        );
+    }
+    if !path_or_parent_writeable(&setup.resolved_config.session_dir) {
+        return format!(
+            "fix `session_dir` or `{PRIMARY_SESSION_DIR_ENV}` so sessions can be written"
+        );
+    }
+    if runtime_ready {
+        return format!("start `{CLI_NAME}` or run `{CLI_NAME} -p \"hello\"`");
+    }
+    "review warnings above before starting interactive sessions".to_string()
+}
+
 fn render_config_report(section: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
-    let cwd = env::current_dir()?;
-    let loader = ConfigLoader::default_for(&cwd);
+    let setup = load_setup_context(SetupMode::Config, None, default_permission_mode(), None)?;
+    let loader = ConfigLoader::default_for(&setup.cwd);
     let discovered = loader.discover();
     let runtime_config = loader.load()?;
 
@@ -3012,9 +3486,15 @@ fn render_config_report(section: Option<&str>) -> Result<String, Box<dyn std::er
         format!(
             "Config
   Working directory {}
-  Loaded files      {}
-  Merged keys       {}",
-            cwd.display(),
+  Config home      {}
+  Session dir      {}
+  Effective model  {}
+  Loaded files     {}
+  Merged keys      {}",
+            setup.cwd.display(),
+            setup.resolved_config.config_home.display(),
+            setup.resolved_config.session_dir.display(),
+            setup.resolved_config.model,
             runtime_config.loaded_entries().len(),
             runtime_config.merged().len()
         ),
@@ -3120,13 +3600,15 @@ fn render_memory_report() -> Result<String, Box<dyn std::error::Error>> {
     ))
 }
 
-fn init_kcode_md() -> Result<String, Box<dyn std::error::Error>> {
+fn init_repo_kcode_md() -> Result<String, Box<dyn std::error::Error>> {
     let cwd = env::current_dir()?;
     Ok(initialize_repo(&cwd)?.render())
 }
 
 fn run_init() -> Result<(), Box<dyn std::error::Error>> {
-    println!("{}", init_kcode_md()?);
+    let cwd = env::current_dir()?;
+    let config_home = ConfigLoader::default_for(&cwd).config_home().to_path_buf();
+    println!("{}", initialize_user_config(&config_home)?.render());
     Ok(())
 }
 
@@ -3955,6 +4437,17 @@ fn build_runtime(
     permission_mode: PermissionMode,
     progress_reporter: Option<InternalPromptProgressReporter>,
 ) -> Result<BuiltRuntime, Box<dyn std::error::Error>> {
+    let setup_context = load_setup_context(
+        if emit_output {
+            SetupMode::Interactive
+        } else {
+            SetupMode::Print
+        },
+        Some(&model),
+        permission_mode,
+        Some(session_id),
+    )?;
+    ensure_setup_ready_for_runtime(&setup_context)?;
     let runtime_plugin_state = build_runtime_plugin_state()?;
     build_runtime_with_plugin_state(
         session,
@@ -3966,6 +4459,7 @@ fn build_runtime(
         allowed_tools,
         permission_mode,
         progress_reporter,
+        &setup_context,
         runtime_plugin_state,
     )
 }
@@ -3982,6 +4476,7 @@ fn build_runtime_with_plugin_state(
     allowed_tools: Option<AllowedToolSet>,
     permission_mode: PermissionMode,
     progress_reporter: Option<InternalPromptProgressReporter>,
+    setup_context: &SetupContext,
     runtime_plugin_state: RuntimePluginState,
 ) -> Result<BuiltRuntime, Box<dyn std::error::Error>> {
     let RuntimePluginState {
@@ -4000,6 +4495,7 @@ fn build_runtime_with_plugin_state(
             allowed_tools.clone(),
             tool_registry.clone(),
             progress_reporter,
+            setup_context,
         )?,
         CliToolExecutor::new(allowed_tools.clone(), emit_output, tool_registry.clone()),
         permission_policy(permission_mode, &feature_config, &tool_registry)
@@ -4115,11 +4611,12 @@ impl AnthropicRuntimeClient {
         allowed_tools: Option<AllowedToolSet>,
         tool_registry: GlobalToolRegistry,
         progress_reporter: Option<InternalPromptProgressReporter>,
+        setup_context: &SetupContext,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         Ok(Self {
             runtime: tokio::runtime::Runtime::new()?,
-            client: AnthropicClient::from_auth(resolve_cli_auth_source()?)
-                .with_base_url(api::read_base_url())
+            client: AnthropicClient::from_auth(resolve_cli_auth_source(setup_context)?)
+                .with_base_url(resolve_cli_base_url(setup_context))
                 .with_prompt_cache(PromptCache::new(session_id)),
             model,
             enable_tools,
@@ -4131,7 +4628,20 @@ impl AnthropicRuntimeClient {
     }
 }
 
-fn resolve_cli_auth_source() -> Result<AuthSource, Box<dyn std::error::Error>> {
+fn resolve_cli_base_url(setup: &SetupContext) -> String {
+    setup.resolved_config.base_url.clone().unwrap_or_else(api::read_base_url)
+}
+
+fn resolve_cli_auth_source(setup: &SetupContext) -> Result<AuthSource, Box<dyn std::error::Error>> {
+    if let Some(api_key) = read_non_empty_env(PRIMARY_API_KEY_ENV) {
+        return Ok(AuthSource::ApiKey(api_key));
+    }
+    let configured_env = setup.resolved_config.api_key_env.as_str();
+    if configured_env != PRIMARY_API_KEY_ENV {
+        if let Some(api_key) = read_non_empty_env(configured_env) {
+            return Ok(AuthSource::ApiKey(api_key));
+        }
+    }
     Ok(resolve_startup_auth_source(|| {
         let cwd = env::current_dir().map_err(api::ApiError::from)?;
         let config = ConfigLoader::default_for(&cwd).load().map_err(|error| {
@@ -5172,6 +5682,8 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "  {CLI_NAME} /skills")?;
     writeln!(out, "  {CLI_NAME} login")?;
     writeln!(out, "  {CLI_NAME} init")?;
+    writeln!(out, "  {CLI_NAME} doctor")?;
+    writeln!(out, "  {CLI_NAME} config show")?;
     Ok(())
 }
 
@@ -5193,9 +5705,9 @@ mod tests {
         format_unknown_slash_command_message, normalize_permission_mode, parse_args,
         parse_git_status_branch, parse_git_status_metadata_for, parse_git_workspace_summary,
         permission_policy, print_help_to, push_output_block, render_config_report,
-        render_diff_report, render_memory_report, render_repl_help, render_resume_usage,
-        resolve_model_alias, resolve_session_reference, response_to_events,
-        resume_supported_slash_commands, run_resume_command,
+        render_diff_report, render_doctor_report_from_setup, render_memory_report,
+        render_repl_help, render_resume_usage, resolve_model_alias, resolve_session_reference,
+        response_to_events, resume_supported_slash_commands, run_resume_command,
         slash_command_completion_candidates_with_sessions, status_context, validate_no_args,
         CliAction, CliOutputFormat, GitWorkspaceSummary, InternalPromptProgressEvent,
         InternalPromptProgressState, LiveCli, SlashCommand, StatusUsage, DEFAULT_MODEL,
@@ -5274,6 +5786,43 @@ mod tests {
         let result = f();
         std::env::set_current_dir(previous).expect("cwd should restore");
         result
+    }
+
+    fn test_setup_context(workspace: &Path) -> runtime::SetupContext {
+        runtime::SetupContext {
+            inputs: runtime::BootstrapInputs {
+                argv: vec!["kcode".to_string(), "doctor".to_string()],
+                cwd: workspace.to_path_buf(),
+                platform: "linux".to_string(),
+                stdio_mode: runtime::StdioMode::NonInteractive,
+                invocation_kind: runtime::SetupMode::Doctor,
+            },
+            session_id: None,
+            cwd: workspace.to_path_buf(),
+            project_root: workspace.to_path_buf(),
+            git_root: None,
+            resolved_config: runtime::ResolvedConfig {
+                config_home: workspace.join(".kcode"),
+                session_dir: workspace.join(".kcode").join("sessions"),
+                discovered_entries: Vec::new(),
+                loaded_entries: Vec::new(),
+                config_file_present: false,
+                model: DEFAULT_MODEL.to_string(),
+                base_url: None,
+                api_key_env: "KCODE_API_KEY".to_string(),
+                api_key_present: false,
+                oauth_credentials_present: false,
+                profile: None,
+                legacy_paths: Vec::new(),
+            },
+            trust_policy: runtime::TrustPolicyContext {
+                permission_mode: "danger-full-access".to_string(),
+                workspace_writeable: true,
+                config_home_writeable: true,
+                trusted_workspace: true,
+            },
+            mode: runtime::SetupMode::Doctor,
+        }
     }
 
     fn write_plugin_fixture(root: &Path, name: &str, include_hooks: bool, include_lifecycle: bool) {
@@ -5551,6 +6100,26 @@ mod tests {
         assert_eq!(
             parse_args(&["init".to_string()]).expect("init should parse"),
             CliAction::Init
+        );
+        assert_eq!(
+            parse_args(&["doctor".to_string()]).expect("doctor should parse"),
+            CliAction::Doctor
+        );
+        assert_eq!(
+            parse_args(&["config".to_string(), "show".to_string()])
+                .expect("config show should parse"),
+            CliAction::ConfigShow { section: None }
+        );
+        assert_eq!(
+            parse_args(&[
+                "config".to_string(),
+                "show".to_string(),
+                "plugins".to_string(),
+            ])
+            .expect("config section should parse"),
+            CliAction::ConfigShow {
+                section: Some("plugins".to_string())
+            }
         );
         assert_eq!(
             parse_args(&["agents".to_string()]).expect("agents should parse"),
@@ -6193,8 +6762,53 @@ mod tests {
     fn config_report_uses_sectioned_layout() {
         let report = render_config_report(None).expect("config report should render");
         assert!(report.contains("Config"));
+        assert!(report.contains("Config home"));
         assert!(report.contains("Discovered files"));
         assert!(report.contains("Merged JSON"));
+    }
+
+    #[test]
+    fn doctor_report_surfaces_missing_bootstrap_state() {
+        let root = temp_dir();
+        fs::create_dir_all(&root).expect("root dir");
+        let report = render_doctor_report_from_setup(&test_setup_context(&root));
+        assert!(report.contains("Doctor"));
+        assert!(report.contains("Runtime ready    no"));
+        assert!(report.contains("[fail] config file"));
+        assert!(report.contains("[fail] base url"));
+        assert!(report.contains("[fail] api credentials"));
+        assert!(report.contains("run `kcode init`"));
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn doctor_report_warns_about_legacy_residue() {
+        let root = temp_dir();
+        let workspace = root.join("workspace");
+        fs::create_dir_all(workspace.join(".kcode")).expect("config dir");
+        fs::create_dir_all(workspace.join(".kcode").join("sessions")).expect("sessions dir");
+
+        let mut setup = test_setup_context(&workspace);
+        setup.resolved_config.config_file_present = true;
+        setup.resolved_config.base_url = Some("https://router.example.test".to_string());
+        setup.resolved_config.api_key_present = true;
+        setup.resolved_config.legacy_paths = vec![workspace.join(".claw").join("settings.json")];
+
+        let report = render_doctor_report_from_setup(&setup);
+        assert!(report.contains("Runtime ready    yes"));
+        assert!(report.contains("[warn] legacy residue"));
+        assert!(report.contains(".claw/settings.json"));
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn nested_session_dir_can_use_existing_workspace_ancestor_for_writeability() {
+        let root = temp_dir();
+        fs::create_dir_all(&root).expect("root dir");
+        let nested = root.join(".kcode").join("sessions");
+        assert!(super::path_or_parent_writeable(&nested));
+        fs::remove_dir_all(root).expect("cleanup temp dir");
     }
 
     #[test]
@@ -6538,8 +7152,8 @@ UU conflicted.rs",
 
     #[test]
     fn init_template_mentions_detected_rust_workspace() {
-        let rendered = crate::init::render_init_claude_md(std::path::Path::new("."));
-        assert!(rendered.contains("# CLAUDE.md"));
+        let rendered = crate::init::render_init_kcode_md(std::path::Path::new("."));
+        assert!(rendered.contains("# KCODE.md"));
         assert!(rendered.contains("cargo clippy --workspace --all-targets -- -D warnings"));
     }
 
@@ -6962,6 +7576,7 @@ UU conflicted.rs",
             None,
             PermissionMode::DangerFullAccess,
             None,
+            &test_setup_context(&workspace),
             runtime_plugin_state,
         )
         .expect("runtime should build");

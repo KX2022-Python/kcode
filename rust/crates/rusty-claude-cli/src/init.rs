@@ -8,6 +8,17 @@ const STARTER_KCODE_JSON: &str = concat!(
     "  }\n",
     "}\n",
 );
+const STARTER_CONFIG_TOML: &str = concat!(
+    "# Kcode bootstrap configuration\n",
+    "# Fill these values before running prompt or interactive sessions.\n",
+    "\n",
+    "profile = \"default\"\n",
+    "model = \"claude-sonnet-4-6\"\n",
+    "base_url = \"\"\n",
+    "api_key_env = \"KCODE_API_KEY\"\n",
+    "permission_mode = \"workspace-write\"\n",
+    "session_dir = \".kcode/sessions\"\n",
+);
 const GITIGNORE_COMMENT: &str = "# Kcode local artifacts";
 const GITIGNORE_ENTRIES: [&str; 2] = [".kcode/settings.local.json", ".kcode/sessions/"];
 
@@ -60,6 +71,31 @@ impl InitReport {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct UserConfigInitReport {
+    pub(crate) config_home: PathBuf,
+    pub(crate) artifacts: Vec<InitArtifact>,
+}
+
+impl UserConfigInitReport {
+    #[must_use]
+    pub(crate) fn render(&self) -> String {
+        let mut lines = vec![
+            "Init".to_string(),
+            format!("  Config home      {}", self.config_home.display()),
+        ];
+        for artifact in &self.artifacts {
+            lines.push(format!(
+                "  {:<16} {}",
+                artifact.name,
+                artifact.status.label()
+            ));
+        }
+        lines.push("  Next step        Set KCODE_API_KEY, review config.toml, then run `kcode doctor`".to_string());
+        lines.join("\n")
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)]
 struct RepoDetection {
@@ -107,6 +143,37 @@ pub(crate) fn initialize_repo(cwd: &Path) -> Result<InitReport, Box<dyn std::err
 
     Ok(InitReport {
         project_root: cwd.to_path_buf(),
+        artifacts,
+    })
+}
+
+pub(crate) fn initialize_user_config(
+    config_home: &Path,
+) -> Result<UserConfigInitReport, Box<dyn std::error::Error>> {
+    let mut artifacts = Vec::new();
+
+    artifacts.push(InitArtifact {
+        name: ".kcode/",
+        status: ensure_dir(config_home)?,
+    });
+
+    artifacts.push(InitArtifact {
+        name: "config.toml",
+        status: write_file_if_missing(&config_home.join("config.toml"), STARTER_CONFIG_TOML)?,
+    });
+
+    artifacts.push(InitArtifact {
+        name: "sessions/",
+        status: ensure_dir(&config_home.join("sessions"))?,
+    });
+
+    artifacts.push(InitArtifact {
+        name: "logs/",
+        status: ensure_dir(&config_home.join("logs"))?,
+    });
+
+    Ok(UserConfigInitReport {
+        config_home: config_home.to_path_buf(),
         artifacts,
     })
 }

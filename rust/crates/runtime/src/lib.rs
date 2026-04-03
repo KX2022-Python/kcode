@@ -19,7 +19,10 @@ mod sse;
 mod usage;
 
 pub use bash::{execute_bash, BashCommandInput, BashCommandOutput};
-pub use bootstrap::{BootstrapPhase, BootstrapPlan};
+pub use bootstrap::{
+    is_path_effectively_writeable, BootstrapInputs, BootstrapPhase, BootstrapPlan, DiagnosticCheck,
+    DiagnosticStatus, ResolvedConfig, SetupContext, SetupMode, StdioMode, TrustPolicyContext,
+};
 pub use compact::{
     compact_session, estimate_session_tokens, format_compact_summary,
     get_compact_continuation_message, should_compact, CompactionConfig, CompactionResult,

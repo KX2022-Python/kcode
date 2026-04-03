@@ -37,6 +37,29 @@ fn status_command_applies_model_and_permission_mode_flags() {
 }
 
 #[test]
+fn init_command_bootstraps_user_config_home() {
+    let temp_dir = unique_temp_dir("init-bootstrap");
+    let config_home = temp_dir.join("home").join(".kcode");
+    fs::create_dir_all(&temp_dir).expect("temp dir should exist");
+
+    let output = command_in(&temp_dir)
+        .env("KCODE_CONFIG_HOME", &config_home)
+        .arg("init")
+        .output()
+        .expect("kcode should launch");
+
+    assert_success(&output);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    assert!(stdout.contains("Init"));
+    assert!(stdout.contains("Config home"));
+    assert!(config_home.join("config.toml").is_file());
+    assert!(config_home.join("sessions").is_dir());
+    assert!(config_home.join("logs").is_dir());
+
+    fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
+}
+
+#[test]
 fn resume_flag_loads_a_saved_session_and_dispatches_status() {
     // given
     let temp_dir = unique_temp_dir("resume-status");
@@ -135,7 +158,8 @@ fn config_command_loads_defaults_from_standard_config_locations() {
     assert_success(&output);
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
     assert!(stdout.contains("Config"));
-    assert!(stdout.contains("Loaded files      3"));
+    assert!(stdout.contains("Config home"));
+    assert!(stdout.contains("Loaded files"));
     assert!(stdout.contains("Merged section: model"));
     assert!(stdout.contains("opus"));
     assert!(stdout.contains(
@@ -152,6 +176,38 @@ fn config_command_loads_defaults_from_standard_config_locations() {
             .to_str()
             .expect("utf8 path")
     ));
+
+    fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
+}
+
+#[test]
+fn doctor_command_reports_bootstrap_gaps_without_oauth_login() {
+    let temp_dir = unique_temp_dir("doctor-bootstrap");
+    let config_home = temp_dir.join("home").join(".kcode");
+    fs::create_dir_all(&config_home).expect("config home should exist");
+    fs::write(
+        config_home.join("config.toml"),
+        r#"
+model = "claude-sonnet-4-6"
+base_url = ""
+api_key_env = "KCODE_API_KEY"
+"#,
+    )
+    .expect("write config");
+
+    let output = command_in(&temp_dir)
+        .env("KCODE_CONFIG_HOME", &config_home)
+        .arg("doctor")
+        .output()
+        .expect("kcode should launch");
+
+    assert_success(&output);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    assert!(stdout.contains("Doctor"));
+    assert!(stdout.contains("Runtime ready    no"));
+    assert!(stdout.contains("[ok  ] config file"));
+    assert!(stdout.contains("[fail] base url"));
+    assert!(stdout.contains("[fail] api credentials"));
 
     fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
 }

@@ -14,6 +14,7 @@ const KCODE_CONFIG_DIR_NAME: &str = ".kcode";
 const CLAW_CONFIG_DIR_NAME: &str = ".claw";
 const KCODE_CONFIG_JSON_NAME: &str = ".kcode.json";
 const CLAW_CONFIG_JSON_NAME: &str = ".claw.json";
+const CONFIG_TOML_NAME: &str = "config.toml";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ConfigSource {
@@ -237,6 +238,11 @@ impl ConfigLoader {
         );
         push_unique_config_entry(
             &mut entries,
+            ConfigSource::User,
+            self.config_home.join(CONFIG_TOML_NAME),
+        );
+        push_unique_config_entry(
+            &mut entries,
             ConfigSource::Project,
             self.cwd.join(CLAW_CONFIG_JSON_NAME),
         );
@@ -257,6 +263,11 @@ impl ConfigLoader {
         );
         push_unique_config_entry(
             &mut entries,
+            ConfigSource::Project,
+            self.cwd.join(KCODE_CONFIG_DIR_NAME).join(CONFIG_TOML_NAME),
+        );
+        push_unique_config_entry(
+            &mut entries,
             ConfigSource::Local,
             self.cwd.join(CLAW_CONFIG_DIR_NAME).join("settings.local.json"),
         );
@@ -273,12 +284,18 @@ impl ConfigLoader {
         let mut merged = BTreeMap::new();
         let mut loaded_entries = Vec::new();
         let mut mcp_servers = BTreeMap::new();
+        let mut resolved_permission_mode = None;
 
         for entry in self.discover() {
             let Some(value) = read_optional_json_object(&entry.path)? else {
                 continue;
             };
             merge_mcp_servers(&mut mcp_servers, entry.source, &value, &entry.path)?;
+            if let Some(permission_mode) =
+                parse_optional_permission_mode(&JsonValue::Object(value.clone()))?
+            {
+                resolved_permission_mode = Some(permission_mode);
+            }
             deep_merge_objects(&mut merged, &value);
             loaded_entries.push(entry);
         }
@@ -293,7 +310,7 @@ impl ConfigLoader {
             },
             oauth: parse_optional_oauth_config(&merged_value, "merged settings.oauth")?,
             model: parse_optional_model(&merged_value),
-            permission_mode: parse_optional_permission_mode(&merged_value)?,
+            permission_mode: resolved_permission_mode,
             permission_rules: parse_optional_permission_rules(&merged_value)?,
             sandbox: parse_optional_sandbox_config(&merged_value)?,
         };
@@ -618,6 +635,7 @@ fn read_optional_json_object(
     path: &Path,
 ) -> Result<Option<BTreeMap<String, JsonValue>>, ConfigError> {
     let is_legacy_config = path.file_name().and_then(|name| name.to_str()) == Some(".claw.json");
+    let is_toml_config = path.file_name().and_then(|name| name.to_str()) == Some(CONFIG_TOML_NAME);
     let contents = match fs::read_to_string(path) {
         Ok(contents) => contents,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -628,7 +646,11 @@ fn read_optional_json_object(
         return Ok(Some(BTreeMap::new()));
     }
 
-    let parsed = match JsonValue::parse(&contents) {
+    let parsed = match if is_toml_config {
+        parse_toml_object(&contents)
+    } else {
+        JsonValue::parse(&contents)
+    } {
         Ok(parsed) => parsed,
         Err(_error) if is_legacy_config => return Ok(None),
         Err(error) => return Err(ConfigError::Parse(format!("{}: {error}", path.display()))),
@@ -643,6 +665,38 @@ fn read_optional_json_object(
         )));
     };
     Ok(Some(object.clone()))
+}
+
+fn parse_toml_object(source: &str) -> Result<JsonValue, crate::json::JsonError> {
+    let parsed = source
+        .parse::<toml::Value>()
+        .map_err(|error| crate::json::JsonError::new(error.to_string()))?;
+    toml_value_to_json_value(parsed)
+}
+
+fn toml_value_to_json_value(value: toml::Value) -> Result<JsonValue, crate::json::JsonError> {
+    Ok(match value {
+        toml::Value::String(value) => JsonValue::String(value),
+        toml::Value::Integer(value) => JsonValue::Number(
+            i64::try_from(value)
+                .map_err(|_| crate::json::JsonError::new("toml integer out of range"))?,
+        ),
+        toml::Value::Float(value) => JsonValue::String(value.to_string()),
+        toml::Value::Boolean(value) => JsonValue::Bool(value),
+        toml::Value::Datetime(value) => JsonValue::String(value.to_string()),
+        toml::Value::Array(values) => JsonValue::Array(
+            values
+                .into_iter()
+                .map(toml_value_to_json_value)
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+        toml::Value::Table(entries) => JsonValue::Object(
+            entries
+                .into_iter()
+                .map(|(key, value)| toml_value_to_json_value(value).map(|value| (key, value)))
+                .collect::<Result<BTreeMap<_, _>, _>>()?,
+        ),
+    })
 }
 
 fn merge_mcp_servers(
@@ -757,13 +811,21 @@ fn parse_optional_permission_mode(
     let Some(object) = root.as_object() else {
         return Ok(None);
     };
-    if let Some(mode) = object.get("permissionMode").and_then(JsonValue::as_str) {
+    if let Some(mode) = object
+        .get("permissionMode")
+        .or_else(|| object.get("permission_mode"))
+        .and_then(JsonValue::as_str)
+    {
         return parse_permission_mode_label(mode, "merged settings.permissionMode").map(Some);
     }
     let Some(mode) = object
         .get("permissions")
         .and_then(JsonValue::as_object)
-        .and_then(|permissions| permissions.get("defaultMode"))
+        .and_then(|permissions| {
+            permissions
+                .get("defaultMode")
+                .or_else(|| permissions.get("default_mode"))
+        })
         .and_then(JsonValue::as_str)
     else {
         return Ok(None);
@@ -1359,6 +1421,52 @@ mod tests {
         assert_eq!(oauth.client_id, "runtime-client");
         assert_eq!(oauth.callback_port, Some(54_545));
         assert_eq!(oauth.scopes, vec!["org:read", "user:write"]);
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn loads_kcode_toml_config_files() {
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let home = root.join("home").join(".kcode");
+        fs::create_dir_all(cwd.join(".kcode")).expect("project config dir");
+        fs::create_dir_all(&home).expect("home config dir");
+
+        fs::write(
+            home.join("config.toml"),
+            r#"
+model = "sonnet"
+base_url = "https://router.example.test"
+permission_mode = "workspace-write"
+"#,
+        )
+        .expect("write user config");
+        fs::write(
+            cwd.join(".kcode").join("config.toml"),
+            r#"
+model = "opus"
+[permissions]
+default_mode = "read-only"
+"#,
+        )
+        .expect("write project config");
+
+        let loaded = ConfigLoader::new(&cwd, &home)
+            .load()
+            .expect("config should load");
+
+        assert_eq!(loaded.model(), Some("opus"));
+        assert_eq!(
+            loaded.get("base_url"),
+            Some(&JsonValue::String(
+                "https://router.example.test".to_string()
+            ))
+        );
+        assert_eq!(
+            loaded.permission_mode(),
+            Some(ResolvedPermissionMode::ReadOnly)
+        );
 
         fs::remove_dir_all(root).expect("cleanup temp dir");
     }
