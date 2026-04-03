@@ -4,6 +4,9 @@ use std::fmt::{Display, Formatter};
 use serde_json::{Map, Value};
 use telemetry::SessionTracer;
 
+use std::thread;
+use std::time::Duration;
+
 use crate::compact::{
     compact_session, estimate_session_tokens, CompactionConfig, CompactionFailureTracker,
     CompactionResult,
@@ -347,9 +350,37 @@ where
                 system_prompt: self.system_prompt.clone(),
                 messages: self.session.messages.clone(),
             };
-            let events = match self.api_client.stream(request) {
-                Ok(events) => events,
-                Err(error) => {
+
+            // Retry API call with exponential backoff (max 3 attempts)
+            let mut last_error = None;
+            let mut api_result = None;
+            let max_attempts = 3;
+
+            for attempt in 0..max_attempts {
+                match self.api_client.stream(request.clone()) {
+                    Ok(events) => {
+                        if attempt > 0 {
+                            eprintln!("[kcode] API call succeeded after {} retries", attempt);
+                        }
+                        api_result = Some(events);
+                        break;
+                    }
+                    Err(error) => {
+                        last_error = Some(error);
+                        if attempt + 1 < max_attempts {
+                            let backoff = Duration::from_millis(200 * (1 << attempt));
+                            thread::sleep(backoff);
+                        }
+                    }
+                }
+            }
+
+            let events = match api_result {
+                Some(events) => events,
+                None => {
+                    let error = last_error.unwrap_or_else(|| {
+                        RuntimeError::new("API call failed after retries")
+                    });
                     self.record_turn_failed(iterations, &error);
                     return Err(error);
                 }
