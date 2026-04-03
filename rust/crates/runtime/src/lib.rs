@@ -61,9 +61,9 @@ pub use mcp::{
     scoped_mcp_config_hash, unwrap_ccr_proxy_url,
 };
 pub use memory::{
-    create_memory, default_memory_dir, default_memory_index, ensure_memory_dir,
+    create_memory, default_memory_dir, default_memory_index, delete_memory, ensure_memory_dir,
     ensure_memory_index, list_memories, load_user_memories, read_memory, render_memory_summary,
-    MemoryEntry, MemoryError, MemoryIndexEntry, MemoryType,
+    update_memory, MemoryEntry, MemoryError, MemoryIndexEntry, MemoryType,
 };
 pub use memory_extraction::{
     extract_memory_from_session, MemoryExtractionState,

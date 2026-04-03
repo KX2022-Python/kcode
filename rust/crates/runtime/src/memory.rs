@@ -176,6 +176,63 @@ pub fn create_memory(
     Ok(file_path)
 }
 
+/// Update an existing memory file. Creates it if it doesn't exist.
+/// If the memory exists, only updates description and body (preserves name and type).
+pub fn update_memory(
+    dir: &Path,
+    name: &str,
+    description: &str,
+    body: &str,
+) -> Result<PathBuf, MemoryError> {
+    ensure_memory_dir(dir)?;
+
+    let file_name = format!("{name}.{MEMORY_FILE_EXT}");
+    let file_path = dir.join(&file_name);
+
+    // If exists, read current type to preserve it
+    let memory_type = if file_path.exists() {
+        let existing = parse_memory_frontmatter(&file_path)?;
+        existing.memory_type
+    } else {
+        MemoryType::Project
+    };
+
+    let content = format_memory_file(name, description, &memory_type, body);
+    atomic_write(&file_path, &content)?;
+    set_file_permissions(&file_path, 0o600)?;
+
+    update_memory_index(dir, name, description, &memory_type, &file_name)?;
+
+    Ok(file_path)
+}
+
+/// Delete a memory file by name.
+pub fn delete_memory(dir: &Path, name: &str) -> Result<(), MemoryError> {
+    let file_name = format!("{name}.{MEMORY_FILE_EXT}");
+    let file_path = dir.join(&file_name);
+
+    if file_path.exists() {
+        fs::remove_file(&file_path).map_err(MemoryError::Io)?;
+    }
+
+    // Remove from index
+    let index_path = dir.join(MEMORY_INDEX_NAME);
+    if index_path.exists() {
+        let content = fs::read_to_string(&index_path).map_err(MemoryError::Io)?;
+        let updated: Vec<String> = content
+            .lines()
+            .filter(|line| !line.contains(&format!("[{name}]")))
+            .map(String::from)
+            .collect();
+        let new_content = updated.join("\n");
+        if !new_content.is_empty() {
+            atomic_write(&index_path, &new_content)?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Update the memory index file with a new entry.
 fn update_memory_index(
     dir: &Path,
