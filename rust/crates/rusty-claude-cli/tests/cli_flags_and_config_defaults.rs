@@ -161,6 +161,50 @@ fn slash_command_names_match_known_commands_and_suggest_nearby_unknown_ones() {
 }
 
 #[test]
+fn help_command_hides_tooling_for_toolless_profile() {
+    let temp_dir = unique_temp_dir("help-toolless-profile");
+    let config_home = temp_dir.join("home").join(".kcode");
+    fs::create_dir_all(&config_home).expect("config home should exist");
+    fs::write(
+        config_home.join("config.toml"),
+        r#"
+profile = "bridge"
+model = "gpt-4.1-mini"
+
+[profiles.bridge]
+default_model = "gpt-4.1-mini"
+base_url_env = "BRIDGE_BASE_URL"
+api_key_env = "BRIDGE_API_KEY"
+supports_tools = false
+supports_streaming = false
+"#,
+    )
+    .expect("write config");
+
+    let output = command_in(&temp_dir)
+        .env("KCODE_CONFIG_HOME", &config_home)
+        .arg("--help")
+        .output()
+        .expect("kcode should launch");
+
+    assert_success(&output);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    let resume_line = stdout
+        .lines()
+        .find(|line| line.starts_with("Resume-safe commands:"))
+        .expect("resume-safe commands line");
+    assert!(!stdout.contains("--allowedTools"));
+    assert!(!stdout.contains("kcode mcp"));
+    assert!(!stdout.contains("kcode mcp show my-server"));
+    assert!(!stdout.contains("/mcp [list|show <server>|help]"));
+    assert!(!resume_line.contains("/mcp"));
+    assert!(stdout.contains("kcode commands [show [local|bridge]]"));
+    assert!(stdout.contains("/status"));
+
+    fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
+}
+
+#[test]
 fn config_command_loads_defaults_from_standard_config_locations() {
     // given
     let temp_dir = unique_temp_dir("config-defaults");
@@ -487,6 +531,49 @@ supports_streaming = false
     assert!(stdout.contains("Status"));
     assert!(stdout.contains("Profile          cliproxyapi"));
     assert!(stdout.contains("Profile source   cli"));
+
+    fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
+}
+
+#[test]
+fn cli_profile_override_reenables_help_tooling_for_tool_capable_profiles() {
+    let temp_dir = unique_temp_dir("help-override");
+    let config_home = temp_dir.join("home").join(".kcode");
+    fs::create_dir_all(&config_home).expect("config home should exist");
+    fs::write(
+        config_home.join("config.toml"),
+        r#"
+profile = "bridge"
+model = "gpt-4.1-mini"
+
+[profiles.bridge]
+default_model = "gpt-4.1-mini"
+base_url_env = "BRIDGE_BASE_URL"
+api_key_env = "BRIDGE_API_KEY"
+supports_tools = false
+supports_streaming = false
+"#,
+    )
+    .expect("write config");
+
+    let output = command_in(&temp_dir)
+        .env("KCODE_CONFIG_HOME", &config_home)
+        .env_remove("KCODE_PROFILE")
+        .args(["--profile", "cliproxyapi", "--help"])
+        .output()
+        .expect("kcode should launch");
+
+    assert_success(&output);
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    let resume_line = stdout
+        .lines()
+        .find(|line| line.starts_with("Resume-safe commands:"))
+        .expect("resume-safe commands line");
+    assert!(stdout.contains("--allowedTools"));
+    assert!(stdout.contains("kcode mcp"));
+    assert!(stdout.contains("kcode mcp show my-server"));
+    assert!(stdout.contains("/mcp [list|show <server>|help]"));
+    assert!(resume_line.contains("/mcp"));
 
     fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
 }

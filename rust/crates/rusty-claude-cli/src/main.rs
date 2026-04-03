@@ -215,7 +215,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             allowed_tools,
             permission_mode,
         )?,
-        CliAction::Help => print_help(),
+        CliAction::Help { profile } => print_help(profile.as_deref()),
     }
     Ok(())
 }
@@ -291,7 +291,9 @@ enum CliAction {
         permission_mode: PermissionMode,
     },
     // prompt-mode formatting is only supported for non-interactive runs
-    Help,
+    Help {
+        profile: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -482,7 +484,9 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
     }
 
     if wants_help {
-        return Ok(CliAction::Help);
+        return Ok(CliAction::Help {
+            profile: profile.clone(),
+        });
     }
 
     if wants_version {
@@ -576,7 +580,9 @@ fn parse_single_word_command_alias(
     }
 
     match rest[0].as_str() {
-        "help" => Some(Ok(CliAction::Help)),
+        "help" => Some(Ok(CliAction::Help {
+            profile: profile.map(ToOwned::to_owned),
+        })),
         "version" => Some(Ok(CliAction::Version)),
         "doctor" => Some(Ok(CliAction::Doctor {
             model: model.to_string(),
@@ -723,7 +729,7 @@ fn parse_direct_slash_cli_action(
 ) -> Result<CliAction, String> {
     let raw = rest.join(" ");
     match SlashCommand::parse(&raw) {
-        Ok(Some(SlashCommand::Help)) => Ok(CliAction::Help),
+        Ok(Some(SlashCommand::Help)) => Ok(CliAction::Help { profile }),
         Ok(Some(SlashCommand::Agents { args })) => Ok(CliAction::Agents { args }),
         Ok(Some(SlashCommand::Mcp { action, target })) => Ok(CliAction::Mcp {
             args: match (action, target) {
@@ -6503,15 +6509,46 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
         .collect()
 }
 
+fn help_profile_supports_tools(profile_override: Option<&str>) -> bool {
+    load_setup_context(
+        SetupMode::Config,
+        None,
+        profile_override,
+        default_permission_mode(),
+        None,
+    )
+    .map(|setup| setup.active_profile.profile.supports_tools)
+    .unwrap_or(true)
+}
+
 #[allow(clippy::too_many_lines)]
-fn print_help_to(out: &mut impl Write) -> io::Result<()> {
+fn print_help_to_for_profile(out: &mut impl Write, profile_supports_tools: bool) -> io::Result<()> {
+    let context =
+        CommandRegistryContext::for_surface(CommandSurface::CliLocal, profile_supports_tools);
+    let snapshot = build_command_registry_snapshot(&context, &[]);
+    let mcp_available = snapshot
+        .process_commands
+        .iter()
+        .any(|descriptor| descriptor.name == "mcp");
+    let resume_commands = snapshot
+        .session_commands
+        .iter()
+        .filter(|descriptor| descriptor.resume_supported)
+        .map(command_descriptor_usage)
+        .collect::<Vec<_>>()
+        .join(", ");
+
     writeln!(out, "{CLI_NAME} v{VERSION}")?;
     writeln!(out)?;
     writeln!(out, "Usage:")?;
-    writeln!(
-        out,
-        "  {CLI_NAME} [--model MODEL] [--profile PROFILE] [--allowedTools TOOL[,TOOL...]]"
-    )?;
+    if profile_supports_tools {
+        writeln!(
+            out,
+            "  {CLI_NAME} [--model MODEL] [--profile PROFILE] [--allowedTools TOOL[,TOOL...]]"
+        )?;
+    } else {
+        writeln!(out, "  {CLI_NAME} [--model MODEL] [--profile PROFILE]")?;
+    }
     writeln!(out, "      Start the interactive REPL")?;
     writeln!(
         out,
@@ -6543,7 +6580,9 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(out, "  {CLI_NAME} sandbox")?;
     writeln!(out, "      Show the current sandbox isolation snapshot")?;
     writeln!(out, "  {CLI_NAME} agents")?;
-    writeln!(out, "  {CLI_NAME} mcp")?;
+    if mcp_available {
+        writeln!(out, "  {CLI_NAME} mcp")?;
+    }
     writeln!(out, "  {CLI_NAME} skills")?;
     writeln!(out, "  {CLI_NAME} commands [show [local|bridge]]")?;
     writeln!(out, "  {CLI_NAME} profile [list|show [name]]")?;
@@ -6576,23 +6615,20 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
         out,
         "  --dangerously-skip-permissions  Skip all permission checks"
     )?;
-    writeln!(out, "  --allowedTools TOOLS       Restrict enabled tools (repeatable; comma-separated aliases supported)")?;
+    if profile_supports_tools {
+        writeln!(
+            out,
+            "  --allowedTools TOOLS       Restrict enabled tools (repeatable; comma-separated aliases supported)"
+        )?;
+    }
     writeln!(
         out,
         "  --version, -V              Print version and build information locally"
     )?;
     writeln!(out)?;
     writeln!(out, "Interactive slash commands:")?;
-    writeln!(out, "{}", render_slash_command_help())?;
+    writeln!(out, "{}", render_slash_command_help_for_context(&context))?;
     writeln!(out)?;
-    let resume_commands = resume_supported_slash_commands()
-        .into_iter()
-        .map(|spec| match spec.argument_hint {
-            Some(argument_hint) => format!("/{} {}", spec.name, argument_hint),
-            None => format!("/{}", spec.name),
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
     writeln!(out, "Resume-safe commands: {resume_commands}")?;
     writeln!(out)?;
     writeln!(out, "Session shortcuts:")?;
@@ -6617,17 +6653,21 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
         out,
         "  {CLI_NAME} --output-format json prompt \"explain src/main.rs\""
     )?;
-    writeln!(
-        out,
-        "  {CLI_NAME} --allowedTools read,glob \"summarize Cargo.toml\""
-    )?;
+    if profile_supports_tools {
+        writeln!(
+            out,
+            "  {CLI_NAME} --allowedTools read,glob \"summarize Cargo.toml\""
+        )?;
+    }
     writeln!(out, "  {CLI_NAME} --resume {LATEST_SESSION_REFERENCE}")?;
     writeln!(
         out,
         "  {CLI_NAME} --resume {LATEST_SESSION_REFERENCE} /status /diff /export notes.txt"
     )?;
     writeln!(out, "  {CLI_NAME} agents")?;
-    writeln!(out, "  {CLI_NAME} mcp show my-server")?;
+    if mcp_available {
+        writeln!(out, "  {CLI_NAME} mcp show my-server")?;
+    }
     writeln!(out, "  {CLI_NAME} commands show bridge")?;
     writeln!(out, "  {CLI_NAME} profile show nvidia")?;
     writeln!(out, "  {CLI_NAME} profile list")?;
@@ -6638,8 +6678,19 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     Ok(())
 }
 
-fn print_help() {
-    let _ = print_help_to(&mut io::stdout());
+fn print_help_to(out: &mut impl Write) -> io::Result<()> {
+    print_help_to_for_profile(out, true)
+}
+
+fn print_help_to_with_profile_override(
+    out: &mut impl Write,
+    profile_override: Option<&str>,
+) -> io::Result<()> {
+    print_help_to_for_profile(out, help_profile_supports_tools(profile_override))
+}
+
+fn print_help(profile_override: Option<&str>) {
+    let _ = print_help_to_with_profile_override(&mut io::stdout(), profile_override);
 }
 
 #[cfg(test)]
@@ -6656,14 +6707,15 @@ mod tests {
         format_unknown_slash_command, format_unknown_slash_command_message,
         normalize_permission_mode, parse_args, parse_git_status_branch,
         parse_git_status_metadata_for, parse_git_workspace_summary, permission_policy,
-        print_help_to, push_output_block, render_commands_report, render_config_report,
-        render_diff_report, render_doctor_report_from_setup, render_memory_report,
-        render_repl_help, render_repl_help_for_profile, render_resume_usage, resolve_model_alias,
-        resolve_session_reference, response_to_events, resume_supported_slash_commands,
-        run_resume_command, slash_command_completion_candidates_with_sessions, status_context,
-        validate_no_args, CliAction, CliOutputFormat, CommandReportSurfaceSelection,
-        GitWorkspaceSummary, InternalPromptProgressEvent, InternalPromptProgressState, LiveCli,
-        ProviderRuntimeClient, SlashCommand, StatusUsage, DEFAULT_MODEL,
+        print_help_to, print_help_to_for_profile, push_output_block, render_commands_report,
+        render_config_report, render_diff_report, render_doctor_report_from_setup,
+        render_memory_report, render_repl_help, render_repl_help_for_profile,
+        render_resume_usage, resolve_model_alias, resolve_session_reference, response_to_events,
+        resume_supported_slash_commands, run_resume_command,
+        slash_command_completion_candidates_with_sessions, status_context, validate_no_args,
+        CliAction, CliOutputFormat, CommandReportSurfaceSelection, GitWorkspaceSummary,
+        InternalPromptProgressEvent, InternalPromptProgressState, LiveCli, ProviderRuntimeClient,
+        SlashCommand, StatusUsage, DEFAULT_MODEL,
     };
     use api::{MessageResponse, OutputContentBlock, Usage};
     use plugins::{
@@ -7284,7 +7336,7 @@ supports_streaming = false
         let permission_mode = super::default_permission_mode();
         assert_eq!(
             parse_args(&["help".to_string()]).expect("help should parse"),
-            CliAction::Help
+            CliAction::Help { profile: None }
         );
         assert_eq!(
             parse_args(&["version".to_string()]).expect("version should parse"),
@@ -7875,6 +7927,25 @@ supports_streaming = false
         assert!(help.contains("kcode commands [show [local|bridge]]"));
         assert!(help.contains("kcode skills"));
         assert!(help.contains("kcode /skills"));
+    }
+
+    #[test]
+    fn help_hides_tooling_for_toolless_profiles() {
+        let mut help = Vec::new();
+        print_help_to_for_profile(&mut help, false).expect("help should render");
+        let help = String::from_utf8(help).expect("help should be utf8");
+        let resume_line = help
+            .lines()
+            .find(|line| line.starts_with("Resume-safe commands:"))
+            .expect("resume-safe commands line");
+
+        assert!(!help.contains("--allowedTools"));
+        assert!(!help.contains("kcode mcp"));
+        assert!(!help.contains("kcode mcp show my-server"));
+        assert!(!help.contains("/mcp [list|show <server>|help]"));
+        assert!(!resume_line.contains("/mcp"));
+        assert!(help.contains("kcode commands [show [local|bridge]]"));
+        assert!(help.contains("/status"));
     }
 
     #[test]
