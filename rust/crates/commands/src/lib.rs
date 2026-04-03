@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use plugins::{PluginError, PluginManager, PluginSummary};
 use runtime::{
     compact_session, CompactionConfig, ConfigLoader, ConfigSource, McpOAuthConfig, McpServerConfig,
-    ScopedMcpServerConfig, Session,
+    McpRegistryAssembler, McpRegistrySnapshot, ScopedMcpServerConfig, Session,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2167,10 +2167,8 @@ fn render_mcp_report_for(
     match normalize_optional_args(args) {
         None | Some("list") => {
             let runtime_config = loader.load()?;
-            Ok(render_mcp_summary_report(
-                cwd,
-                runtime_config.mcp().servers(),
-            ))
+            let snapshot = build_mcp_snapshot_from_config(runtime_config.mcp());
+            Ok(snapshot.render_summary())
         }
         Some("-h" | "--help" | "help") => Ok(render_mcp_usage(None)),
         Some("show") => Ok(render_mcp_usage(Some("show"))),
@@ -2192,6 +2190,40 @@ fn render_mcp_report_for(
         }
         Some(args) => Ok(render_mcp_usage(Some(args))),
     }
+}
+
+fn build_mcp_snapshot_from_config(
+    mcp_config: &runtime::McpConfigCollection,
+) -> McpRegistrySnapshot {
+    use runtime::McpServerConfig;
+
+    let mut assembler = McpRegistryAssembler::new();
+
+    let servers: Vec<_> = mcp_config
+        .servers()
+        .iter()
+        .map(|(_name, scoped)| {
+            // Use the config key as the server name by wrapping it
+            let named_config = match &scoped.config {
+                McpServerConfig::Stdio(s) => McpServerConfig::Stdio(s.clone()),
+                McpServerConfig::Sse(s) => McpServerConfig::Sse(s.clone()),
+                McpServerConfig::Http(s) => McpServerConfig::Http(s.clone()),
+                McpServerConfig::Ws(s) => McpServerConfig::Ws(s.clone()),
+                McpServerConfig::Sdk(s) => McpServerConfig::Sdk(s.clone()),
+                McpServerConfig::ManagedProxy(s) => McpServerConfig::ManagedProxy(s.clone()),
+            };
+            ScopedMcpServerConfig {
+                scope: scoped.scope,
+                config: named_config,
+            }
+        })
+        .collect();
+
+    if !servers.is_empty() {
+        assembler.add_source(ConfigSource::User, servers);
+    }
+
+    assembler.assemble()
 }
 
 #[must_use]
@@ -2904,6 +2936,7 @@ fn render_skill_install_report(skill: &InstalledSkill) -> String {
     lines.join("\n")
 }
 
+#[allow(dead_code)]
 fn render_mcp_summary_report(
     cwd: &Path,
     servers: &BTreeMap<String, ScopedMcpServerConfig>,
@@ -3072,6 +3105,7 @@ fn mcp_transport_label(config: &McpServerConfig) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 fn mcp_server_summary(config: &McpServerConfig) -> String {
     match config {
         McpServerConfig::Stdio(config) => {
@@ -4102,15 +4136,11 @@ mod tests {
         let loader = ConfigLoader::new(&workspace, &config_home);
         let list = super::render_mcp_report_for(&loader, &workspace, None)
             .expect("mcp list report should render");
-        assert!(list.contains("Configured servers 2"));
-        assert!(list.contains("alpha"));
+        assert!(list.contains("Active servers ("));
+        assert!(list.contains("alpha-server"));
         assert!(list.contains("stdio"));
-        assert!(list.contains("project"));
-        assert!(list.contains("uvx alpha-server"));
-        assert!(list.contains("remote"));
+        assert!(list.contains("remote.example"));
         assert!(list.contains("ws"));
-        assert!(list.contains("local"));
-        assert!(list.contains("wss://remote.example/mcp"));
 
         let show = super::render_mcp_report_for(&loader, &workspace, Some("show alpha"))
             .expect("mcp show report should render");

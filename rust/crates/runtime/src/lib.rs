@@ -6,8 +6,10 @@ mod conversation;
 mod file_ops;
 mod hooks;
 mod json;
+mod memory;
 mod mcp;
 mod mcp_client;
+mod mcp_registry;
 mod mcp_stdio;
 mod oauth;
 mod permissions;
@@ -25,8 +27,11 @@ pub use bootstrap::{
     DiagnosticStatus, ResolvedConfig, SetupContext, SetupMode, StdioMode, TrustPolicyContext,
 };
 pub use compact::{
-    compact_session, estimate_session_tokens, format_compact_summary,
-    get_compact_continuation_message, should_compact, CompactionConfig, CompactionResult,
+    collect_reinjectable_attachments, compact_session, estimate_session_tokens,
+    format_compact_summary, format_reinjected_attachments, get_compact_continuation_message,
+    should_compact, AutoCompactionOutcome, CompactionConfig, CompactionFailureTracker,
+    CompactionResult, ReinjectionAttachment, ReinjectionAttachmentKind,
+    MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES,
 };
 pub use config::{
     ConfigEntry, ConfigError, ConfigLoader, ConfigSource, McpConfigCollection,
@@ -52,6 +57,15 @@ pub use hooks::{
 pub use mcp::{
     mcp_server_signature, mcp_tool_name, mcp_tool_prefix, normalize_name_for_mcp,
     scoped_mcp_config_hash, unwrap_ccr_proxy_url,
+};
+pub use memory::{
+    create_memory, default_memory_dir, default_memory_index, ensure_memory_dir,
+    ensure_memory_index, list_memories, load_user_memories, read_memory, render_memory_summary,
+    MemoryEntry, MemoryError, MemoryIndexEntry, MemoryType,
+};
+pub use mcp_registry::{
+    load_mcp_config_file, McpPolicy, McpPolicyRule, McpRegistryAssembler, McpRegistrySnapshot,
+    McpServerDescriptor,
 };
 pub use mcp_client::{
     McpClientAuth, McpClientBootstrap, McpClientTransport, McpManagedProxyTransport,

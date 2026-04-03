@@ -5,7 +5,8 @@ use serde_json::{Map, Value};
 use telemetry::SessionTracer;
 
 use crate::compact::{
-    compact_session, estimate_session_tokens, CompactionConfig, CompactionResult,
+    compact_session, estimate_session_tokens, CompactionConfig, CompactionFailureTracker,
+    CompactionResult,
 };
 use crate::config::RuntimeFeatureConfig;
 use crate::hooks::{HookAbortSignal, HookProgressReporter, HookRunResult, HookRunner};
@@ -106,6 +107,7 @@ pub struct TurnSummary {
     pub iterations: usize,
     pub usage: TokenUsage,
     pub auto_compaction: Option<AutoCompactionEvent>,
+    pub compaction_circuit_tripped: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,6 +128,7 @@ pub struct ConversationRuntime<C, T> {
     hook_abort_signal: HookAbortSignal,
     hook_progress_reporter: Option<Box<dyn HookProgressReporter>>,
     session_tracer: Option<SessionTracer>,
+    compaction_failure_tracker: CompactionFailureTracker,
 }
 
 impl<C, T> ConversationRuntime<C, T>
@@ -175,6 +178,7 @@ where
             hook_abort_signal: HookAbortSignal::default(),
             hook_progress_reporter: None,
             session_tracer: None,
+            compaction_failure_tracker: CompactionFailureTracker::new(),
         }
     }
 
@@ -460,6 +464,7 @@ where
         }
 
         let auto_compaction = self.maybe_auto_compact();
+        let compaction_circuit_tripped = self.compaction_failure_tracker.is_tripped();
 
         let summary = TurnSummary {
             assistant_messages,
@@ -468,6 +473,7 @@ where
             iterations,
             usage: self.usage_tracker.cumulative_usage(),
             auto_compaction,
+            compaction_circuit_tripped,
         };
         self.record_turn_completed(&summary);
 
@@ -477,6 +483,21 @@ where
     #[must_use]
     pub fn compact(&self, config: CompactionConfig) -> CompactionResult {
         compact_session(&self.session, config)
+    }
+
+    /// Compact the session and track success/failure for the circuit breaker.
+    pub fn compact_with_tracking(&mut self, config: CompactionConfig) -> CompactionResult {
+        let result = compact_session(&self.session, config);
+        if result.removed_message_count > 0 {
+            self.compaction_failure_tracker.record_success();
+        }
+        self.session = result.compacted_session.clone();
+        result
+    }
+
+    /// Returns whether the auto-compaction circuit breaker is tripped.
+    pub fn compaction_circuit_is_tripped(&self) -> bool {
+        self.compaction_failure_tracker.is_tripped()
     }
 
     #[must_use]
@@ -505,6 +526,10 @@ where
     }
 
     fn maybe_auto_compact(&mut self) -> Option<AutoCompactionEvent> {
+        if self.compaction_failure_tracker.is_tripped() {
+            return None;
+        }
+
         if self.usage_tracker.cumulative_usage().input_tokens
             < self.auto_compaction_input_tokens_threshold
         {
@@ -520,10 +545,12 @@ where
         );
 
         if result.removed_message_count == 0 {
+            self.compaction_failure_tracker.record_success();
             return None;
         }
 
         self.session = result.compacted_session;
+        self.compaction_failure_tracker.record_success();
         Some(AutoCompactionEvent {
             removed_message_count: result.removed_message_count,
         })

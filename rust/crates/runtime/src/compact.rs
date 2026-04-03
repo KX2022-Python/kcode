@@ -687,3 +687,126 @@ mod tests {
         assert!(pending[0].contains("Next: update tests"));
     }
 }
+
+// --- Circuit Breaker for Auto-Compaction ---
+
+/// Maximum consecutive auto-compact failures before tripping the breaker.
+pub const MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES: usize = 3;
+
+/// Tracks consecutive compaction failures for circuit breaker behavior.
+#[derive(Debug, Clone, Default)]
+pub struct CompactionFailureTracker {
+    consecutive_failures: usize,
+    tripped: bool,
+}
+
+impl CompactionFailureTracker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a successful compaction. Resets the failure counter.
+    pub fn record_success(&mut self) {
+        self.consecutive_failures = 0;
+        self.tripped = false;
+    }
+
+    /// Record a compaction failure. Returns true if the circuit breaker is now tripped.
+    pub fn record_failure(&mut self) -> bool {
+        self.consecutive_failures += 1;
+        if self.consecutive_failures >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES {
+            self.tripped = true;
+        }
+        self.tripped
+    }
+
+    /// Whether the circuit breaker is tripped (no more auto-compact attempts should be made).
+    pub fn is_tripped(&self) -> bool {
+        self.tripped
+    }
+
+    /// How many consecutive failures have been recorded.
+    pub fn consecutive_failures(&self) -> usize {
+        self.consecutive_failures
+    }
+
+    /// Reset the tracker entirely.
+    pub fn reset(&mut self) {
+        self.consecutive_failures = 0;
+        self.tripped = false;
+    }
+}
+
+/// The result of attempting an automatic compaction, including circuit breaker state.
+#[derive(Debug, Clone)]
+pub struct AutoCompactionOutcome {
+    pub did_compact: bool,
+    pub summary: String,
+    pub circuit_tripped: bool,
+    pub error: Option<String>,
+}
+
+/// Represents an attachment that should be reinjected after compaction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReinjectionAttachment {
+    pub kind: ReinjectionAttachmentKind,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReinjectionAttachmentKind {
+    QueuedCommand,
+    Memory,
+    Skill,
+}
+
+/// Collect attachments from messages that should be reinjected after compaction.
+#[must_use]
+pub fn collect_reinjectable_attachments(
+    messages: &[ConversationMessage],
+) -> Vec<ReinjectionAttachment> {
+    messages
+        .iter()
+        .flat_map(|msg| msg.blocks.iter())
+        .filter_map(|block| match block {
+            ContentBlock::Text { text } if text.starts_with("[queued]") => {
+                Some(ReinjectionAttachment {
+                    kind: ReinjectionAttachmentKind::QueuedCommand,
+                    content: text.clone(),
+                })
+            }
+            ContentBlock::Text { text } if text.starts_with("[memory]") => {
+                Some(ReinjectionAttachment {
+                    kind: ReinjectionAttachmentKind::Memory,
+                    content: text.clone(),
+                })
+            }
+            ContentBlock::Text { text } if text.starts_with("[skill]") => {
+                Some(ReinjectionAttachment {
+                    kind: ReinjectionAttachmentKind::Skill,
+                    content: text.clone(),
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Format reinjected attachments into a system message block.
+#[must_use]
+pub fn format_reinjected_attachments(attachments: &[ReinjectionAttachment]) -> String {
+    if attachments.is_empty() {
+        return String::new();
+    }
+
+    let mut lines = vec!["[reinjected attachments]".to_string()];
+    for attachment in attachments {
+        let kind_label = match attachment.kind {
+            ReinjectionAttachmentKind::QueuedCommand => "queued command",
+            ReinjectionAttachmentKind::Memory => "memory",
+            ReinjectionAttachmentKind::Skill => "skill",
+        };
+        lines.push(format!("- [{kind_label}] {}", attachment.content));
+    }
+    lines.join("\n")
+}
