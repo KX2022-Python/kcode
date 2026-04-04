@@ -4,7 +4,7 @@ use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::Duration;
 
 use api::{
-    AnthropicClient, ApiClient, ApiError, AuthSource, ContentBlockDelta, ContentBlockDeltaEvent,
+    AnthropicClient, ApiError, AuthSource, ContentBlockDelta, ContentBlockDeltaEvent,
     ContentBlockStartEvent, InputContentBlock, InputMessage, MessageDeltaEvent, MessageRequest,
     OutputContentBlock, PromptCache, PromptCacheConfig, ProviderClient, StreamEvent, ToolChoice,
     ToolDefinition,
@@ -44,9 +44,7 @@ async fn send_message_posts_json_and_parses_response() {
     )
     .await;
 
-    let client = ApiClient::new("test-key")
-        .with_auth_token(Some("proxy-token".to_string()))
-        .with_base_url(server.base_url());
+    let client = AnthropicClient::new("test-key").with_base_url(server.base_url());
     let response = client
         .send_message(&sample_request(false))
         .await
@@ -73,20 +71,16 @@ async fn send_message_posts_json_and_parses_response() {
         Some("test-key")
     );
     assert_eq!(
-        request.headers.get("authorization").map(String::as_str),
-        Some("Bearer proxy-token")
-    );
-    assert_eq!(
-        request.headers.get("anthropic-version").map(String::as_str),
+        request.headers.get("x-kcode-api-version").map(String::as_str),
         Some("2023-06-01")
     );
     assert_eq!(
         request.headers.get("user-agent").map(String::as_str),
-        Some("claude-code/0.1.0")
+        Some("kcode/0.1.0")
     );
     assert_eq!(
-        request.headers.get("anthropic-beta").map(String::as_str),
-        Some("claude-code-20250219,prompt-caching-scope-2026-01-05")
+        request.headers.get("x-kcode-beta").map(String::as_str),
+        Some("kcode-20250219,prompt-caching-scope-2026-01-05")
     );
     let body: serde_json::Value =
         serde_json::from_str(&request.body).expect("request body should be json");
@@ -99,7 +93,7 @@ async fn send_message_posts_json_and_parses_response() {
     assert_eq!(body["tool_choice"]["type"], json!("auto"));
     assert_eq!(
         body["betas"],
-        json!(["claude-code-20250219", "prompt-caching-scope-2026-01-05"])
+        json!(["kcode-20250219", "prompt-caching-scope-2026-01-05"])
     );
 }
 
@@ -131,9 +125,9 @@ async fn send_message_applies_request_profile_and_records_telemetry() {
 
     let client = AnthropicClient::new("test-key")
         .with_base_url(server.base_url())
-        .with_client_identity(ClientIdentity::new("claude-code", "9.9.9").with_runtime("rust-cli"))
+        .with_client_identity(ClientIdentity::new("kcode", "9.9.9").with_runtime("rust-cli"))
         .with_beta("tools-2026-04-01")
-        .with_extra_body_param("metadata", json!({"source": "clawd-code"}))
+        .with_extra_body_param("metadata", json!({"source": "kcode"}))
         .with_session_tracer(SessionTracer::new("session-telemetry", sink.clone()));
 
     let response = client
@@ -146,20 +140,20 @@ async fn send_message_applies_request_profile_and_records_telemetry() {
     let captured = state.lock().await;
     let request = captured.first().expect("server should capture request");
     assert_eq!(
-        request.headers.get("anthropic-beta").map(String::as_str),
-        Some("claude-code-20250219,prompt-caching-scope-2026-01-05,tools-2026-04-01")
+        request.headers.get("x-kcode-beta").map(String::as_str),
+        Some("kcode-20250219,prompt-caching-scope-2026-01-05,tools-2026-04-01")
     );
     assert_eq!(
         request.headers.get("user-agent").map(String::as_str),
-        Some("claude-code/9.9.9")
+        Some("kcode/9.9.9")
     );
     let body: serde_json::Value =
         serde_json::from_str(&request.body).expect("request body should be json");
-    assert_eq!(body["metadata"]["source"], json!("clawd-code"));
+    assert_eq!(body["metadata"]["source"], json!("kcode"));
     assert_eq!(
         body["betas"],
         json!([
-            "claude-code-20250219",
+            "kcode-20250219",
             "prompt-caching-scope-2026-01-05",
             "tools-2026-04-01"
         ])
@@ -281,8 +275,7 @@ async fn stream_message_parses_sse_events_with_tool_use() {
     )
     .await;
 
-    let client = ApiClient::new("test-key")
-        .with_auth_token(Some("proxy-token".to_string()))
+    let client = AnthropicClient::new("test-key")
         .with_base_url(server.base_url())
         .with_prompt_cache(PromptCache::new("stream-session"));
     let mut stream = client
@@ -374,7 +367,7 @@ async fn retries_retryable_failures_before_succeeding() {
     )
     .await;
 
-    let client = ApiClient::new("test-key")
+    let client = AnthropicClient::new("test-key")
         .with_base_url(server.base_url())
         .with_retry_policy(2, Duration::from_millis(1), Duration::from_millis(2));
 
@@ -448,7 +441,7 @@ async fn surfaces_retry_exhaustion_for_persistent_retryable_errors() {
     )
     .await;
 
-    let client = ApiClient::new("test-key")
+    let client = AnthropicClient::new("test-key")
         .with_base_url(server.base_url())
         .with_retry_policy(1, Duration::from_millis(1), Duration::from_millis(2));
 
@@ -594,7 +587,7 @@ async fn send_message_tracks_unexpected_prompt_cache_breaks() {
 #[tokio::test]
 #[ignore = "requires ANTHROPIC_API_KEY and network access"]
 async fn live_stream_smoke_test() {
-    let client = ApiClient::from_env().expect("ANTHROPIC_API_KEY must be set");
+    let client = AnthropicClient::from_env().expect("ANTHROPIC_API_KEY must be set");
     let mut stream = client
         .stream_message(&MessageRequest {
             model: std::env::var("ANTHROPIC_MODEL")

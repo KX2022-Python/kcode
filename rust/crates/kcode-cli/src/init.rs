@@ -13,7 +13,7 @@ const STARTER_CONFIG_TOML: &str = concat!(
     "# Fill these values before running prompt or interactive sessions.\n",
     "\n",
     "profile = \"cliproxyapi\"\n",
-    "model = \"claude-sonnet-4-6\"\n",
+    "model = \"gpt-4.1\"\n",
     "base_url = \"\"\n",
     "api_key_env = \"KCODE_API_KEY\"\n",
     "permission_mode = \"workspace-write\"\n",

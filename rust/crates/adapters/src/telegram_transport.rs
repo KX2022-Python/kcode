@@ -293,8 +293,6 @@ struct TelegramMessage {
 #[derive(Debug, Deserialize)]
 struct TelegramPhoto {
     file_id: String,
-    width: u32,
-    height: u32,
     file_size: Option<u32>,
 }
 
@@ -308,7 +306,6 @@ struct TelegramDocument {
 
 #[derive(Debug, Deserialize)]
 struct TelegramVoice {
-    duration: Option<u32>,
     mime_type: Option<String>,
     file_id: String,
     file_size: Option<u32>,
@@ -328,7 +325,7 @@ struct TelegramChat {
 #[derive(Debug, Deserialize)]
 pub struct TelegramWebhookUpdate {
     pub update_id: i64,
-    pub message: Option<TelegramMessage>,
+    message: Option<TelegramMessage>,
 }
 
 /// Parse a Telegram webhook payload into a list of BridgeInboundEvents.

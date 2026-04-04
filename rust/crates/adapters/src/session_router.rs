@@ -5,8 +5,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent};
-
 /// A session entry holding the channel-specific state.
 pub struct ChannelSession {
     /// Unique session identifier (derived from chat_id).

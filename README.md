@@ -64,6 +64,8 @@ If you just want to use the interactive terminal REPL:
 
 ```bash
 export KCODE_API_KEY="your-api-key"
+export KCODE_BASE_URL="https://your-openai-compatible-endpoint/v1"
+export KCODE_MODEL="gpt-4.1"
 kcode
 ```
 

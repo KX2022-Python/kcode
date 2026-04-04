@@ -31,6 +31,7 @@ pub struct OpenAiCompatConfig {
 }
 
 const XAI_ENV_VARS: &[&str] = &["XAI_API_KEY"];
+const KCODE_ENV_VARS: &[&str] = &["KCODE_API_KEY"];
 const OPENAI_ENV_VARS: &[&str] = &["OPENAI_API_KEY"];
 
 impl OpenAiCompatConfig {
@@ -53,9 +54,21 @@ impl OpenAiCompatConfig {
             default_base_url: DEFAULT_OPENAI_BASE_URL,
         }
     }
+
+    #[must_use]
+    pub const fn kcode() -> Self {
+        Self {
+            provider_name: "Kcode",
+            api_key_env: "KCODE_API_KEY",
+            base_url_env: "KCODE_BASE_URL",
+            default_base_url: DEFAULT_OPENAI_BASE_URL,
+        }
+    }
+
     #[must_use]
     pub fn credential_env_vars(self) -> &'static [&'static str] {
         match self.provider_name {
+            "Kcode" => KCODE_ENV_VARS,
             "xAI" => XAI_ENV_VARS,
             "OpenAI" => OPENAI_ENV_VARS,
             _ => &[],

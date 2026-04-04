@@ -12,7 +12,7 @@ cd rust && cargo check 2>&1 | grep -E "error|warning"
 ## 2. 测试验证
 
 ```bash
-cd rust && cargo test -p runtime -p commands -p rusty-claude-cli -p bridge -p adapters -p tools 2>&1 | grep "test result"
+cd rust && cargo test --workspace 2>&1 | grep "test result"
 # 期望：所有 test result 均为 ok
 ```
 

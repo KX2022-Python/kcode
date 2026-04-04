@@ -30,7 +30,7 @@ fn status_command_applies_model_and_permission_mode_flags() {
     assert_success(&output);
     let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
     assert!(stdout.contains("Status"));
-    assert!(stdout.contains("Model            claude-sonnet-4-6"));
+    assert!(stdout.contains("Model            gpt-4.1"));
     assert!(stdout.contains("Permission mode  read-only"));
 
     fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
@@ -269,7 +269,7 @@ fn doctor_command_reports_bootstrap_gaps_without_oauth_login() {
     fs::write(
         config_home.join("config.toml"),
         r#"
-model = "claude-sonnet-4-6"
+model = "gpt-4.1"
 base_url = ""
 api_key_env = "KCODE_API_KEY"
 "#,
@@ -354,7 +354,7 @@ fn profile_commands_report_effective_router_settings_after_init() {
     let list_stdout = String::from_utf8(list_output.stdout).expect("stdout should be utf8");
     assert!(list_stdout.contains("* cliproxyapi"));
     assert!(list_stdout.contains("key=KCODE_API_KEY"));
-    assert!(list_stdout.contains("model=claude-sonnet-4-6"));
+    assert!(list_stdout.contains("model=gpt-4.1"));
 
     let show_output = command_in(&temp_dir)
         .env("KCODE_CONFIG_HOME", &config_home)
@@ -365,7 +365,7 @@ fn profile_commands_report_effective_router_settings_after_init() {
     let show_stdout = String::from_utf8(show_output.stdout).expect("stdout should be utf8");
     assert!(show_stdout.contains("Base URL env      KCODE_BASE_URL"));
     assert!(show_stdout.contains("API key env       KCODE_API_KEY"));
-    assert!(show_stdout.contains("Default model     claude-sonnet-4-6"));
+    assert!(show_stdout.contains("Default model     gpt-4.1"));
 
     fs::remove_dir_all(temp_dir).expect("cleanup temp dir");
 }

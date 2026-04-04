@@ -1,16 +1,13 @@
 //! WhatsApp Cloud API Transport implementation.
 //! Handles the 24-hour session window, template messages, and media management.
 
-use std::collections::HashMap;
 use std::error::Error;
 
 use async_trait::async_trait;
-use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent, DeliveryMode};
+use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent};
 use bridge::attachment::{AttachmentEnvelope, AttachmentKind};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tracing::{error, info};
-
 use super::transport::{Transport, TransportConfig};
 
 /// WhatsApp Cloud API configuration.

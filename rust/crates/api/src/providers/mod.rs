@@ -42,28 +42,28 @@ const MODEL_REGISTRY: &[(&str, ProviderMetadata)] = &[
     (
         "opus",
         ProviderMetadata {
-            provider: ProviderKind::Anthropic,
-            auth_env: "ANTHROPIC_API_KEY",
-            base_url_env: "ANTHROPIC_BASE_URL",
-            default_base_url: anthropic::DEFAULT_BASE_URL,
+            provider: ProviderKind::OpenAi,
+            auth_env: "OPENAI_API_KEY",
+            base_url_env: "OPENAI_BASE_URL",
+            default_base_url: openai_compat::DEFAULT_OPENAI_BASE_URL,
         },
     ),
     (
         "sonnet",
         ProviderMetadata {
-            provider: ProviderKind::Anthropic,
-            auth_env: "ANTHROPIC_API_KEY",
-            base_url_env: "ANTHROPIC_BASE_URL",
-            default_base_url: anthropic::DEFAULT_BASE_URL,
+            provider: ProviderKind::OpenAi,
+            auth_env: "OPENAI_API_KEY",
+            base_url_env: "OPENAI_BASE_URL",
+            default_base_url: openai_compat::DEFAULT_OPENAI_BASE_URL,
         },
     ),
     (
         "haiku",
         ProviderMetadata {
-            provider: ProviderKind::Anthropic,
-            auth_env: "ANTHROPIC_API_KEY",
-            base_url_env: "ANTHROPIC_BASE_URL",
-            default_base_url: anthropic::DEFAULT_BASE_URL,
+            provider: ProviderKind::OpenAi,
+            auth_env: "OPENAI_API_KEY",
+            base_url_env: "OPENAI_BASE_URL",
+            default_base_url: openai_compat::DEFAULT_OPENAI_BASE_URL,
         },
     ),
     (
@@ -127,13 +127,17 @@ pub fn resolve_model_alias(model: &str) -> String {
                     "haiku" => "claude-haiku-4-5-20251213",
                     _ => trimmed,
                 },
+                ProviderKind::OpenAi => match *alias {
+                    "opus" | "sonnet" => "gpt-4.1",
+                    "haiku" => "gpt-4.1-mini",
+                    _ => trimmed,
+                },
                 ProviderKind::Xai => match *alias {
                     "grok" | "grok-3" => "grok-3",
                     "grok-mini" | "grok-3-mini" => "grok-3-mini",
                     "grok-2" => "grok-2",
                     _ => trimmed,
                 },
-                ProviderKind::OpenAi => trimmed,
             })
         })
         .map_or_else(|| trimmed.to_string(), ToOwned::to_owned)
@@ -158,6 +162,18 @@ pub fn metadata_for_model(model: &str) -> Option<ProviderMetadata> {
             default_base_url: openai_compat::DEFAULT_XAI_BASE_URL,
         });
     }
+    if canonical.starts_with("gpt-")
+        || canonical.starts_with("o1")
+        || canonical.starts_with("o3")
+        || canonical.starts_with("o4")
+    {
+        return Some(ProviderMetadata {
+            provider: ProviderKind::OpenAi,
+            auth_env: "OPENAI_API_KEY",
+            base_url_env: "OPENAI_BASE_URL",
+            default_base_url: openai_compat::DEFAULT_OPENAI_BASE_URL,
+        });
+    }
     None
 }
 
@@ -166,16 +182,19 @@ pub fn detect_provider_kind(model: &str) -> ProviderKind {
     if let Some(metadata) = metadata_for_model(model) {
         return metadata.provider;
     }
-    if anthropic::has_auth_from_env_or_saved().unwrap_or(false) {
-        return ProviderKind::Anthropic;
-    }
     if openai_compat::has_api_key("OPENAI_API_KEY") {
+        return ProviderKind::OpenAi;
+    }
+    if openai_compat::has_api_key("KCODE_API_KEY") {
         return ProviderKind::OpenAi;
     }
     if openai_compat::has_api_key("XAI_API_KEY") {
         return ProviderKind::Xai;
     }
-    ProviderKind::Anthropic
+    if anthropic::has_auth_from_env_or_saved().unwrap_or(false) {
+        return ProviderKind::Anthropic;
+    }
+    ProviderKind::OpenAi
 }
 
 #[must_use]
@@ -202,15 +221,13 @@ mod tests {
     #[test]
     fn detects_provider_from_model_name_first() {
         assert_eq!(detect_provider_kind("grok"), ProviderKind::Xai);
-        assert_eq!(
-            detect_provider_kind("claude-sonnet-4-6"),
-            ProviderKind::Anthropic
-        );
+        assert_eq!(detect_provider_kind("claude-sonnet-4-6"), ProviderKind::Anthropic);
+        assert_eq!(detect_provider_kind("gpt-4.1"), ProviderKind::OpenAi);
     }
 
     #[test]
     fn keeps_existing_max_token_heuristic() {
-        assert_eq!(max_tokens_for_model("opus"), 32_000);
+        assert_eq!(max_tokens_for_model("opus"), 64_000);
         assert_eq!(max_tokens_for_model("grok-3"), 64_000);
     }
 }

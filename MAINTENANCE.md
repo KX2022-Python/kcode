@@ -57,7 +57,7 @@ git log kcode-base..upstream/main --oneline
 git cherry-pick <commit-hash>
 
 # 4. 解决冲突后测试
-cargo test -p runtime -p commands -p rusty-claude-cli -p bridge -p adapters -p tools
+cargo test --workspace
 ```
 
 ## 3. 升级准则

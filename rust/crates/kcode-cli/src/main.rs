@@ -65,7 +65,7 @@ use bridge_core::{BridgeCore, BridgeMessage, SessionConfig};
 
 use adapters::{TelegramConfig, TelegramMode, TelegramTransport};
 
-const DEFAULT_MODEL: &str = "claude-opus-4-6";
+const DEFAULT_MODEL: &str = "gpt-4.1";
 const CLI_NAME: &str = "kcode";
 const PRIMARY_CONFIG_DIR_NAME: &str = ".kcode";
 const LEGACY_CONFIG_DIR_NAME: &str = ".claw";
@@ -915,9 +915,8 @@ fn levenshtein_distance(left: &str, right: &str) -> usize {
 
 fn resolve_model_alias(model: &str) -> &str {
     match model {
-        "opus" => "claude-opus-4-6",
-        "sonnet" => "claude-sonnet-4-6",
-        "haiku" => "claude-haiku-4-5-20251213",
+        "opus" | "sonnet" => "gpt-4.1",
+        "haiku" => "gpt-4.1-mini",
         _ => model,
     }
 }
@@ -1138,16 +1137,12 @@ fn looks_like_slash_command_token(token: &str) -> bool {
 
 fn default_oauth_config() -> OAuthConfig {
     OAuthConfig {
-        client_id: String::from("9d1c250a-e61b-44d9-88ed-5944d1962f5e"),
-        authorize_url: String::from("https://platform.claude.com/oauth/authorize"),
-        token_url: String::from("https://platform.claude.com/v1/oauth/token"),
+        client_id: String::from("kcode-legacy-oauth-disabled"),
+        authorize_url: String::from("https://oauth.invalid/authorize"),
+        token_url: String::from("https://oauth.invalid/token"),
         callback_port: None,
         manual_redirect_url: None,
-        scopes: vec![
-            String::from("user:profile"),
-            String::from("user:inference"),
-            String::from("user:sessions:claude_code"),
-        ],
+        scopes: vec![String::from("legacy:disabled")],
     }
 }
 
@@ -1206,9 +1201,9 @@ fn wait_for_oauth_callback(
     let callback = parse_oauth_callback_request_target(target)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     let body = if callback.error.is_some() {
-        "Claude OAuth login failed. You can close this window."
+        "Legacy OAuth callback failed. You can close this window."
     } else {
-        "Claude OAuth login succeeded. You can close this window."
+        "Legacy OAuth callback succeeded. You can close this window."
     };
     let response = format!(
         "HTTP/1.1 200 OK\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
@@ -4059,7 +4054,7 @@ fn run_doctor_fix(
     // Clean up .claw directory if empty
     let claw_dir = format!("{}/.claw", home);
     if std::path::Path::new(&claw_dir).is_dir() {
-        if std::fs::read_dir(&claw_dir).map(|mut d| d.count() == 0).unwrap_or(false) {
+        if std::fs::read_dir(&claw_dir).map(|d| d.count() == 0).unwrap_or(false) {
             println!("🧹 Removing empty .claw directory");
             let _ = std::fs::remove_dir(&claw_dir);
             fixed_count += 1;
@@ -7481,7 +7476,7 @@ mod tests {
             parse_args(&args).expect("args should parse"),
             CliAction::Prompt {
                 prompt: "explain this".to_string(),
-                model: "claude-opus-4-6".to_string(),
+                model: "gpt-4.1".to_string(),
                 model_explicit: true,
                 profile: None,
                 output_format: CliOutputFormat::Text,
@@ -7493,9 +7488,9 @@ mod tests {
 
     #[test]
     fn resolves_known_model_aliases() {
-        assert_eq!(resolve_model_alias("opus"), "claude-opus-4-6");
-        assert_eq!(resolve_model_alias("sonnet"), "claude-sonnet-4-6");
-        assert_eq!(resolve_model_alias("haiku"), "claude-haiku-4-5-20251213");
+        assert_eq!(resolve_model_alias("opus"), "gpt-4.1");
+        assert_eq!(resolve_model_alias("sonnet"), "gpt-4.1");
+        assert_eq!(resolve_model_alias("haiku"), "gpt-4.1-mini");
         assert_eq!(resolve_model_alias("claude-opus"), "claude-opus");
     }
 
@@ -8152,7 +8147,7 @@ supports_streaming = false
             vec!["session-old".to_string()],
         );
 
-        assert!(completions.contains(&"/model claude-sonnet-4-6".to_string()));
+        assert!(completions.contains(&"/model gpt-4.1".to_string()));
         assert!(completions.contains(&"/permissions workspace-write".to_string()));
         assert!(completions.contains(&"/session list".to_string()));
         assert!(completions.contains(&"/session switch session-current".to_string()));
@@ -8185,7 +8180,7 @@ supports_streaming = false
 
         let banner = with_current_dir(&root, || {
             LiveCli::new(
-                "claude-sonnet-4-6".to_string(),
+                "gpt-4.1".to_string(),
                 false,
                 None,
                 true,
@@ -9263,7 +9258,7 @@ UU conflicted.rs",
             MessageResponse {
                 id: "msg-1".to_string(),
                 kind: "message".to_string(),
-                model: "claude-opus-4-6".to_string(),
+                model: "gpt-4.1".to_string(),
                 role: "assistant".to_string(),
                 content: vec![OutputContentBlock::ToolUse {
                     id: "tool-1".to_string(),
@@ -9298,7 +9293,7 @@ UU conflicted.rs",
             MessageResponse {
                 id: "msg-2".to_string(),
                 kind: "message".to_string(),
-                model: "claude-opus-4-6".to_string(),
+                model: "gpt-4.1".to_string(),
                 role: "assistant".to_string(),
                 content: vec![OutputContentBlock::ToolUse {
                     id: "tool-2".to_string(),
@@ -9333,7 +9328,7 @@ UU conflicted.rs",
             MessageResponse {
                 id: "msg-3".to_string(),
                 kind: "message".to_string(),
-                model: "claude-opus-4-6".to_string(),
+                model: "gpt-4.1".to_string(),
                 role: "assistant".to_string(),
                 content: vec![
                     OutputContentBlock::Thinking {

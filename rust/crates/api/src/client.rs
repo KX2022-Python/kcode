@@ -5,6 +5,23 @@ use crate::providers::openai_compat::{self, OpenAiCompatClient, OpenAiCompatConf
 use crate::providers::{self, Provider, ProviderKind};
 use crate::types::{MessageRequest, MessageResponse, StreamEvent};
 
+fn prefers_kcode_openai_env() -> bool {
+    std::env::var("KCODE_API_KEY")
+        .ok()
+        .is_some_and(|value| !value.trim().is_empty())
+        || std::env::var("KCODE_BASE_URL")
+            .ok()
+            .is_some_and(|value| !value.trim().is_empty())
+}
+
+fn openai_compat_default_config() -> OpenAiCompatConfig {
+    if prefers_kcode_openai_env() {
+        OpenAiCompatConfig::kcode()
+    } else {
+        OpenAiCompatConfig::openai()
+    }
+}
+
 async fn send_via_provider<P: Provider>(
     provider: &P,
     request: &MessageRequest,
@@ -46,7 +63,7 @@ impl ProviderClient {
                 OpenAiCompatConfig::xai(),
             )?)),
             ProviderKind::OpenAi => Ok(Self::OpenAi(OpenAiCompatClient::from_env(
-                OpenAiCompatConfig::openai(),
+                openai_compat_default_config(),
             )?)),
         }
     }
@@ -137,7 +154,7 @@ pub use anthropic::{
 };
 #[must_use]
 pub fn read_base_url() -> String {
-    anthropic::read_base_url()
+    openai_compat::read_base_url(openai_compat_default_config())
 }
 
 #[must_use]
@@ -151,7 +168,7 @@ mod tests {
 
     #[test]
     fn resolves_existing_and_grok_aliases() {
-        assert_eq!(resolve_model_alias("opus"), "claude-opus-4-6");
+        assert_eq!(resolve_model_alias("opus"), "gpt-4.1");
         assert_eq!(resolve_model_alias("grok"), "grok-3");
         assert_eq!(resolve_model_alias("grok-mini"), "grok-3-mini");
     }
@@ -159,9 +176,7 @@ mod tests {
     #[test]
     fn provider_detection_prefers_model_family() {
         assert_eq!(detect_provider_kind("grok-3"), ProviderKind::Xai);
-        assert_eq!(
-            detect_provider_kind("claude-sonnet-4-6"),
-            ProviderKind::Anthropic
-        );
+        assert_eq!(detect_provider_kind("claude-sonnet-4-6"), ProviderKind::Anthropic);
+        assert_eq!(detect_provider_kind("gpt-4.1"), ProviderKind::OpenAi);
     }
 }

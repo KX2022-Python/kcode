@@ -4,12 +4,12 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Clone, Parser, PartialEq, Eq)]
 #[command(
-    name = "kcode-cli",
+    name = "kcode",
     version,
-    about = "Rust Claude CLI prototype"
+    about = "Kcode terminal AI agent"
 )]
 pub struct Cli {
-    #[arg(long, default_value = "claude-opus-4-6")]
+    #[arg(long, default_value = "gpt-4.1")]
     pub model: String,
 
     #[arg(long, value_enum, default_value_t = PermissionMode::DangerFullAccess)]

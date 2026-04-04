@@ -85,8 +85,6 @@ pub fn get_compact_continuation_message(
     base
 }
 
-#[must_use]
-
 /// Threshold for head truncation retry: if compacted session still exceeds this,
 /// we truncate older messages from the compacted result and retry.
 const MAX_COMPACTED_TOKENS_FOR_RETRY: usize = 80_000;
@@ -768,10 +766,10 @@ mod tests {
     #[test]
     fn extracts_key_files_from_message_content() {
         let files = collect_key_files(&[ConversationMessage::user_text(
-            "Update rust/crates/runtime/src/compact.rs and rust/crates/rusty-claude-cli/src/main.rs next.",
+            "Update rust/crates/runtime/src/compact.rs and rust/crates/kcode-cli/src/main.rs next.",
         )]);
         assert!(files.contains(&"rust/crates/runtime/src/compact.rs".to_string()));
-        assert!(files.contains(&"rust/crates/rusty-claude-cli/src/main.rs".to_string()));
+        assert!(files.contains(&"rust/crates/kcode-cli/src/main.rs".to_string()));
     }
 
     #[test]

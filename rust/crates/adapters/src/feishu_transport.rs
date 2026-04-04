@@ -1,16 +1,13 @@
 //! Feishu (Lark) Transport implementation.
 //! Handles Challenge verification, Interactive Cards, and Rich Text messages.
 
-use std::collections::HashMap;
 use std::error::Error;
 
 use async_trait::async_trait;
-use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent, DeliveryMode};
+use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent};
 use bridge::attachment::{AttachmentEnvelope, AttachmentKind};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tracing::{error, info};
-
 use super::transport::{Transport, TransportConfig};
 
 /// Feishu/Lark Bot API configuration.
@@ -126,6 +123,7 @@ impl FeishuTransport {
     }
 
     /// Send an interactive card message to Feishu.
+    #[allow(dead_code)]
     async fn send_card(&self, receive_id: &str, card_json: &str, receive_id_type: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
         let token = self.get_tenant_token().await?;
         let url = format!("{}?receive_id_type={}", self.api_url("/im/v1/messages"), receive_id_type);

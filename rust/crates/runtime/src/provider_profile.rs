@@ -7,7 +7,7 @@ const PRIMARY_PROFILE_ENV: &str = "KCODE_PROFILE";
 const PRIMARY_MODEL_ENV: &str = "KCODE_MODEL";
 const PRIMARY_BASE_URL_ENV: &str = "KCODE_BASE_URL";
 const PRIMARY_API_KEY_ENV: &str = "KCODE_API_KEY";
-const SHARED_ROUTER_MODEL: &str = "claude-sonnet-4-6";
+const SHARED_ROUTER_MODEL: &str = "gpt-4.1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolutionSource {

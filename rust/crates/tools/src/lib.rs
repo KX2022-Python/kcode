@@ -552,7 +552,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "Config",
-            description: "Get or set Claude Code settings.",
+            description: "Get or set Kcode settings.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -1605,6 +1605,7 @@ struct TestingPermissionInput {
     action: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct WebBrowserInput {
     action: String,
@@ -2328,7 +2329,7 @@ fn resolve_skill_path(skill: &str) -> Result<std::path::PathBuf, String> {
     Err(format!("unknown skill: {requested}"))
 }
 
-const DEFAULT_AGENT_MODEL: &str = "claude-opus-4-6";
+const DEFAULT_AGENT_MODEL: &str = "gpt-4.1";
 const DEFAULT_AGENT_SYSTEM_DATE: &str = "2026-03-31";
 const DEFAULT_AGENT_MAX_ITERATIONS: usize = 32;
 
@@ -4572,7 +4573,9 @@ mod tests {
 
     #[test]
     fn skill_loads_local_skill_prompt() {
-        let _guard = env_lock().lock().expect("env lock should acquire");
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let home = temp_path("skills-home");
         let skill_dir = home.join(".agents").join("skills").join("help");
         fs::create_dir_all(&skill_dir).expect("skill dir should exist");
@@ -4751,7 +4754,7 @@ mod tests {
                 prompt: "Do the work".to_string(),
                 subagent_type: Some("Explore".to_string()),
                 name: Some("complete-task".to_string()),
-                model: Some("claude-sonnet-4-6".to_string()),
+                model: Some("gpt-4.1".to_string()),
             },
             |job| {
                 persist_agent_terminal_state(
@@ -5365,10 +5368,10 @@ mod tests {
         ));
         let home = root.join("home");
         let cwd = root.join("cwd");
-        std::fs::create_dir_all(home.join(".claw")).expect("home dir");
-        std::fs::create_dir_all(cwd.join(".claw")).expect("cwd dir");
+        std::fs::create_dir_all(home.join(".kcode")).expect("home dir");
+        std::fs::create_dir_all(cwd.join(".kcode")).expect("cwd dir");
         std::fs::write(
-            home.join(".claw").join("settings.json"),
+            home.join(".kcode").join("settings.json"),
             r#"{"verbose":false}"#,
         )
         .expect("write global settings");
@@ -5431,10 +5434,10 @@ mod tests {
         ));
         let home = root.join("home");
         let cwd = root.join("cwd");
-        std::fs::create_dir_all(home.join(".claw")).expect("home dir");
-        std::fs::create_dir_all(cwd.join(".claw")).expect("cwd dir");
+        std::fs::create_dir_all(home.join(".kcode")).expect("home dir");
+        std::fs::create_dir_all(cwd.join(".kcode")).expect("cwd dir");
         std::fs::write(
-            cwd.join(".claw").join("settings.local.json"),
+            cwd.join(".kcode").join("settings.local.json"),
             r#"{"permissions":{"defaultMode":"acceptEdits"}}"#,
         )
         .expect("write local settings");
@@ -5453,12 +5456,14 @@ mod tests {
         assert_eq!(enter_output["previousLocalMode"], "acceptEdits");
         assert_eq!(enter_output["currentLocalMode"], "plan");
 
-        let local_settings = std::fs::read_to_string(cwd.join(".claw").join("settings.local.json"))
+        let local_settings =
+            std::fs::read_to_string(cwd.join(".kcode").join("settings.local.json"))
             .expect("local settings after enter");
         assert!(local_settings.contains(r#""defaultMode": "plan""#));
-        let state =
-            std::fs::read_to_string(cwd.join(".claw").join("tool-state").join("plan-mode.json"))
-                .expect("plan mode state");
+        let state = std::fs::read_to_string(
+            cwd.join(".kcode").join("tool-state").join("plan-mode.json"),
+        )
+        .expect("plan mode state");
         assert!(state.contains(r#""hadLocalOverride": true"#));
         assert!(state.contains(r#""previousLocalMode": "acceptEdits""#));
 
@@ -5469,11 +5474,12 @@ mod tests {
         assert_eq!(exit_output["previousLocalMode"], "acceptEdits");
         assert_eq!(exit_output["currentLocalMode"], "acceptEdits");
 
-        let local_settings = std::fs::read_to_string(cwd.join(".claw").join("settings.local.json"))
+        let local_settings =
+            std::fs::read_to_string(cwd.join(".kcode").join("settings.local.json"))
             .expect("local settings after exit");
         assert!(local_settings.contains(r#""defaultMode": "acceptEdits""#));
         assert!(!cwd
-            .join(".claw")
+            .join(".kcode")
             .join("tool-state")
             .join("plan-mode.json")
             .exists());
@@ -5504,8 +5510,8 @@ mod tests {
         ));
         let home = root.join("home");
         let cwd = root.join("cwd");
-        std::fs::create_dir_all(home.join(".claw")).expect("home dir");
-        std::fs::create_dir_all(cwd.join(".claw")).expect("cwd dir");
+        std::fs::create_dir_all(home.join(".kcode")).expect("home dir");
+        std::fs::create_dir_all(cwd.join(".kcode")).expect("cwd dir");
 
         let original_home = std::env::var("HOME").ok();
         let original_config_home = std::env::var("CLAW_CONFIG_HOME").ok();
@@ -5524,7 +5530,8 @@ mod tests {
         assert_eq!(exit_output["changed"], true);
         assert_eq!(exit_output["currentLocalMode"], serde_json::Value::Null);
 
-        let local_settings = std::fs::read_to_string(cwd.join(".claw").join("settings.local.json"))
+        let local_settings =
+            std::fs::read_to_string(cwd.join(".kcode").join("settings.local.json"))
             .expect("local settings after exit");
         let local_settings_json: serde_json::Value =
             serde_json::from_str(&local_settings).expect("valid settings json");
@@ -5534,7 +5541,7 @@ mod tests {
             "permissions override should be removed on exit"
         );
         assert!(!cwd
-            .join(".claw")
+            .join(".kcode")
             .join("tool-state")
             .join("plan-mode.json")
             .exists());

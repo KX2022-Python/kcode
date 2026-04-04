@@ -1,7 +1,6 @@
 //! Environment configuration validation.
 //! Ensures all required variables are set and correctly formatted before startup.
 
-use std::collections::HashMap;
 use std::env;
 
 /// Represents a validation error for an environment variable.

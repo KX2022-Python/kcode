@@ -260,7 +260,7 @@ mod tests {
             discovered_entries: vec![sample_entry.clone()],
             loaded_entries: vec![sample_entry],
             config_file_present: true,
-            model: "claude-sonnet-4-6".to_string(),
+            model: "gpt-4.1".to_string(),
             base_url: Some("https://example.test".to_string()),
             api_key_env: "KCODE_API_KEY".to_string(),
             api_key_present: true,

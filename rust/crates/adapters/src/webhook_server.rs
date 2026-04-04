@@ -17,7 +17,7 @@ use serde::Deserialize;
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
-use crate::feishu_transport::{parse_feishu_webhook, verify_feishu_signature, FeishuConfig, FeishuTransport, FeishuWebhookPayload};
+use crate::feishu_transport::{parse_feishu_webhook, verify_feishu_signature, FeishuWebhookPayload};
 use crate::session_router::SessionRouter;
 use crate::telegram_transport::{parse_telegram_webhook, TelegramConfig, TelegramTransport};
 use crate::transport::Transport;
