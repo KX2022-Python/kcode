@@ -30,6 +30,12 @@ pub use session_router::{ChannelSession, SessionRouter};
 pub mod webhook_server;
 pub use webhook_server::{start_webhook_server, WebhookState};
 
+pub mod media_download;
+pub use media_download::{
+    download_file, download_feishu_file, download_telegram_file, download_whatsapp_file,
+    media_storage_dir,
+};
+
 // Re-exports for convenience
 pub use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent};
 pub use bridge::DeliveryMode;

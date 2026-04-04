@@ -17,12 +17,12 @@ use serde::Deserialize;
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
-use crate::feishu_transport::{parse_feishu_webhook, FeishuConfig, FeishuTransport, FeishuWebhookPayload};
+use crate::feishu_transport::{parse_feishu_webhook, verify_feishu_signature, FeishuConfig, FeishuTransport, FeishuWebhookPayload};
 use crate::session_router::SessionRouter;
 use crate::telegram_transport::{parse_telegram_webhook, TelegramConfig, TelegramTransport};
 use crate::transport::Transport;
 use crate::whatsapp_transport::{
-    parse_whatsapp_webhook, WhatsAppConfig, WhatsAppTransport,
+    parse_whatsapp_webhook, verify_whatsapp_signature, WhatsAppConfig, WhatsAppTransport,
     WhatsAppWebhookPayload,
 };
 
@@ -31,7 +31,9 @@ use crate::whatsapp_transport::{
 pub struct WebhookState {
     pub session_router: Arc<SessionRouter>,
     pub telegram_transport: Option<Arc<TelegramTransport>>,
+    pub whatsapp_config: Option<WhatsAppConfig>,
     pub whatsapp_transport: Option<Arc<WhatsAppTransport>>,
+    pub feishu_config: Option<crate::feishu_transport::FeishuConfig>,
     pub feishu_transport: Option<Arc<crate::feishu_transport::FeishuTransport>>,
     pub handler: Arc<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + Send + Sync>,
 }
@@ -46,13 +48,17 @@ pub async fn start_webhook_server(
     handler: impl Fn(BridgeInboundEvent) -> BridgeOutboundEvent + Send + Sync + 'static,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let telegram_transport = telegram_config.map(|c| Arc::new(TelegramTransport::new(c)));
+    let whatsapp_config_clone = whatsapp_config.clone();
     let whatsapp_transport = whatsapp_config.map(|c| Arc::new(WhatsAppTransport::new(c)));
+    let feishu_config_clone = feishu_config.clone();
     let feishu_transport = feishu_config.map(|c| Arc::new(crate::feishu_transport::FeishuTransport::new(c)));
 
     let state = WebhookState {
         session_router,
         telegram_transport,
+        whatsapp_config: whatsapp_config_clone,
         whatsapp_transport,
+        feishu_config: feishu_config_clone,
         feishu_transport,
         handler: Arc::new(handler),
     };
@@ -128,14 +134,13 @@ async fn handle_whatsapp_webhook(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     // Verify signature if present
     if let Some(sig) = headers.get("X-Hub-Signature-256") {
-        if let Some(transport) = &state.whatsapp_transport {
-            // Access app_secret from config if available, or store in transport
-            // For now, we skip if signature verification is not configured
-            // In production, this should be robust
+        if let Some(config) = &state.whatsapp_config {
             let sig_str = sig.to_str().unwrap_or("");
             if !sig_str.is_empty() {
-                // Placeholder for verification logic
-                // verify_whatsapp_signature(&body, sig_str, &app_secret)
+                if !verify_whatsapp_signature(&body, sig_str, &config.app_secret) {
+                    error!("WhatsApp signature verification failed");
+                    return Err(StatusCode::UNAUTHORIZED);
+                }
             }
         }
     }
@@ -168,8 +173,27 @@ async fn handle_feishu_ping() -> Json<serde_json::Value> {
 
 async fn handle_feishu_webhook(
     State(state): State<WebhookState>,
+    headers: axum::http::HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
+    // Verify Feishu signature if present
+    if let (Some(ts), Some(nonce), Some(sig)) = (
+        headers.get("X-Lark-Request-Timestamp"),
+        headers.get("X-Lark-Request-Nonce"),
+        headers.get("X-Lark-Signature"),
+    ) {
+        if let Some(config) = &state.feishu_config {
+            let ts_str = ts.to_str().unwrap_or("");
+            let nonce_str = nonce.to_str().unwrap_or("");
+            let sig_str = sig.to_str().unwrap_or("");
+            
+            if !verify_feishu_signature(ts_str, nonce_str, sig_str, &body, &config.app_secret) {
+                error!("Feishu signature verification failed");
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+        }
+    }
+
     let payload: FeishuWebhookPayload = match serde_json::from_slice(&body) {
         Ok(p) => p,
         Err(e) => {

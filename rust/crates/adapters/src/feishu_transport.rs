@@ -184,6 +184,28 @@ impl Transport for FeishuTransport {
     }
 }
 
+/// Verify the Feishu webhook signature (X-Lark-Signature).
+/// Signature = SHA256(timestamp + nonce + encrypt_key + body)
+pub fn verify_feishu_signature(
+    timestamp: &str,
+    nonce: &str,
+    signature: &str,
+    body: &[u8],
+    encrypt_key: &str,
+) -> bool {
+    use sha2::{Sha256, Digest};
+
+    let mut hasher = Sha256::new();
+    hasher.update(timestamp.as_bytes());
+    hasher.update(nonce.as_bytes());
+    hasher.update(encrypt_key.as_bytes());
+    hasher.update(body);
+    let result = hasher.finalize();
+    let actual_sig = hex::encode(result);
+
+    actual_sig == signature
+}
+
 /// Parse an incoming Feishu webhook payload into a BridgeInboundEvent.
 pub fn parse_feishu_webhook(payload: &FeishuWebhookPayload) -> Option<BridgeInboundEvent> {
     if payload.r#type == "url_verification" {
