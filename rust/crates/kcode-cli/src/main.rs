@@ -3993,7 +3993,6 @@ fn run_doctor_fix(
             let entry = entry?;
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
-                // Simple validation: check if file is readable and not empty
                 if let Ok(content) = std::fs::read_to_string(&path) {
                     if content.is_empty() {
                         let backup = path.with_extension("jsonl.corrupted");
@@ -4006,23 +4005,94 @@ fn run_doctor_fix(
         }
     }
 
-    // 4. Check Environment Variables
-    let required_vars = ["KCODE_API_KEY", "KCODE_MODEL"];
-    for var in required_vars {
-        if std::env::var(var).is_err() {
-            println!("⚠ Missing environment variable: {}", var);
-            println!("   → Please add 'export {}=your_value' to your shell profile", var);
+    // 4. Clean up legacy residue from upstream import
+    let legacy_files = [
+        format!("{}/.claw.json", home),
+        format!("{}/.claw/settings.json", home),
+        format!("{}/.claw/settings.local.json", home),
+    ];
+    for file in &legacy_files {
+        if std::path::Path::new(file).exists() {
+            println!("🧹 Cleaning legacy residue: {}", file);
+            let _ = std::fs::remove_file(file);
+            fixed_count += 1;
+        }
+    }
+    // Clean up .claw directory if empty
+    let claw_dir = format!("{}/.claw", home);
+    if std::path::Path::new(&claw_dir).is_dir() {
+        if std::fs::read_dir(&claw_dir).map(|mut d| d.count() == 0).unwrap_or(false) {
+            println!("🧹 Removing empty .claw directory");
+            let _ = std::fs::remove_dir(&claw_dir);
+            fixed_count += 1;
         }
     }
 
-    // 5. Check Bridge Config
+    // 5. Generate .env template if missing
+    let env_template_path = format!("{}/.kcode/.env.example", home);
+    if !std::path::Path::new(&env_template_path).exists() {
+        println!("📝 Generating .env.example template...");
+        let env_content = r#"# Kcode Bridge Environment Variables
+# Copy this file to .env and fill in your values
+
+# Core API Configuration
+KCODE_API_KEY=your_api_key_here
+KCODE_MODEL=your_model_name
+# KCODE_BASE_URL=https://your-custom-endpoint
+
+# Telegram Bot (Optional)
+# KCODE_TELEGRAM_BOT_TOKEN=123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11
+
+# WhatsApp Cloud API (Optional)
+# KCODE_WHATSAPP_PHONE_ID=your_phone_id
+# KCODE_WHATSAPP_TOKEN=your_access_token
+# KCODE_WHATSAPP_APP_SECRET=your_app_secret
+
+# Feishu/Lark (Optional)
+# KCODE_FEISHU_APP_ID=your_app_id
+# KCODE_FEISHU_APP_SECRET=your_app_secret
+
+# Webhook Configuration (Optional, for production use)
+# KCODE_WEBHOOK_URL=https://your-domain.com/webhook/telegram
+# KCODE_WEBHOOK_VERIFY_TOKEN=your_verify_token
+"#;
+        std::fs::write(&env_template_path, env_content)?;
+        fixed_count += 1;
+    }
+
+    // 6. Check Environment Variables and provide setup hints
+    let mut missing_vars = Vec::new();
+    let required_vars = ["KCODE_API_KEY", "KCODE_MODEL"];
+    for var in required_vars {
+        if std::env::var(var).is_err() {
+            missing_vars.push(var.to_string());
+        }
+    }
+
+    if !missing_vars.is_empty() {
+        println!("\n⚠ Missing required environment variables:");
+        for var in &missing_vars {
+            println!("   • {}", var);
+        }
+        println!("\n💡 Quick Fix:");
+        println!("   1. Copy ~/.kcode/.env.example to ~/.kcode/.env");
+        println!("   2. Edit ~/.kcode/.env and fill in your values");
+        println!("   3. Run: source ~/.kcode/.env");
+    } else {
+        println!("\n✅ All required environment variables are set.");
+    }
+
+    // 7. Check Bridge Channel Configuration
     let has_channel = ["KCODE_TELEGRAM_BOT_TOKEN", "KCODE_WHATSAPP_PHONE_ID", "KCODE_FEISHU_APP_ID"]
         .iter()
         .any(|v| std::env::var(v).is_ok());
     
     if !has_channel {
-        println!("ℹ No bridge channels configured.");
-        println!("   → Set KCODE_TELEGRAM_BOT_TOKEN or others to enable multi-channel mode.");
+        println!("\nℹ No bridge channels configured.");
+        println!("   → This is normal for REPL-only usage.");
+        println!("   → To enable multi-channel bot mode, set KCODE_TELEGRAM_BOT_TOKEN or others.");
+    } else {
+        println!("\n✅ Bridge channels detected.");
     }
 
     println!("\n✅ Self-healing complete. Fixed {} issue(s).", fixed_count);
