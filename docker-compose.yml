@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  kcode-bot:
+    build: .
+    container_name: kcode-bot
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      # Mount configuration and session data to host
+      - ./kcode-config:/root/.kcode
+    env_file:
+      # Load environment variables for secrets
+      - .env
+    environment:
+      # Enable Webhook mode if you have a domain
+      # - KCODE_WEBHOOK_URL=https://your-domain.com/webhook/telegram

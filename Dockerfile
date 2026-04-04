@@ -1,24 +1,15 @@
-# Build Stage
-FROM rust:1.78-alpine AS builder
-RUN apk add --no-cache musl-dev git
+FROM rust:1.75-alpine AS builder
 WORKDIR /app
-COPY rust/Cargo.toml rust/Cargo.lock ./
-COPY rust/crates ./crates
-# Build release binary
+COPY rust/ .
 RUN cargo build --release -p kcode-cli
-RUN strip target/release/kcode
 
-# Runtime Stage
-FROM alpine:3.20
-RUN apk add --no-cache ca-certificates
-WORKDIR /app
-COPY --from=builder /app/target/release/kcode /usr/local/bin/kcode
+FROM alpine:3.19
+RUN apk --no-cache add ca-certificates
+WORKDIR /root/
+COPY --from=builder /app/target/release/kcode .
 
-# Runtime Config
-ENV RUST_LOG=info
+# Expose Webhook port
 EXPOSE 3000
 
-# Volumes for persistence
-VOLUME ["/root/.kcode"]
-
-ENTRYPOINT ["kcode", "bridge"]
+ENTRYPOINT ["./kcode"]
+CMD ["bridge"]
