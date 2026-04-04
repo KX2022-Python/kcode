@@ -11,6 +11,8 @@ use syntect::highlighting::{Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::util::{as_24_bit_terminal_escaped, LinesWithEndings};
 
+use crate::theme_settings::current_theme_name;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ColorTheme {
     heading: Color,
@@ -28,18 +30,66 @@ pub struct ColorTheme {
 
 impl Default for ColorTheme {
     fn default() -> Self {
-        Self {
-            heading: Color::Cyan,
-            emphasis: Color::Magenta,
-            strong: Color::Yellow,
-            inline_code: Color::Green,
-            link: Color::Blue,
-            quote: Color::DarkGrey,
-            table_border: Color::DarkCyan,
-            code_block_border: Color::DarkGrey,
-            spinner_active: Color::Blue,
-            spinner_done: Color::Green,
-            spinner_failed: Color::Red,
+        Self::from_theme_name(current_theme_name())
+    }
+}
+
+impl ColorTheme {
+    #[must_use]
+    pub fn from_theme_name(theme: crate::render_theme::ThemeName) -> Self {
+        match theme {
+            crate::render_theme::ThemeName::Graphite => Self {
+                heading: Color::Cyan,
+                emphasis: Color::Magenta,
+                strong: Color::Yellow,
+                inline_code: Color::Green,
+                link: Color::Blue,
+                quote: Color::DarkGrey,
+                table_border: Color::DarkCyan,
+                code_block_border: Color::DarkGrey,
+                spinner_active: Color::Blue,
+                spinner_done: Color::Green,
+                spinner_failed: Color::Red,
+            },
+            crate::render_theme::ThemeName::Sunset => Self {
+                heading: Color::DarkYellow,
+                emphasis: Color::Red,
+                strong: Color::Yellow,
+                inline_code: Color::Magenta,
+                link: Color::DarkYellow,
+                quote: Color::DarkRed,
+                table_border: Color::DarkYellow,
+                code_block_border: Color::DarkRed,
+                spinner_active: Color::DarkYellow,
+                spinner_done: Color::Green,
+                spinner_failed: Color::Red,
+            },
+            crate::render_theme::ThemeName::Amber => Self {
+                heading: Color::Yellow,
+                emphasis: Color::DarkYellow,
+                strong: Color::White,
+                inline_code: Color::Yellow,
+                link: Color::DarkYellow,
+                quote: Color::DarkGrey,
+                table_border: Color::DarkYellow,
+                code_block_border: Color::DarkYellow,
+                spinner_active: Color::Yellow,
+                spinner_done: Color::Green,
+                spinner_failed: Color::Red,
+            },
+            crate::render_theme::ThemeName::Ocean => Self {
+                heading: Color::Cyan,
+                emphasis: Color::Blue,
+                strong: Color::White,
+                inline_code: Color::Green,
+                link: Color::Blue,
+                quote: Color::DarkCyan,
+                table_border: Color::Cyan,
+                code_block_border: Color::DarkCyan,
+                spinner_active: Color::Cyan,
+                spinner_done: Color::Green,
+                spinner_failed: Color::Red,
+            },
         }
     }
 }

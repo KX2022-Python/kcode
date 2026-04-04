@@ -1,14 +1,12 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{List, ListItem, ListState, Paragraph};
+use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use super::message_row::render_message;
 use super::state::RenderableMessage;
 
-/// 消息列表渲染 — 对齐 CC-Haha VirtualMessageList
-/// 使用简单的滚动列表（暂不实现虚拟滚动，后续优化）
 pub fn render_messages(
     frame: &mut Frame<'_>,
     messages: &[RenderableMessage],
@@ -19,51 +17,63 @@ pub fn render_messages(
         let empty = Paragraph::new(vec![
             Line::from(""),
             Line::from(""),
-            Line::from(""),
-            Line::from(vec![ratatui::text::Span::styled(
-                "  输入消息开始对话，或输入 / 查看命令",
-                Style::default().fg(Color::Gray),
-            )]),
-        ]);
+            Line::from("  输入消息开始对话，或输入 / 查看命令"),
+        ])
+        .style(Style::default().fg(Color::Gray));
         frame.render_widget(empty, area);
         return;
     }
 
-    let items: Vec<ListItem> = messages
-        .iter()
-        .flat_map(|msg| {
-            let lines = render_message(msg);
-            lines.into_iter().map(ListItem::new).collect::<Vec<_>>()
-        })
-        .collect();
+    let lines = message_lines(messages, area.width);
+    let max_offset = lines.len().saturating_sub(area.height as usize);
+    *scroll_offset = (*scroll_offset).min(max_offset);
 
-    let message_count = items.len();
-    let mut list_state = ListState::default();
-
-    // 滚动控制：确保滚动偏移在有效范围内
-    let visible_height = area.height as usize;
-    let max_offset = message_count.saturating_sub(visible_height);
-    if *scroll_offset > max_offset {
-        *scroll_offset = max_offset;
-    }
-
-    list_state.select(Some(*scroll_offset));
-
-    let list = List::new(items).highlight_style(
-        Style::default()
-            .bg(Color::Rgb(30, 30, 30))
-            .add_modifier(Modifier::BOLD),
-    );
-
-    frame.render_stateful_widget(list, area, &mut list_state);
+    let paragraph =
+        Paragraph::new(lines).scroll(((*scroll_offset).min(u16::MAX as usize) as u16, 0));
+    frame.render_widget(paragraph, area);
 }
 
-/// 计算当前应该显示的滚动位置（自动滚动到底部）
-pub fn auto_scroll_to_bottom(messages: &[RenderableMessage], area_height: u16) -> usize {
-    let total_lines = messages
-        .iter()
-        .map(|m| render_message(m).len())
-        .sum::<usize>()
-        .max(1);
-    total_lines.saturating_sub(area_height as usize)
+pub fn auto_scroll_to_bottom(
+    messages: &[RenderableMessage],
+    area_height: u16,
+    area_width: u16,
+) -> usize {
+    line_count(messages, area_width).saturating_sub(area_height as usize)
+}
+
+fn line_count(messages: &[RenderableMessage], width: u16) -> usize {
+    message_lines(messages, width).len().max(1)
+}
+
+fn message_lines(messages: &[RenderableMessage], width: u16) -> Vec<Line<'static>> {
+    let content_width = width.saturating_sub(1).max(1);
+    let mut lines = Vec::new();
+
+    for (index, message) in messages.iter().enumerate() {
+        if index > 0 {
+            lines.push(Line::from(""));
+        }
+        lines.extend(render_message(message, content_width));
+    }
+
+    lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::auto_scroll_to_bottom;
+    use crate::tui::repl::state::RenderableMessage;
+
+    #[test]
+    fn auto_scroll_changes_with_terminal_width() {
+        let messages = vec![RenderableMessage::AssistantText {
+            text: "abcdefghijklmnopqrstuvwxyz0123456789".to_string(),
+            streaming: false,
+        }];
+
+        let narrow = auto_scroll_to_bottom(&messages, 3, 12);
+        let wide = auto_scroll_to_bottom(&messages, 3, 80);
+
+        assert!(narrow >= wide);
+    }
 }

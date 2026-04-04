@@ -352,7 +352,7 @@ fn profile_commands_report_effective_router_settings_after_init() {
         .expect("kcode should launch");
     assert_success(&list_output);
     let list_stdout = String::from_utf8(list_output.stdout).expect("stdout should be utf8");
-    assert!(list_stdout.contains("* cliproxyapi"));
+    assert!(list_stdout.contains("* custom"));
     assert!(list_stdout.contains("key=KCODE_API_KEY"));
     assert!(list_stdout.contains("model=gpt-4.1"));
 
@@ -363,6 +363,7 @@ fn profile_commands_report_effective_router_settings_after_init() {
         .expect("kcode should launch");
     assert_success(&show_output);
     let show_stdout = String::from_utf8(show_output.stdout).expect("stdout should be utf8");
+    assert!(show_stdout.contains("Name              custom"));
     assert!(show_stdout.contains("Base URL env      KCODE_BASE_URL"));
     assert!(show_stdout.contains("API key env       KCODE_API_KEY"));
     assert!(show_stdout.contains("Default model     gpt-4.1"));

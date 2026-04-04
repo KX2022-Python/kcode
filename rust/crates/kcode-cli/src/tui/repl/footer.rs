@@ -17,14 +17,12 @@ pub fn footer(
     };
 
     let state_indicator = match state_label {
-        "requesting" | "thinking" | "responding" | "tool_use" | "tool_running" => {
-            Span::styled(
-                format!(" ● {}", state_label),
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            )
-        }
+        "requesting" | "thinking" | "responding" | "tool_use" | "tool_running" => Span::styled(
+            format!(" ● {}", state_label),
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD),
+        ),
         "waiting_permission" => Span::styled(
             " ⚠ waiting_permission",
             Style::default()
@@ -33,28 +31,18 @@ pub fn footer(
         ),
         "error" => Span::styled(
             " ✗ error",
-            Style::default()
-                .fg(Color::Red)
-                .add_modifier(Modifier::BOLD),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         ),
-        _ => Span::styled(
-            " · ready",
-            Style::default().fg(Color::Gray),
-        ),
+        _ => Span::styled(" · ready", Style::default().fg(Color::Gray)),
     };
 
-    Paragraph::new(vec![
-        Line::from(vec![
-            Span::styled(
-                " ",
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::styled(
-                hints,
-                Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
-            ),
-            state_indicator,
-        ]),
-    ])
+    Paragraph::new(vec![Line::from(vec![
+        Span::styled(" ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            hints,
+            Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
+        ),
+        state_indicator,
+    ])])
     .style(ratatui::style::Style::default().bg(Color::Rgb(18, 28, 20)))
 }

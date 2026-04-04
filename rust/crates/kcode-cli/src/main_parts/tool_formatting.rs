@@ -45,7 +45,7 @@ fn format_tool_call_start(name: &str, input: &str) -> String {
         _ => summarize_tool_payload(input),
     };
 
-    let palette = ThemePalette::default_terminal();
+    let palette = ThemePalette::current_terminal();
     let border = "─".repeat(name.len() + 8);
     let name_colored = render_with_palette(&palette, name, SemanticRole::Tool, true, true);
     format!(
@@ -54,7 +54,7 @@ fn format_tool_call_start(name: &str, input: &str) -> String {
 }
 
 fn format_tool_result(name: &str, output: &str, is_error: bool) -> String {
-    let palette = ThemePalette::default_terminal();
+    let palette = ThemePalette::current_terminal();
     let role = if is_error { SemanticRole::Error } else { SemanticRole::Success };
     let icon = render_with_palette(&palette, if is_error { "✗" } else { "✓" }, role, true, true);
 

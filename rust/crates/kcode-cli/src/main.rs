@@ -7,10 +7,12 @@
     clippy::unused_self
 )]
 mod init;
+mod init_defaults;
 mod input;
 mod render;
 mod render_semantic;
 mod render_theme;
+mod theme_settings;
 mod tui;
 
 use std::collections::BTreeSet;

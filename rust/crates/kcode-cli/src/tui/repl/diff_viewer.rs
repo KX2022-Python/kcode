@@ -93,14 +93,12 @@ pub fn render_diff_viewer(frame: &mut Frame<'_>, viewer: &DiffViewer, area: Rect
     };
 
     let mut lines: Vec<Line> = vec![
-        Line::from(vec![
-            Span::styled(
-                format!(" 📄 {} ", viewer.file_path),
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
+        Line::from(vec![Span::styled(
+            format!(" 📄 {} ", viewer.file_path),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
     ];
 
@@ -122,14 +120,12 @@ pub fn render_diff_viewer(frame: &mut Frame<'_>, viewer: &DiffViewer, area: Rect
                 Span::styled("  ", Style::default()),
                 Span::styled(text.clone(), Style::default().fg(Color::Gray)),
             ]),
-            DiffLine::Header(text) => Line::from(vec![
-                Span::styled(
-                    text.clone(),
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]),
+            DiffLine::Header(text) => Line::from(vec![Span::styled(
+                text.clone(),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )]),
         };
         lines.push(line);
     }

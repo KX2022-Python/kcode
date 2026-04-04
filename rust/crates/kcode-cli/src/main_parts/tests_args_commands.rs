@@ -79,6 +79,16 @@
             CliAction::Tui { section: None }
         );
         assert_eq!(
+            parse_args(&["repl-tui".to_string()]).expect("repl-tui should parse"),
+            CliAction::ReplTui {
+                model: DEFAULT_MODEL.to_string(),
+                model_explicit: false,
+                profile: None,
+                allowed_tools: None,
+                permission_mode: super::default_permission_mode(),
+            }
+        );
+        assert_eq!(
             parse_args(&["configure".to_string(), "bridge".to_string()])
                 .expect("configure bridge should parse"),
             CliAction::Tui {

@@ -2,7 +2,6 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-/// Footer Pills — 对齐 CC-Haha PromptInputFooter 状态指示器系统
 pub struct FooterPills {
     pub model: String,
     pub permission_mode: String,
@@ -20,11 +19,7 @@ pub struct TokenUsage {
 }
 
 impl FooterPills {
-    pub fn new(
-        model: String,
-        permission_mode: String,
-        session_id: String,
-    ) -> Self {
+    pub fn new(model: String, permission_mode: String, session_id: String) -> Self {
         Self {
             model,
             permission_mode,
@@ -36,91 +31,47 @@ impl FooterPills {
         }
     }
 
-    pub fn render(&self) -> Paragraph<'static> {
-        let mut spans: Vec<Span<'static>> = Vec::new();
-
-        // Model pill
-        spans.push(Span::styled(
-            format!(" 🤖 {} ", self.model),
-            Style::default()
-                .fg(Color::Cyan)
-                .bg(Color::Rgb(15, 25, 30)),
-        ));
-
+    pub fn render(&self, width: u16) -> Paragraph<'static> {
+        let mut spans = vec![pill("Tab", "commands", Color::Cyan)];
         spans.push(Span::raw(" "));
+        spans.push(pill("Shift+Enter", "newline", Color::Gray));
 
-        // Permission mode pill
-        let perm_color = match self.permission_mode.as_str() {
-            "allow" | "Allow" => Color::Green,
-            "prompt" | "Prompt" => Color::Yellow,
-            "danger" => Color::Red,
-            _ => Color::Gray,
-        };
-        spans.push(Span::styled(
-            format!(" 🔒 {} ", self.permission_mode),
-            Style::default()
-                .fg(perm_color)
-                .bg(Color::Rgb(25, 22, 8)),
-        ));
-
-        spans.push(Span::raw(" "));
-
-        // Session pill
-        spans.push(Span::styled(
-            format!(" 📋 {} ", self.session_id.chars().take(12).collect::<String>()),
-            Style::default()
-                .fg(Color::Gray)
-                .bg(Color::Rgb(20, 20, 20)),
-        ));
-
-        // Token usage pill (if available)
-        if let Some(ref usage) = self.token_usage {
+        if width >= 100 {
             spans.push(Span::raw(" "));
-            spans.push(Span::styled(
-                format!(
-                    " ⚡ {}in/{}out ",
-                    usage.input_tokens, usage.output_tokens
-                ),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .bg(Color::Rgb(25, 22, 8)),
-            ));
+            spans.push(pill("PgUp/PgDn", "scroll", Color::Gray));
         }
 
-        // Active query indicator
+        if let Some(usage) = &self.token_usage {
+            if width >= 130 {
+                spans.push(Span::raw(" "));
+                spans.push(pill(
+                    "tokens",
+                    &format!("{} in / {} out", usage.input_tokens, usage.output_tokens),
+                    Color::Yellow,
+                ));
+            }
+        }
+
         if self.has_active_query {
             spans.push(Span::raw(" "));
-            spans.push(Span::styled(
-                " ● processing ",
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            ));
+            spans.push(pill("state", "processing", Color::Magenta));
         }
-
-        // Permission pending indicator
         if self.has_pending_permission {
             spans.push(Span::raw(" "));
-            spans.push(Span::styled(
-                " ⚠ permission ",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ));
+            spans.push(pill("state", "permission", Color::Yellow));
         }
-
-        // Notification indicator
         if self.has_notifications {
             spans.push(Span::raw(" "));
-            spans.push(Span::styled(
-                " 🔔 ",
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
-            ));
+            spans.push(pill("state", "notice", Color::Red));
         }
 
-        Paragraph::new(vec![Line::from(spans)])
-            .style(Style::default().bg(Color::Rgb(18, 28, 20)))
+        Paragraph::new(vec![Line::from(spans)]).style(Style::default().bg(Color::Rgb(18, 28, 20)))
     }
+}
+
+fn pill(label: &str, value: &str, color: Color) -> Span<'static> {
+    Span::styled(
+        format!("{label}:{value}"),
+        Style::default().fg(color).add_modifier(Modifier::DIM),
+    )
 }

@@ -1,3 +1,4 @@
+use crate::init_defaults::starter_config_toml;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -7,17 +8,6 @@ const STARTER_KCODE_JSON: &str = concat!(
     "    \"defaultMode\": \"dontAsk\"\n",
     "  }\n",
     "}\n",
-);
-const STARTER_CONFIG_TOML: &str = concat!(
-    "# Kcode bootstrap configuration\n",
-    "# Fill these values before running prompt or interactive sessions.\n",
-    "\n",
-    "profile = \"cliproxyapi\"\n",
-    "model = \"gpt-4.1\"\n",
-    "base_url = \"\"\n",
-    "api_key_env = \"KCODE_API_KEY\"\n",
-    "permission_mode = \"workspace-write\"\n",
-    "session_dir = \".kcode/sessions\"\n",
 );
 const GITIGNORE_COMMENT: &str = "# Kcode local artifacts";
 const GITIGNORE_ENTRIES: [&str; 2] = [".kcode/settings.local.json", ".kcode/sessions/"];
@@ -92,8 +82,7 @@ impl UserConfigInitReport {
             ));
         }
         lines.push(
-            "  Next step        Set KCODE_API_KEY, review config.toml, then run `kcode doctor`"
-                .to_string(),
+            "  Next step        Run `kcode` and complete provider setup in the TUI".to_string(),
         );
         lines.join("\n")
     }
@@ -162,7 +151,10 @@ pub(crate) fn initialize_user_config(
 
     artifacts.push(InitArtifact {
         name: "config.toml",
-        status: write_file_if_missing(&config_home.join("config.toml"), STARTER_CONFIG_TOML)?,
+        status: write_file_if_missing(
+            &config_home.join("config.toml"),
+            &starter_config_toml(config_home),
+        )?,
     });
 
     artifacts.push(InitArtifact {

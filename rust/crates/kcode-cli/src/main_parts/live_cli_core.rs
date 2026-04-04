@@ -81,7 +81,7 @@ impl LiveCli {
   \x1b[2mDirectory\x1b[0m        {}\n\
   \x1b[2mSession\x1b[0m          {}\n\
   \x1b[2mAuto-save\x1b[0m        {}\n\n\
-  Type \x1b[1m/help\x1b[0m for commands · \x1b[1m/status\x1b[0m for live context · \x1b[2m/resume latest\x1b[0m jumps back to the newest session · \x1b[1m/diff\x1b[0m then \x1b[1m/commit\x1b[0m to ship · \x1b[2mTab\x1b[0m for workflow completions · \x1b[2mShift+Enter\x1b[0m for newline",
+  Type \x1b[1m/help\x1b[0m for commands · \x1b[1m/status\x1b[0m for live context · type \x1b[1m/\x1b[0m to preview slash commands · \x1b[2m/resume latest\x1b[0m jumps back to the newest session · \x1b[1m/diff\x1b[0m then \x1b[1m/commit\x1b[0m to ship · \x1b[2mTab\x1b[0m for full workflow completions · \x1b[2mShift+Enter\x1b[0m for newline",
             self.model,
             self.active_profile.profile_name,
             self.permission_mode.as_str(),

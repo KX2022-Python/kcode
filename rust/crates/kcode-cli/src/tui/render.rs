@@ -4,26 +4,20 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 
-use super::app::{EditorState, FieldId, TuiApp};
+use super::app::{EditorState, FieldId, FieldRow, TuiApp};
+use super::render_parts::{
+    detail_panel, display_value, palette, section_badge, value_style, Palette,
+};
 use super::state::{Section, ThemePreset};
-
-#[derive(Debug, Clone, Copy)]
-struct Palette {
-    accent: Color,
-    accent_soft: Color,
-    panel: Color,
-    muted: Color,
-    text: Color,
-}
 
 pub(crate) fn draw(frame: &mut Frame<'_>, app: &TuiApp) {
     let palette = palette(app.settings().appearance.theme);
     let layout = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(5),
+            Constraint::Min(16),
             Constraint::Length(3),
-            Constraint::Min(10),
-            Constraint::Length(2),
         ])
         .split(frame.area());
 
@@ -36,74 +30,103 @@ pub(crate) fn draw(frame: &mut Frame<'_>, app: &TuiApp) {
 }
 
 fn render_body(frame: &mut Frame<'_>, app: &TuiApp, palette: Palette, area: Rect) {
-    let sections = Layout::default()
+    let columns = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Length(24), Constraint::Min(20)])
+        .constraints([
+            Constraint::Length(24),
+            Constraint::Min(36),
+            Constraint::Length(34),
+        ])
         .split(area);
 
+    render_sections(frame, app, palette, columns[0]);
+    let selected_row = render_fields(frame, app, palette, columns[1]);
+    frame.render_widget(
+        detail_panel(app, selected_row.as_ref(), palette),
+        columns[2],
+    );
+}
+
+fn render_sections(frame: &mut Frame<'_>, app: &TuiApp, palette: Palette, area: Rect) {
     let items = Section::ALL
         .iter()
         .map(|section| {
-            let mut label = section.title().to_string();
-            if *section == app.section() {
-                label.push_str("  •");
-            }
-            ListItem::new(Line::from(label))
+            let label = if *section == app.section() {
+                format!("{}  •", section.title())
+            } else {
+                section.title().to_string()
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(
+                    section_badge(*section),
+                    Style::default()
+                        .fg(if *section == app.section() {
+                            palette.accent
+                        } else {
+                            palette.muted
+                        })
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" "),
+                Span::styled(label, Style::default().fg(palette.text)),
+            ]))
         })
         .collect::<Vec<_>>();
-    let mut section_state = ListState::default();
-    section_state.select(
+
+    let mut state = ListState::default();
+    state.select(
         Section::ALL
             .iter()
             .position(|section| *section == app.section()),
     );
-    let section_list = List::new(items)
+
+    let list = List::new(items)
         .highlight_style(
             Style::default()
-                .fg(palette.accent)
-                .bg(palette.panel)
+                .fg(palette.text)
+                .bg(palette.panel_alt)
                 .add_modifier(Modifier::BOLD),
         )
         .block(
             Block::default()
-                .title("Sections")
+                .title(" Navigate ")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(palette.accent_soft)),
+                .style(Style::default().bg(palette.surface))
+                .border_style(Style::default().fg(palette.border)),
         );
-    frame.render_stateful_widget(section_list, sections[0], &mut section_state);
+    frame.render_stateful_widget(list, area, &mut state);
+}
 
+fn render_fields(
+    frame: &mut Frame<'_>,
+    app: &TuiApp,
+    palette: Palette,
+    area: Rect,
+) -> Option<FieldRow> {
     let rows = app.rows();
+    let selected_row = rows.get(app.field_index()).cloned();
     let items = rows
         .iter()
         .map(|row| {
             let label_style = if row.editable {
                 Style::default().fg(palette.accent)
             } else {
-                Style::default().fg(palette.muted)
+                Style::default().fg(palette.text_dim)
             };
-            let value = if row.value.trim().is_empty() && row.id != FieldId::ReadOnly {
-                "<unset>".to_string()
-            } else {
-                row.value.clone()
-            };
-            let line = if row.id == FieldId::ReadOnly {
-                Line::from(vec![
-                    Span::styled(format!("{:<16}", row.label), label_style),
-                    Span::styled(value, Style::default().fg(palette.text)),
-                ])
-            } else {
-                Line::from(vec![
-                    Span::styled(format!("{:<16}", row.label), label_style),
-                    Span::styled(value, Style::default().fg(palette.text)),
-                ])
-            };
+            let value = display_value(row);
+            let line = Line::from(vec![
+                Span::styled(format!("{:<16}", row.label), label_style),
+                Span::styled(value, value_style(row, palette)),
+            ]);
             ListItem::new(line)
         })
         .collect::<Vec<_>>();
-    let mut field_state = ListState::default();
+
+    let mut state = ListState::default();
     if !rows.is_empty() {
-        field_state.select(Some(app.field_index()));
+        state.select(Some(app.field_index()));
     }
+
     let title = match app.section() {
         Section::Mcp if !app.settings().mcp.servers.is_empty() => format!(
             "{}  [{}/{}]  n:add x:del [ ]:switch",
@@ -113,68 +136,108 @@ fn render_body(frame: &mut Frame<'_>, app: &TuiApp, palette: Palette, area: Rect
         ),
         _ => app.section().title().to_string(),
     };
-    let row_list = List::new(items)
+
+    let list = List::new(items)
         .highlight_symbol("› ")
         .highlight_style(
             Style::default()
                 .fg(palette.text)
-                .bg(palette.panel)
+                .bg(palette.panel_alt)
                 .add_modifier(Modifier::BOLD),
         )
         .block(
             Block::default()
-                .title(title)
+                .title(format!(" {} ", title))
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(palette.accent_soft)),
+                .style(Style::default().bg(palette.surface))
+                .border_style(Style::default().fg(palette.border_active)),
         );
-    frame.render_stateful_widget(row_list, sections[1], &mut field_state);
+    frame.render_stateful_widget(list, area, &mut state);
+    selected_row
 }
 
 fn header(app: &TuiApp, palette: Palette) -> Paragraph<'static> {
     let state = if app.is_dirty() { "modified" } else { "saved" };
-    let line = Line::from(vec![
-        Span::styled(
-            "Kcode Configure",
-            Style::default()
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            format!("scope: {}", app.settings().scope.label()),
-            Style::default().fg(palette.text),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            format!("state: {state}"),
-            Style::default().fg(palette.muted),
-        ),
-    ]);
+    let runtime = if app.settings().overview.runtime_ready {
+        "ready"
+    } else {
+        "needs setup"
+    };
     Paragraph::new(vec![
-        line,
-        Line::from("完整终端设置界面，保存后直接作用于 config.toml 与 bridge.env。"),
+        Line::from(vec![
+            Span::styled(
+                "Kcode Control Deck",
+                Style::default()
+                    .fg(palette.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("   "),
+            Span::styled(
+                format!("section {}", app.section().title()),
+                Style::default().fg(palette.text),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                format!("scope {}", app.settings().scope.label()),
+                Style::default().fg(palette.accent_alt),
+            ),
+            Span::raw("   "),
+            Span::styled(
+                format!("state {state}"),
+                Style::default().fg(if app.is_dirty() {
+                    palette.warning
+                } else {
+                    palette.success
+                }),
+            ),
+            Span::raw("   "),
+            Span::styled(
+                format!("runtime {runtime}"),
+                Style::default().fg(if app.settings().overview.runtime_ready {
+                    palette.success
+                } else {
+                    palette.warning
+                }),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "First run starts in Provider.",
+                Style::default().fg(palette.text),
+            ),
+            Span::raw(" "),
+            Span::styled(
+                "Fill endpoint, API key env, and default model before chatting.",
+                Style::default().fg(palette.text_dim),
+            ),
+        ]),
     ])
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.accent_soft)),
+            .style(Style::default().bg(palette.panel))
+            .border_style(Style::default().fg(palette.border_active)),
     )
     .wrap(Wrap { trim: true })
 }
 
 fn footer(app: &TuiApp, palette: Palette) -> Paragraph<'_> {
-    let hint = "←/→ 切页 · ↑/↓ 选项 · Enter 编辑/切换 · s 保存 · g 作用域 · r 重载 · q 退出";
     Paragraph::new(vec![
         Line::from(vec![Span::styled(
             app.status().to_string(),
             Style::default().fg(palette.text),
         )]),
-        Line::from(vec![Span::styled(hint, Style::default().fg(palette.muted))]),
+        Line::from(vec![Span::styled(
+            "←/→ section  ↑/↓ field  Enter edit/toggle  s save  g scope  r reload  q quit",
+            Style::default().fg(palette.text_dim),
+        )]),
     ])
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.accent_soft)),
+            .style(Style::default().bg(palette.panel))
+            .border_style(Style::default().fg(palette.border)),
     )
     .wrap(Wrap { trim: true })
 }
@@ -193,15 +256,16 @@ fn render_editor(frame: &mut Frame<'_>, editor: &EditorState, palette: Palette) 
         text,
         Line::from(""),
         Line::from(vec![Span::styled(
-            "Enter 应用，Esc 取消，Ctrl+U 清空。",
-            Style::default().fg(palette.muted),
+            "Enter apply  Esc cancel  Ctrl+U clear",
+            Style::default().fg(palette.text_dim),
         )]),
     ])
     .block(
         Block::default()
-            .title("Edit")
+            .title(" Edit ")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(palette.accent)),
+            .style(Style::default().bg(palette.panel))
+            .border_style(Style::default().fg(palette.border_active)),
     )
     .wrap(Wrap { trim: false });
     frame.render_widget(Clear, area);
@@ -245,31 +309,5 @@ fn line_with_cursor(value: &str, cursor: usize) -> Line<'static> {
             ),
             Span::raw(rest.to_string()),
         ])
-    }
-}
-
-fn palette(theme: ThemePreset) -> Palette {
-    match theme {
-        ThemePreset::Amber => Palette {
-            accent: Color::Yellow,
-            accent_soft: Color::Rgb(210, 160, 30),
-            panel: Color::Rgb(42, 30, 8),
-            muted: Color::Gray,
-            text: Color::White,
-        },
-        ThemePreset::Ocean => Palette {
-            accent: Color::Cyan,
-            accent_soft: Color::Rgb(40, 150, 170),
-            panel: Color::Rgb(8, 32, 42),
-            muted: Color::Gray,
-            text: Color::White,
-        },
-        ThemePreset::Default => Palette {
-            accent: Color::Green,
-            accent_soft: Color::Rgb(40, 120, 70),
-            panel: Color::Rgb(18, 28, 20),
-            muted: Color::Gray,
-            text: Color::White,
-        },
     }
 }

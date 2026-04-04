@@ -95,7 +95,9 @@ impl NotificationQueue {
     }
 
     pub fn dismiss_all(&mut self) {
-        self.notifications.iter_mut().for_each(|n| n.dismissed = true);
+        self.notifications
+            .iter_mut()
+            .for_each(|n| n.dismissed = true);
     }
 
     /// 获取当前应显示的通知（未过期 + 未解除）

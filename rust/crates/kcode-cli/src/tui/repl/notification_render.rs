@@ -7,11 +7,7 @@ use ratatui::Frame;
 use super::notifications::{Notification, NotificationPriority, NotificationQueue};
 
 /// 渲染通知栏 — 对齐 CC-Haha Notifications.tsx 单行绝对定位
-pub fn render_notifications(
-    frame: &mut Frame<'_>,
-    queue: &mut NotificationQueue,
-    area: Rect,
-) {
+pub fn render_notifications(frame: &mut Frame<'_>, queue: &mut NotificationQueue, area: Rect) {
     // 清理过期通知
     queue.cleanup();
 
@@ -42,11 +38,7 @@ fn render_single_notification(
             Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
             Color::Gray,
         ),
-        NotificationPriority::Medium => (
-            "●",
-            Style::default().fg(Color::Cyan),
-            Color::Cyan,
-        ),
+        NotificationPriority::Medium => ("●", Style::default().fg(Color::Cyan), Color::Cyan),
         NotificationPriority::High => (
             "★",
             Style::default()

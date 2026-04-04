@@ -14,9 +14,12 @@ release/
 .DS_Store
 Thumbs.db
 
-# Kcode local artifacts (sensitive paths)
-.kcode/sessions/
-.kcode/memory/
+# Kcode local artifacts and secrets
+.kcode/
+.env
+.env.*
+bridge.env
+*.log
 
 # Claude Code local artifacts
 .claude/

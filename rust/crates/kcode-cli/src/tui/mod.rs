@@ -2,6 +2,7 @@ mod app;
 mod config_store;
 pub(crate) mod repl;
 mod render;
+mod render_parts;
 pub(crate) mod state;
 
 use std::error::Error;
@@ -82,8 +83,7 @@ fn parse_section(value: &str) -> Result<Section, Box<dyn Error>> {
     }
 }
 
-/// REPL TUI 入口 — 全屏 AI 编程会话界面
-pub fn run_repl(
+pub(crate) fn run_repl(
     model: String,
     profile: String,
     session_id: String,

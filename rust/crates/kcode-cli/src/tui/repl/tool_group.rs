@@ -26,13 +26,11 @@ impl ToolUseGroup {
 
     pub fn add_tool(&mut self, msg: RenderableMessage) {
         match &msg {
-            RenderableMessage::ToolCall { status, .. } => {
-                match status {
-                    ToolStatus::Completed => self.success_count += 1,
-                    ToolStatus::Denied => self.error_count += 1,
-                    ToolStatus::Pending | ToolStatus::Running => self.pending_count += 1,
-                }
-            }
+            RenderableMessage::ToolCall { status, .. } => match status {
+                ToolStatus::Completed => self.success_count += 1,
+                ToolStatus::Denied => self.error_count += 1,
+                ToolStatus::Pending | ToolStatus::Running => self.pending_count += 1,
+            },
             RenderableMessage::ToolResult { is_error, .. } => {
                 if *is_error {
                     self.error_count += 1;
@@ -54,11 +52,15 @@ impl ToolUseGroup {
     pub fn summary_line(&self) -> String {
         let icon = if self.collapsed { "▶" } else { "▼" };
         let status = if self.pending_count > 0 {
-            format!("{} 个工具调用 ({} 完成, {} 错误, {} 等待)",
-                self.total_count, self.success_count, self.error_count, self.pending_count)
+            format!(
+                "{} 个工具调用 ({} 完成, {} 错误, {} 等待)",
+                self.total_count, self.success_count, self.error_count, self.pending_count
+            )
         } else {
-            format!("{} 个工具调用 ({} 完成, {} 错误)",
-                self.total_count, self.success_count, self.error_count)
+            format!(
+                "{} 个工具调用 ({} 完成, {} 错误)",
+                self.total_count, self.success_count, self.error_count
+            )
         };
         format!(" {} {}", icon, status)
     }

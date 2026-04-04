@@ -108,24 +108,29 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             profile,
             allowed_tools,
             permission_mode,
-        } => run_repl(
-            model,
-            model_explicit,
-            profile,
-            allowed_tools,
-            permission_mode,
-        )?,
+        } => {
+            if maybe_bootstrap_first_run(
+                model_explicit.then_some(model.as_str()),
+                profile.as_deref(),
+                permission_mode,
+            )? {
+                return Ok(());
+            }
+            run_repl(
+                model,
+                model_explicit,
+                profile,
+                allowed_tools,
+                permission_mode,
+            )?
+        }
         CliAction::ReplTui {
             model,
             model_explicit,
             profile,
             allowed_tools,
             permission_mode,
-        } => run_repl_tui(
-            model,
-            profile,
-            permission_mode,
-        )?,
+        } => run_repl_tui(model, profile, permission_mode)?,
         CliAction::Bridge {
             model,
             model_explicit,
@@ -140,6 +145,52 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         CliAction::Help { profile } => print_help(profile.as_deref()),
     }
     Ok(())
+}
+
+fn maybe_bootstrap_first_run(
+    model_override: Option<&str>,
+    profile_override: Option<&str>,
+    permission_mode: PermissionMode,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return Ok(false);
+    }
+
+    let setup = load_setup_context(
+        SetupMode::Interactive,
+        model_override,
+        profile_override,
+        permission_mode,
+        None,
+    )?;
+    if ensure_setup_ready_for_runtime(&setup).is_ok() {
+        return Ok(false);
+    }
+
+    let report = initialize_user_config(&setup.resolved_config.config_home)?;
+    let section = bootstrap_section(&setup);
+    println!("{}", report.render());
+    println!();
+    println!("Opening setup TUI on `{}` so you can configure your provider before first use.", section);
+    tui::run(Some(section))?;
+    Ok(true)
+}
+
+fn bootstrap_section(setup: &SetupContext) -> &'static str {
+    if !setup.resolved_config.config_file_present
+        || setup
+            .resolved_config
+            .base_url
+            .as_deref()
+            .is_none_or(|value| value.trim().is_empty())
+        || !setup.resolved_config.api_key_present
+    {
+        "provider"
+    } else if !path_or_parent_writeable(&setup.resolved_config.session_dir) {
+        "runtime"
+    } else {
+        "overview"
+    }
 }
 
 // ... (other existing code)
@@ -244,19 +295,9 @@ fn run_repl_tui(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let profile_name = profile.unwrap_or_else(|| "default".to_string());
     let session_id = format!("repl-{}", chrono_id());
-    let perm_str = permission_mode.as_str().to_string();
+    let permission_mode = permission_mode.as_str().to_string();
 
-    let submitted = tui::run_repl(model, profile_name, session_id, perm_str)?;
-
-    // 如果有提交的命令，继续执行
-    for cmd in submitted {
-        if cmd.starts_with('/') {
-            println!("执行斜杠命令: {}", cmd);
-            // 斜杠命令在 TUI 外执行，这里简化处理
-        } else if !cmd.starts_with("__permission_") {
-            println!("普通消息: {}", cmd);
-        }
-    }
+    let _submitted = tui::run_repl(model, profile_name, session_id, permission_mode)?;
     Ok(())
 }
 
@@ -264,8 +305,7 @@ fn chrono_id() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    let secs = now.as_secs();
-    format!("{:x}", secs)
+    format!("{:x}", now.as_secs())
 }
 
 fn resume_session(session_path: &Path, commands: &[String]) {

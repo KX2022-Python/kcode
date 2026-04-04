@@ -16,19 +16,19 @@ pub fn render_permission_dialog(
     focused_button: usize,
 ) {
     let lines = vec![
-        Line::from(vec![
-            Span::styled(
-                " ⚠ Permission Required",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
+        Line::from(vec![Span::styled(
+            " ⚠ Permission Required",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
         Line::from(vec![
             Span::styled(
                 "Tool: ",
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 &request.tool_name,
@@ -40,7 +40,9 @@ pub fn render_permission_dialog(
         Line::from(""),
         Line::from(vec![Span::styled(
             "Input:",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )]),
     ];
 
@@ -89,10 +91,7 @@ pub fn render_permission_dialog(
                 } else {
                     Style::default().fg(Color::Gray)
                 };
-                vec![
-                    Span::styled(label.to_string(), style),
-                    Span::raw("  "),
-                ]
+                vec![Span::styled(label.to_string(), style), Span::raw("  ")]
             })
             .collect::<Vec<_>>(),
     );

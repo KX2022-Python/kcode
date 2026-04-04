@@ -12,11 +12,17 @@ pub enum DialogType {
     /// 帮助菜单
     Help,
     /// 模型选择器
-    ModelPicker { models: Vec<String>, selected: usize },
+    ModelPicker {
+        models: Vec<String>,
+        selected: usize,
+    },
     /// 快捷键参考
     Keybindings,
     /// 会话选择器
-    SessionPicker { sessions: Vec<String>, selected: usize },
+    SessionPicker {
+        sessions: Vec<String>,
+        selected: usize,
+    },
     /// 通用信息对话框
     Info { title: String, content: String },
 }
@@ -63,9 +69,7 @@ pub fn render_dialog(frame: &mut Frame<'_>, dialog: &DialogState, area: Rect) {
 
     let lines = match dialog_type {
         DialogType::Help => build_help_dialog(),
-        DialogType::ModelPicker { models, selected } => {
-            build_model_picker(models, *selected)
-        }
+        DialogType::ModelPicker { models, selected } => build_model_picker(models, *selected),
         DialogType::Keybindings => build_keybindings_dialog(),
         DialogType::SessionPicker { sessions, selected } => {
             build_session_picker(sessions, *selected)
