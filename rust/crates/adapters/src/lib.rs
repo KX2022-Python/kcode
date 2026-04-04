@@ -30,10 +30,6 @@ pub use session_router::{ChannelSession, SessionRouter};
 pub mod webhook_server;
 pub use webhook_server::{start_webhook_server, WebhookState};
 
-/// Request sent from webhook server to the background processing task.
-pub struct WebhookRequest {
-    pub event: bridge::events::BridgeInboundEvent,
-}
-
+// Re-exports for convenience
 pub use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent};
 pub use bridge::DeliveryMode;

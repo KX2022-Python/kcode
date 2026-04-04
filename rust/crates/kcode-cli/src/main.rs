@@ -59,10 +59,11 @@ use runtime::{
 use serde_json::json;
 use tools::GlobalToolRegistry;
 
-// v1.1 Bridge Imports
-use adapters::{TelegramConfig, TelegramTransport, Transport};
-use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent};
-use bridge::DeliveryMode;
+// v1.1 Bridge Modules
+mod bridge_core;
+use bridge_core::{BridgeCore, BridgeMessage, SessionConfig};
+
+use adapters::{TelegramConfig, TelegramMode, TelegramTransport};
 
 const DEFAULT_MODEL: &str = "claude-opus-4-6";
 const CLI_NAME: &str = "kcode";
@@ -2064,103 +2065,67 @@ fn run_bridge(
     let bot_token = std::env::var("KCODE_TELEGRAM_BOT_TOKEN")
         .map_err(|_| "Environment variable KCODE_TELEGRAM_BOT_TOKEN is not set.")?;
 
-    let telegram_config = adapters::TelegramConfig {
+    let telegram_config = TelegramConfig {
         bot_token,
-        mode: adapters::TelegramMode::Polling { timeout: 30 },
+        mode: TelegramMode::Polling { timeout: 30 },
     };
+    let telegram_transport = TelegramTransport::new(telegram_config.clone());
 
-    // We use a channel to send inbound events to a dedicated background task.
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<adapters::WebhookRequest>(32);
-    
-    // Background task to process events sequentially
+    // Setup Session Router for persistence
     let session_router = std::sync::Arc::new(adapters::SessionRouter::new(
-        std::path::PathBuf::from(".kcode/sessions")
+        std::path::PathBuf::from(".kcode/bridge-sessions")
     ));
 
-    // Clone Send data for the background thread
-    let bg_model = model.clone();
-    let bg_model_explicit = model_explicit;
-    let bg_profile = profile.clone();
-    let bg_permission_mode = permission_mode;
-    let bg_telegram_config = telegram_config.clone();
+    // Create channel for BridgeCore
+    let (core_tx, core_rx) = std::sync::mpsc::channel::<BridgeMessage>();
 
-    // We spawn the processing loop on a dedicated thread.
-    // LiveCli is created INSIDE the thread to avoid Send requirements.
+    // Spawn BridgeCore in a dedicated thread to handle !Send LiveCli
     std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("Failed to create bridge runtime");
-
-        // We can't use block_on with LiveCli if it's !Send, but we can use LocalSet
-        // Actually, since we are in a single thread, we can just use block_on 
-        // IF we ensure we don't cross thread boundaries.
-        // But LiveCli contains Runtime which is !Send.
-        // We can wrap it in a LocalSet to run async code.
-        let local = tokio::task::LocalSet::new();
-        
-        local.block_on(&rt, async move {
-            // Create LiveCli INSIDE the thread
-            let mut cli = match LiveCli::new(
-                bg_model,
-                bg_model_explicit,
-                bg_profile,
-                true,
-                None,
-                bg_permission_mode,
-            ) {
-                Ok(c) => c,
-                Err(e) => {
-                    eprintln!("Failed to initialize bridge CLI: {}", e);
-                    return;
-                }
-            };
-
-            let telegram_transport = adapters::TelegramTransport::new(bg_telegram_config);
-            
-            while let Some(req) = rx.recv().await {
-                let chat_id = req.event.channel_chat_id.clone();
-                
-                match cli.run_turn_capture(&req.event.text) {
-                    Ok(response) => {
-                        let outbound = adapters::BridgeOutboundEvent {
-                            bridge_event_id: req.event.bridge_event_id,
-                            session_id: chat_id.clone(),
-                            channel_capability_hint: req.event.channel.clone(),
-                            reply_target: Some(chat_id.clone()),
-                            render_items: vec![("text".to_string(), response)],
-                            delivery_mode: adapters::DeliveryMode::Reply { reply_to: chat_id },
-                        };
-                        if let Err(e) = telegram_transport.send_outbound(&outbound).await {
-                            eprintln!("Bridge send failed: {}", e);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("Bridge processing failed: {}", e);
-                    }
-                }
-            }
-        });
+        let core = BridgeCore::new(
+            std::path::PathBuf::from(".kcode/bridge-sessions"),
+            telegram_transport,
+        );
+        let config = SessionConfig {
+            model: model, // Moved from main thread
+            model_explicit: model_explicit,
+            profile: profile, // Moved from main thread
+            permission_mode: permission_mode, // Moved from main thread
+        };
+        core.run(core_rx, config);
     });
 
-    // Webhook handler that just forwards to the channel
-    let webhook_tx = tx.clone();
+    // Webhook handler that forwards events to BridgeCore
     let handler = Box::new(move |event: adapters::BridgeInboundEvent| -> adapters::BridgeOutboundEvent {
-        let _ = webhook_tx.try_send(adapters::WebhookRequest {
-            event,
-        });
-        // Return a placeholder immediately
-        adapters::BridgeOutboundEvent {
-            bridge_event_id: "placeholder".to_string(),
-            session_id: String::new(),
-            channel_capability_hint: String::new(),
-            reply_target: None,
-            render_items: vec![],
-            delivery_mode: adapters::DeliveryMode::Single,
+        let (reply_tx, rx) = std::sync::mpsc::channel();
+        if let Err(e) = core_tx.send(BridgeMessage { event, reply_tx }) {
+            eprintln!("Failed to send event to BridgeCore: {}", e);
+            return adapters::BridgeOutboundEvent {
+                bridge_event_id: "error".to_string(),
+                session_id: String::new(),
+                channel_capability_hint: String::new(),
+                reply_target: None,
+                render_items: vec![("text".to_string(), "Error: Core unavailable".to_string())],
+                delivery_mode: adapters::DeliveryMode::Single,
+            };
+        }
+
+        // Block until BridgeCore processes the turn (sync reply for webhook response)
+        match rx.recv() {
+            Ok(outbound) => outbound,
+            Err(_) => adapters::BridgeOutboundEvent {
+                bridge_event_id: "error".to_string(),
+                session_id: String::new(),
+                channel_capability_hint: String::new(),
+                reply_target: None,
+                render_items: vec![("text".to_string(), "Error: Timeout".to_string())],
+                delivery_mode: adapters::DeliveryMode::Single,
+            },
         }
     });
 
-    // Run the webhook server on the main thread
+    println!("Kcode Bridge started (Telegram). Waiting for messages...");
+
+    // Run the webhook server
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     rt.block_on(async {
         adapters::start_webhook_server(
