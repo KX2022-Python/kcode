@@ -62,6 +62,9 @@ enum CliAction {
     Login,
     Logout,
     Init,
+    Tui {
+        section: Option<String>,
+    },
     Repl {
         model: String,
         model_explicit: bool,

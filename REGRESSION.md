@@ -5,15 +5,15 @@
 ## 1. 编译验证
 
 ```bash
-cd rust && cargo check 2>&1 | grep -E "error|warning"
-# 期望：零错误零警告
+cd rust && cargo check --workspace
+# 期望：编译成功，且无 warning
 ```
 
 ## 2. 测试验证
 
 ```bash
-cd rust && cargo test --workspace 2>&1 | grep "test result"
-# 期望：所有 test result 均为 ok
+cd rust && cargo test --workspace -q
+# 期望：工作区所有测试通过
 ```
 
 ## 3. Release 构建
@@ -29,8 +29,11 @@ cd rust && cargo build --release
 |------|---------|---------|
 | `kcode version` | 运行命令 | 输出版本号 |
 | `kcode doctor` | 运行命令 | 显示环境检查结果 |
+| `kcode tui` | 交互终端启动 | 进入设置 TUI 并可安全退出 |
+| `kcode configure bridge` | 交互终端启动 | 直接打开 bridge 设置页 |
 | `kcode init` | 运行命令 | 创建配置和目录 |
 | `kcode config show` | 运行命令 | 显示配置 |
+| `kcode config tui bridge` | 交互终端启动 | `config show` 不受影响，TUI 入口正常 |
 | `kcode resume` | 运行命令 | 显示可恢复会话 |
 | `kcode /help` | 运行后输入 | 显示帮助 |
 | `kcode /memory` | 运行后输入 | 显示 memory 状态 |
@@ -51,6 +54,8 @@ cd rust && cargo build --release
 - [ ] Tab 补全命令名
 - [ ] 输入 `/` 后显示可用命令列表
 - [ ] 未知命令返回友好错误提示
+- [ ] `kcode tui` 能在交互终端进入、导航、保存并退出
+- [ ] 非交互终端调用 `kcode tui` 时返回清晰错误并指向 `kcode config show`
 
 ### 5.2 工具行为
 
@@ -79,6 +84,7 @@ cd rust && cargo build --release
 - [ ] bridge-safe 命令过滤正确
 - [ ] local-ui 命令不暴露到 bridge
 - [ ] loopback adapter 可模拟消息往返
+- [ ] `~/.kcode/bridge.env` 或 `KCODE_BRIDGE_ENV_FILE` 中的 bridge 凭据可被 doctor / bridge 启动读取
 
 ## 6. 平台验证
 

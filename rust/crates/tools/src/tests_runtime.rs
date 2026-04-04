@@ -282,6 +282,9 @@ fn given_empty_payload_when_structured_output_then_rejects_with_error() {
 
 #[test]
 fn repl_executes_python_code() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let (language, code, expected_stdout) = if command_exists("python3") || command_exists("python")
     {
         ("python", "print(1 + 1)", "2")
@@ -318,6 +321,9 @@ fn given_unsupported_language_when_repl_then_rejects_with_error() {
 
 #[test]
 fn given_timeout_ms_when_repl_blocks_then_returns_timeout_error() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let (language, code) = if command_exists("python3") || command_exists("python") {
         ("python", "import time\ntime.sleep(1)")
     } else {

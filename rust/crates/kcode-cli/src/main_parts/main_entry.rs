@@ -101,6 +101,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         CliAction::Login => run_login()?,
         CliAction::Logout => run_logout()?,
         CliAction::Init => run_init()?,
+        CliAction::Tui { section } => tui::run(section.as_deref())?,
         CliAction::Repl {
             model,
             model_explicit,
@@ -146,14 +147,14 @@ fn default_oauth_config() -> OAuthConfig {
 fn run_login() -> Result<(), Box<dyn std::error::Error>> {
     println!("Login is retired. Kcode uses configuration-driven authentication.");
     println!("Set your credentials via KCODE_API_KEY, KCODE_BASE_URL, KCODE_MODEL env vars.");
-    println!("Or edit ~/.kcode/config.toml directly.");
+    println!("Or run `kcode tui` to edit ~/.kcode/config.toml and bridge settings.");
     println!("Run `kcode doctor` to verify your setup.");
     Ok(())
 }
 
 fn run_logout() -> Result<(), Box<dyn std::error::Error>> {
     println!("Logout is retired. Kcode does not use OAuth authentication.");
-    println!("To change your API key, update KCODE_API_KEY or edit ~/.kcode/config.toml.");
+    println!("To change your API key, update KCODE_API_KEY or run `kcode tui`.");
     Ok(())
 }
 

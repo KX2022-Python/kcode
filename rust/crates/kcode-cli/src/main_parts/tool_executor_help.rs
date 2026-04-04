@@ -189,12 +189,17 @@ fn print_help_to_for_profile(out: &mut impl Write, profile_supports_tools: bool)
     )?;
     writeln!(out, "  {CLI_NAME} sandbox")?;
     writeln!(out, "      Show the current sandbox isolation snapshot")?;
+    writeln!(out, "  {CLI_NAME} tui [section]")?;
+    writeln!(out, "      Open the full-screen settings TUI")?;
+    writeln!(out, "  {CLI_NAME} configure [section]")?;
+    writeln!(out, "      Alias for `{CLI_NAME} tui [section]`")?;
     writeln!(out, "  {CLI_NAME} agents")?;
     if mcp_available {
         writeln!(out, "  {CLI_NAME} mcp")?;
     }
     writeln!(out, "  {CLI_NAME} skills")?;
     writeln!(out, "  {CLI_NAME} commands [show [local|bridge]]")?;
+    writeln!(out, "  {CLI_NAME} config tui [section]")?;
     writeln!(out, "  {CLI_NAME} profile [list|show [name]]")?;
     writeln!(
         out,
@@ -285,6 +290,8 @@ fn print_help_to_for_profile(out: &mut impl Write, profile_supports_tools: bool)
     writeln!(out, "  {CLI_NAME} init")?;
     writeln!(out, "  {CLI_NAME} doctor")?;
     writeln!(out, "  {CLI_NAME} config show")?;
+    writeln!(out, "  {CLI_NAME} tui")?;
+    writeln!(out, "  {CLI_NAME} configure bridge")?;
     Ok(())
 }
 

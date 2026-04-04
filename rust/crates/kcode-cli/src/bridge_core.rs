@@ -207,10 +207,13 @@ pub fn run_bridge_service(
     permission_mode: PermissionMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use adapters::{
-        print_config_summary, validate_bridge_config, FeishuConfig, SessionRouter, WhatsAppConfig,
+        apply_bridge_env_defaults_to_process, print_config_summary, validate_bridge_config,
+        FeishuConfig, SessionRouter, WhatsAppConfig,
     };
     use std::sync::Arc;
     use tokio::runtime::Builder;
+
+    let _ = apply_bridge_env_defaults_to_process();
 
     // Validate configuration before startup
     let errors = validate_bridge_config();

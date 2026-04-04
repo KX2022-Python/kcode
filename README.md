@@ -10,6 +10,7 @@
 
 - 🦀 **Rust Core**: Built entirely in Rust for maximum safety, speed, and zero dependencies.
 - 🧠 **Persistent Memory**: Automatically extracts insights from your sessions and saves them as local Markdown files.
+- 🖥️ **Terminal Settings TUI**: Configure provider, sandbox, MCP, bridge, and UI preferences with `kcode tui`.
 - 🌐 **Multi-Channel Bridge**: Connect to Telegram, WhatsApp, and Feishu with a single unified engine.
 - 🔄 **Native 24/7 Uptime**: Run as a robust Systemd service or via Docker with auto-restart policies.
 - 📷 **Rich Media Support**: Recognize and process images, documents, and voice messages from all supported channels.
@@ -73,9 +74,47 @@ kcode
 
 ```bash
 kcode doctor
+kcode status
+```
+
+### Open The Settings TUI
+
+```bash
+kcode tui
+kcode configure bridge
+```
+
+The TUI is local-only and does not require any Web UI. It lets you edit:
+
+- provider profile, model, base URL, API key env name
+- permission mode, session directory, sandbox rules
+- hooks, plugins, MCP servers
+- Telegram / WhatsApp / Feishu bridge secrets
+- appearance and privacy preferences
+
+If you are in a non-interactive terminal, use:
+
+```bash
+kcode config show
 ```
 
 ---
+
+## ⚙️ Configuration Surfaces
+
+Kcode now uses two primary writable local configuration files:
+
+| Surface | Default Path | Purpose |
+|---------|--------------|---------|
+| User config | `~/.kcode/config.toml` | provider/runtime/sandbox/hooks/plugins/MCP/UI preferences |
+| Project config | `./.kcode/config.toml` | repo-local overrides when you switch scope inside the TUI |
+| Bridge secrets | `~/.kcode/bridge.env` | Telegram / WhatsApp / Feishu secrets and webhook tokens |
+
+Notes:
+
+- `kcode tui` reads legacy `settings.json` / `settings.local.json` for compatibility, but writes back to `config.toml`.
+- Bridge secrets are intentionally kept out of `config.toml`.
+- To manage a service-owned bridge env file, point `KCODE_BRIDGE_ENV_FILE` at that path before launching `kcode tui`.
 
 ## 🌉 Multi-Channel Bridge
 
@@ -94,6 +133,12 @@ To use Webhook mode (recommended for high concurrency), set:
 export KCODE_WEBHOOK_URL="https://your-domain.com/webhook/telegram"
 ```
 Kcode will automatically configure the Telegram API and listen on port `3000` for all active channels.
+
+For local CLI management, you can edit the same bridge settings through:
+
+```bash
+kcode configure bridge
+```
 
 ---
 

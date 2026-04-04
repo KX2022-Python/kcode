@@ -132,6 +132,9 @@ fn notebook_edit_rejects_invalid_inputs() {
 
 #[test]
 fn bash_tool_reports_success_exit_failure_timeout_and_background() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let success =
         execute_tool("bash", &json!({ "command": "printf 'hello'" })).expect("bash should succeed");
     let success_output: serde_json::Value = serde_json::from_str(&success).expect("json");

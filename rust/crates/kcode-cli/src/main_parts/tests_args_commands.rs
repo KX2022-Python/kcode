@@ -75,6 +75,24 @@
             CliAction::Skills { args: None }
         );
         assert_eq!(
+            parse_args(&["tui".to_string()]).expect("tui should parse"),
+            CliAction::Tui { section: None }
+        );
+        assert_eq!(
+            parse_args(&["configure".to_string(), "bridge".to_string()])
+                .expect("configure bridge should parse"),
+            CliAction::Tui {
+                section: Some("bridge".to_string())
+            }
+        );
+        assert_eq!(
+            parse_args(&["config".to_string(), "tui".to_string(), "appearance".to_string()])
+                .expect("config tui appearance should parse"),
+            CliAction::Tui {
+                section: Some("appearance".to_string())
+            }
+        );
+        assert_eq!(
             parse_args(&["agents".to_string(), "--help".to_string()])
                 .expect("agents help should parse"),
             CliAction::Agents {
@@ -93,6 +111,10 @@
         assert_eq!(
             parse_args(&["version".to_string()]).expect("version should parse"),
             CliAction::Version
+        );
+        assert_eq!(
+            parse_args(&["configure".to_string()]).expect("configure should parse"),
+            CliAction::Tui { section: None }
         );
         assert_eq!(
             parse_args(&["status".to_string()]).expect("status should parse"),

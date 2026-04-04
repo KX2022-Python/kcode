@@ -3,6 +3,8 @@
 
 use std::env;
 
+use crate::apply_bridge_env_defaults_to_process;
+
 /// Represents a validation error for an environment variable.
 pub struct EnvError {
     pub var_name: String,
@@ -13,6 +15,7 @@ pub struct EnvError {
 /// Returns a list of errors (empty if all valid).
 pub fn validate_bridge_config() -> Vec<EnvError> {
     let mut errors = Vec::new();
+    let _ = apply_bridge_env_defaults_to_process();
 
     // Check if at least one channel is configured
     let telegram_set = env::var("KCODE_TELEGRAM_BOT_TOKEN")
@@ -75,40 +78,39 @@ pub fn validate_bridge_config() -> Vec<EnvError> {
         }
     }
 
-    // Validate core API config
-    if env::var("KCODE_API_KEY")
-        .ok()
-        .map(|v| v.is_empty())
-        .unwrap_or(true)
-    {
-        errors.push(EnvError {
-            var_name: "KCODE_API_KEY".to_string(),
-            message: "Kcode API key is required".to_string(),
-        });
-    }
-
-    if env::var("KCODE_MODEL")
-        .ok()
-        .map(|v| v.is_empty())
-        .unwrap_or(true)
-    {
-        errors.push(EnvError {
-            var_name: "KCODE_MODEL".to_string(),
-            message: "Model name is required".to_string(),
-        });
-    }
-
     errors
 }
 
 /// Print a formatted summary of the current configuration.
 pub fn print_config_summary() {
+    let snapshot = apply_bridge_env_defaults_to_process().ok();
     println!("📋 Configuration Summary:");
 
     let channels = [
-        ("Telegram", env::var("KCODE_TELEGRAM_BOT_TOKEN").ok()),
-        ("WhatsApp", env::var("KCODE_WHATSAPP_PHONE_ID").ok()),
-        ("Feishu", env::var("KCODE_FEISHU_APP_ID").ok()),
+        (
+            "Telegram",
+            env::var("KCODE_TELEGRAM_BOT_TOKEN").ok().or_else(|| {
+                snapshot
+                    .as_ref()
+                    .and_then(|env| env.resolve("KCODE_TELEGRAM_BOT_TOKEN"))
+            }),
+        ),
+        (
+            "WhatsApp",
+            env::var("KCODE_WHATSAPP_PHONE_ID").ok().or_else(|| {
+                snapshot
+                    .as_ref()
+                    .and_then(|env| env.resolve("KCODE_WHATSAPP_PHONE_ID"))
+            }),
+        ),
+        (
+            "Feishu",
+            env::var("KCODE_FEISHU_APP_ID").ok().or_else(|| {
+                snapshot
+                    .as_ref()
+                    .and_then(|env| env.resolve("KCODE_FEISHU_APP_ID"))
+            }),
+        ),
     ];
 
     for (name, value) in channels.iter() {

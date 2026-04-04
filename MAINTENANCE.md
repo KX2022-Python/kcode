@@ -110,6 +110,11 @@ cargo test --workspace
 | 回归检查单 | `REGRESSION.md` | 新增 Phase 时补充测试项 |
 | 偏差记录 | `DEVIATIONS.md` | 发现与参考源偏差时记录 |
 
+额外要求：
+
+- 任何涉及 `kcode tui`、`config.toml` 写回逻辑、`bridge.env` 路径或 bridge 配置入口的改动，必须同步更新 `README.md` 与 `REGRESSION.md`
+- 文档中的命令示例必须和当前 CLI 入口保持一致，至少覆盖 `kcode tui`、`kcode configure`、`kcode config show`
+
 ## 6. 代码质量标准
 
 - 单文件默认 ≤ 500 行，超过必须拆分
@@ -117,3 +122,4 @@ cargo test --workspace
 - 所有 crate 测试通过
 - 禁止硬编码 API 密钥、token 等敏感信息
 - 所有工具/命令的添加必须附带测试
+- 设置界面与配置写回逻辑必须保持模块拆分，单文件默认不超过 500 行

@@ -119,6 +119,19 @@ impl LiveCli {
                 Self::print_skills(args.as_deref())?;
                 false
             }
+            SlashCommand::Keybindings
+            | SlashCommand::PrivacySettings
+            | SlashCommand::Theme { .. }
+            | SlashCommand::Voice { .. }
+            | SlashCommand::Color { .. }
+            | SlashCommand::OutputStyle { .. } => {
+                eprintln!("Run `kcode tui appearance` to manage UI and privacy settings.");
+                false
+            }
+            SlashCommand::Hooks { .. } => {
+                eprintln!("Run `kcode tui extensions` to manage hooks and plugins.");
+                false
+            }
             SlashCommand::Login
             | SlashCommand::Logout
             | SlashCommand::Vim
@@ -138,24 +151,17 @@ impl LiveCli {
             | SlashCommand::Thinkback
             | SlashCommand::ReleaseNotes
             | SlashCommand::SecurityReview
-            | SlashCommand::Keybindings
-            | SlashCommand::PrivacySettings
             | SlashCommand::Plan { .. }
             | SlashCommand::Review { .. }
-            | SlashCommand::Theme { .. }
-            | SlashCommand::Voice { .. }
             | SlashCommand::Usage { .. }
             | SlashCommand::Rename { .. }
             | SlashCommand::Copy { .. }
-            | SlashCommand::Hooks { .. }
             | SlashCommand::Context { .. }
-            | SlashCommand::Color { .. }
             | SlashCommand::Effort { .. }
             | SlashCommand::Branch { .. }
             | SlashCommand::Rewind { .. }
             | SlashCommand::Ide { .. }
             | SlashCommand::Tag { .. }
-            | SlashCommand::OutputStyle { .. }
             | SlashCommand::AddDir { .. } => {
                 eprintln!("Command registered but not yet implemented.");
                 false

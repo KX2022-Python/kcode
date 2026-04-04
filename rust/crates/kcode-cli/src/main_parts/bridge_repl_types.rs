@@ -4,6 +4,8 @@ fn run_bridge(
     profile: Option<String>,
     permission_mode: PermissionMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let _ = adapters::apply_bridge_env_defaults_to_process();
+
     // Security: Load credentials from environment variables only.
     let bot_token = std::env::var("KCODE_TELEGRAM_BOT_TOKEN").ok();
     let whatsapp_phone = std::env::var("KCODE_WHATSAPP_PHONE_ID").ok();

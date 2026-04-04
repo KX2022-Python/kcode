@@ -188,6 +188,8 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
         "login" => Ok(CliAction::Login),
         "logout" => Ok(CliAction::Logout),
         "init" => Ok(CliAction::Init),
+        "tui" => parse_tui_args(&rest[1..]),
+        "configure" => parse_tui_args(&rest[1..]),
         "bridge" => Ok(CliAction::Bridge {
             model,
             model_explicit,
@@ -256,6 +258,8 @@ fn parse_single_word_command_alias(
             profile: profile.map(ToOwned::to_owned),
             permission_mode,
         })),
+        "tui" => Some(Ok(CliAction::Tui { section: None })),
+        "configure" => Some(Ok(CliAction::Tui { section: None })),
         "sandbox" => Some(Ok(CliAction::Sandbox)),
         other => bare_slash_command_guidance(other).map(Err),
     }
@@ -312,13 +316,20 @@ fn parse_config_args(
             model_explicit,
             profile,
         }),
+        [subcommand] if subcommand == "tui" => Ok(CliAction::Tui { section: None }),
+        [subcommand, section] if subcommand == "tui" => Ok(CliAction::Tui {
+            section: Some(section.clone()),
+        }),
         [subcommand, section] if subcommand == "show" => Ok(CliAction::ConfigShow {
             section: Some(section.clone()),
             model: model.to_string(),
             model_explicit,
             profile,
         }),
-        _ => Err("usage: kcode config show [env|hooks|model|plugins|profile|provider]".to_string()),
+        _ => Err(
+            "usage: kcode config show [env|hooks|model|plugins|profile|provider] | kcode config tui [section]"
+                .to_string(),
+        ),
     }
 }
 
@@ -346,4 +357,14 @@ fn parse_profile_args(
         model_explicit,
         profile,
     })
+}
+
+fn parse_tui_args(args: &[String]) -> Result<CliAction, String> {
+    match args {
+        [] => Ok(CliAction::Tui { section: None }),
+        [section] => Ok(CliAction::Tui {
+            section: Some(section.clone()),
+        }),
+        _ => Err("usage: kcode tui [section]".to_string()),
+    }
 }

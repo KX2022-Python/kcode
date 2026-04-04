@@ -11,6 +11,7 @@ mod input;
 mod render;
 mod render_semantic;
 mod render_theme;
+mod tui;
 
 use std::collections::BTreeSet;
 use std::env;

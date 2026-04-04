@@ -328,6 +328,8 @@ supports_streaming = false
         assert!(help.contains("kcode version"));
         assert!(help.contains("kcode status"));
         assert!(help.contains("kcode sandbox"));
+        assert!(help.contains("kcode tui [section]"));
+        assert!(help.contains("kcode configure [section]"));
         assert!(help.contains("kcode init"));
         assert!(help.contains("kcode agents"));
         assert!(help.contains("kcode mcp"));

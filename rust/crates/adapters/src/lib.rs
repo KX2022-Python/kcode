@@ -36,6 +36,12 @@ pub use media_download::{
 pub mod config_validator;
 pub use config_validator::{print_config_summary, validate_bridge_config, EnvError};
 
+pub mod bridge_env;
+pub use bridge_env::{
+    apply_bridge_env_defaults_to_process, bridge_env_path, known_bridge_keys,
+    load_bridge_env_snapshot, write_bridge_env_file, BridgeEnvSnapshot,
+};
+
 // Re-exports for convenience
 pub use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent};
 pub use bridge::DeliveryMode;
