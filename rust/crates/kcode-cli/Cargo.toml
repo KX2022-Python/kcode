@@ -10,6 +10,7 @@ name = "kcode"
 path = "src/main.rs"
 
 [dependencies]
+adapters = { path = "../adapters" }
 api = { path = "../api" }
 commands = { path = "../commands" }
 crossterm = "0.28"

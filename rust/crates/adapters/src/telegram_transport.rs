@@ -53,14 +53,14 @@ impl TelegramTransport {
 impl Transport for TelegramTransport {
     async fn run(
         &self,
-        on_message: Box<dyn Fn(BridgeInboundEvent) + Send + Sync + 'static>,
+        handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + Send + Sync + 'static>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         info!("Starting Telegram Long Polling transport...");
 
         loop {
             let offset = self.offset.load(std::sync::atomic::Ordering::SeqCst);
             let url = self.api_url("getUpdates");
-            
+
             // Build request params
             let mut params = HashMap::new();
             params.insert("offset", offset.to_string());
@@ -100,28 +100,31 @@ impl Transport for TelegramTransport {
                     if let Some(text) = message.text {
                         let chat_id = message.chat.id.to_string();
                         let user_id = message.from.map(|u| u.id.to_string()).unwrap_or_else(|| "unknown".to_string());
-                        
-                        let event = BridgeInboundEvent::new(
-                            format!("tg-{}-{}", chat_id, update.update_id),
-                            "telegram".to_string(),
-                            user_id,
-                            chat_id.clone(),
-                            update.update_id.to_string(),
-                            text,
-                        );
 
-                        // Store chat_id in metadata for reply routing
-                        // on_message(event); // This will be called by the loop below
-                        
-                        // We need to store the chat_id to reply later.
-                        // The simplest way is to use a map in the transport or attach it to the event.
-                        // For this v1.1 implementation, we'll attach it to metadata.
-                        // However, BridgeInboundEvent has a metadata field.
-                        
-                        on_message(event);
+                        let event = BridgeInboundEvent {
+                            bridge_event_id: format!("tg-{}-{}", chat_id, update.update_id),
+                            channel: "telegram".to_string(),
+                            channel_user_id: user_id,
+                            channel_chat_id: chat_id.clone(),
+                            channel_message_id: update.update_id.to_string(),
+                            text,
+                            attachments: vec![],
+                            received_at: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis() as u64)
+                                .unwrap_or(0),
+                            reply_to: message.reply_to_message.map(|m| m.message_id.to_string()),
+                            metadata: std::collections::BTreeMap::new(),
+                        };
+
+                        // Call the handler to get the response event
+                        let outbound_event = handler(event);
+
+                        // Send the response back to Telegram
+                        self.send(&outbound_event).await?;
                     }
                 }
-                
+
                 // Update offset
                 self.offset.store(update.update_id + 1, std::sync::atomic::Ordering::SeqCst);
             }

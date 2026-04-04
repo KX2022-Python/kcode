@@ -59,6 +59,10 @@ use runtime::{
 use serde_json::json;
 use tools::GlobalToolRegistry;
 
+// v1.1 Bridge Imports
+use adapters::{TelegramConfig, TelegramTransport, Transport};
+use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent};
+
 const DEFAULT_MODEL: &str = "claude-opus-4-6";
 const CLI_NAME: &str = "kcode";
 const PRIMARY_CONFIG_DIR_NAME: &str = ".kcode";
@@ -220,10 +224,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             allowed_tools,
             permission_mode,
         )?,
+        CliAction::Bridge {
+            model,
+            model_explicit,
+            profile,
+            permission_mode,
+        } => run_bridge(
+            model,
+            model_explicit,
+            profile,
+            permission_mode,
+        )?,
         CliAction::Help { profile } => print_help(profile.as_deref()),
     }
     Ok(())
 }
+
+// ... (other existing code)
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum CliAction {
@@ -293,6 +310,12 @@ enum CliAction {
         model_explicit: bool,
         profile: Option<String>,
         allowed_tools: Option<AllowedToolSet>,
+        permission_mode: PermissionMode,
+    },
+    Bridge {
+        model: String,
+        model_explicit: bool,
+        profile: Option<String>,
         permission_mode: PermissionMode,
     },
     // prompt-mode formatting is only supported for non-interactive runs
@@ -545,6 +568,12 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
         "login" => Ok(CliAction::Login),
         "logout" => Ok(CliAction::Logout),
         "init" => Ok(CliAction::Init),
+        "bridge" => Ok(CliAction::Bridge {
+            model,
+            model_explicit,
+            profile,
+            permission_mode,
+        }),
         "prompt" => {
             let prompt = rest[1..].join(" ");
             if prompt.trim().is_empty() {
@@ -2022,6 +2051,80 @@ fn run_resume_command(
         | SlashCommand::OutputStyle { .. }
         | SlashCommand::AddDir { .. } => Err("unsupported resumed slash command".into()),
     }
+}
+
+fn run_bridge(
+    model: String,
+    model_explicit: bool,
+    profile: Option<String>,
+    permission_mode: PermissionMode,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Security: Load credentials from environment variables only.
+    let bot_token = std::env::var("KCODE_TELEGRAM_BOT_TOKEN")
+        .map_err(|_| "Environment variable KCODE_TELEGRAM_BOT_TOKEN is not set.")?;
+
+    let config = TelegramConfig {
+        bot_token,
+        allowed_updates: vec!["message".to_string()],
+    };
+    let transport = TelegramTransport::new(config);
+
+    // Initialize the Kcode Runtime (LiveCli)
+    // We wrap it in Arc<Mutex<>> to safely share it across the async bridge loop
+    let cli = std::sync::Arc::new(std::sync::Mutex::new(LiveCli::new(
+        model,
+        model_explicit,
+        profile,
+        true,
+        None,
+        permission_mode,
+    )?));
+
+    println!("Kcode Bridge started (Telegram). Waiting for messages...");
+
+    // Run the async bridge loop
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let cli_clone = cli.clone();
+
+        let handler = Box::new(move |event: BridgeInboundEvent| -> BridgeOutboundEvent {
+            let chat_id = event.reply_target.clone().unwrap_or_else(|| "unknown".to_string());
+            
+            // Process message in a blocking manner
+            let mut cli_locked = cli_clone.lock().unwrap();
+            
+            // Capture output to return it via Telegram
+            // We use run_turn_with_output to get the text response
+            match cli_locked.run_turn_with_output(&event.text, CliOutputFormat::Text) {
+                Ok(response) => {
+                    // response is a string, send it back
+                    BridgeOutboundEvent {
+                        bridge_event_id: event.bridge_event_id,
+                        channel: "telegram".to_string(),
+                        reply_target: Some(chat_id),
+                        render_items: vec![("text".to_string(), response)],
+                        delivery_mode: bridge::DeliveryMode::Reply,
+                    }
+                }
+                Err(e) => {
+                    let error_msg = format!("Error processing request: {}", e);
+                    eprintln!("{}", error_msg);
+                    BridgeOutboundEvent {
+                        bridge_event_id: event.bridge_event_id,
+                        channel: "telegram".to_string(),
+                        reply_target: Some(chat_id),
+                        render_items: vec![("text".to_string(), error_msg)],
+                        delivery_mode: bridge::DeliveryMode::Reply,
+                    }
+                }
+            }
+        });
+
+        transport.run(handler).await?;
+        Ok::<(), Box<dyn std::error::Error>>(())
+    })?;
+
+    Ok(())
 }
 
 fn run_repl(
