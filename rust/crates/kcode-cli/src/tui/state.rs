@@ -78,18 +78,20 @@ impl Section {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThemePreset {
-    Default,
+    Graphite,
+    Sunset,
     Amber,
     Ocean,
 }
 
 impl ThemePreset {
-    pub const ALL: [Self; 3] = [Self::Default, Self::Amber, Self::Ocean];
+    pub const ALL: [Self; 4] = [Self::Graphite, Self::Sunset, Self::Amber, Self::Ocean];
 
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Default => "default",
+            Self::Graphite => "graphite",
+            Self::Sunset => "sunset",
             Self::Amber => "amber",
             Self::Ocean => "ocean",
         }
@@ -98,18 +100,21 @@ impl ThemePreset {
     #[must_use]
     pub fn parse(value: &str) -> Self {
         match value {
+            "graphite" => Self::Graphite,
+            "sunset" => Self::Sunset,
             "amber" => Self::Amber,
             "ocean" => Self::Ocean,
-            _ => Self::Default,
+            _ => Self::Graphite,
         }
     }
 
     #[must_use]
     pub fn next(self) -> Self {
         match self {
-            Self::Default => Self::Amber,
+            Self::Graphite => Self::Sunset,
+            Self::Sunset => Self::Amber,
             Self::Amber => Self::Ocean,
-            Self::Ocean => Self::Default,
+            Self::Ocean => Self::Graphite,
         }
     }
 }
@@ -291,7 +296,7 @@ pub struct AppearanceSettings {
 impl Default for AppearanceSettings {
     fn default() -> Self {
         Self {
-            theme: ThemePreset::Default,
+            theme: ThemePreset::Graphite,
             redact_secrets: true,
             keybindings_hint: "default".to_string(),
         }

@@ -1,6 +1,37 @@
 //! Theme system: ThemePalette, default theme, semantic color mapping.
 
 use crate::render_semantic::SemanticRole;
+use crate::theme_settings::current_theme_name;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ThemeName {
+    Graphite,
+    Sunset,
+    Amber,
+    Ocean,
+}
+
+impl ThemeName {
+    #[must_use]
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "sunset" => Self::Sunset,
+            "amber" => Self::Amber,
+            "ocean" => Self::Ocean,
+            _ => Self::Graphite,
+        }
+    }
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Graphite => "graphite",
+            Self::Sunset => "sunset",
+            Self::Amber => "amber",
+            Self::Ocean => "ocean",
+        }
+    }
+}
 
 /// A single entry in a theme palette: semantic role → ANSI code.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,8 +54,27 @@ impl ThemePalette {
     /// The default terminal theme — optimized for dark backgrounds,
     /// low eye-strain during long REPL sessions.
     pub fn default_terminal() -> &'static Self {
+        Self::graphite()
+    }
+
+    #[must_use]
+    pub fn current_terminal() -> &'static Self {
+        Self::for_theme(current_theme_name())
+    }
+
+    #[must_use]
+    pub fn for_theme(theme: ThemeName) -> &'static Self {
+        match theme {
+            ThemeName::Graphite => Self::graphite(),
+            ThemeName::Sunset => Self::sunset(),
+            ThemeName::Amber => Self::amber(),
+            ThemeName::Ocean => Self::ocean(),
+        }
+    }
+
+    fn graphite() -> &'static Self {
         static PALETTE: ThemePalette = ThemePalette {
-            name: "default",
+            name: "graphite",
             entries: &[
                 ThemeEntry {
                     role: SemanticRole::User,
@@ -84,6 +134,213 @@ impl ThemePalette {
                 ThemeEntry {
                     role: SemanticRole::Progress,
                     ansi_fg: "\x1b[34m", // blue
+                    bold: true,
+                },
+            ],
+        };
+        &PALETTE
+    }
+
+    fn sunset() -> &'static Self {
+        static PALETTE: ThemePalette = ThemePalette {
+            name: "sunset",
+            entries: &[
+                ThemeEntry {
+                    role: SemanticRole::User,
+                    ansi_fg: "\x1b[38;5;216m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Assistant,
+                    ansi_fg: "\x1b[0m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Tool,
+                    ansi_fg: "\x1b[38;5;209m",
+                    bold: true,
+                },
+                ThemeEntry {
+                    role: SemanticRole::System,
+                    ansi_fg: "\x1b[38;5;244m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Warning,
+                    ansi_fg: "\x1b[38;5;220m",
+                    bold: true,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Error,
+                    ansi_fg: "\x1b[38;5;203m",
+                    bold: true,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Success,
+                    ansi_fg: "\x1b[38;5;151m",
+                    bold: true,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Memory,
+                    ansi_fg: "\x1b[38;5;181m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Compact,
+                    ansi_fg: "\x1b[38;5;180m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Permission,
+                    ansi_fg: "\x1b[38;5;215m",
+                    bold: true,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Diff,
+                    ansi_fg: "\x1b[38;5;223m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Progress,
+                    ansi_fg: "\x1b[38;5;209m",
+                    bold: true,
+                },
+            ],
+        };
+        &PALETTE
+    }
+
+    fn amber() -> &'static Self {
+        static PALETTE: ThemePalette = ThemePalette {
+            name: "amber",
+            entries: &[
+                ThemeEntry {
+                    role: SemanticRole::User,
+                    ansi_fg: "\x1b[38;5;221m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Assistant,
+                    ansi_fg: "\x1b[0m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Tool,
+                    ansi_fg: "\x1b[38;5;214m",
+                    bold: true,
+                },
+                ThemeEntry {
+                    role: SemanticRole::System,
+                    ansi_fg: "\x1b[38;5;243m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Warning,
+                    ansi_fg: "\x1b[38;5;220m",
+                    bold: true,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Error,
+                    ansi_fg: "\x1b[31m",
+                    bold: true,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Success,
+                    ansi_fg: "\x1b[32m",
+                    bold: true,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Memory,
+                    ansi_fg: "\x1b[38;5;179m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Compact,
+                    ansi_fg: "\x1b[38;5;246m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Permission,
+                    ansi_fg: "\x1b[38;5;178m",
+                    bold: true,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Diff,
+                    ansi_fg: "\x1b[38;5;229m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Progress,
+                    ansi_fg: "\x1b[33m",
+                    bold: true,
+                },
+            ],
+        };
+        &PALETTE
+    }
+
+    fn ocean() -> &'static Self {
+        static PALETTE: ThemePalette = ThemePalette {
+            name: "ocean",
+            entries: &[
+                ThemeEntry {
+                    role: SemanticRole::User,
+                    ansi_fg: "\x1b[96m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Assistant,
+                    ansi_fg: "\x1b[0m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Tool,
+                    ansi_fg: "\x1b[94m",
+                    bold: true,
+                },
+                ThemeEntry {
+                    role: SemanticRole::System,
+                    ansi_fg: "\x1b[36m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Warning,
+                    ansi_fg: "\x1b[38;5;222m",
+                    bold: true,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Error,
+                    ansi_fg: "\x1b[91m",
+                    bold: true,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Success,
+                    ansi_fg: "\x1b[92m",
+                    bold: true,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Memory,
+                    ansi_fg: "\x1b[38;5;123m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Compact,
+                    ansi_fg: "\x1b[38;5;110m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Permission,
+                    ansi_fg: "\x1b[38;5;87m",
+                    bold: true,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Diff,
+                    ansi_fg: "\x1b[38;5;159m",
+                    bold: false,
+                },
+                ThemeEntry {
+                    role: SemanticRole::Progress,
+                    ansi_fg: "\x1b[96m",
                     bold: true,
                 },
             ],

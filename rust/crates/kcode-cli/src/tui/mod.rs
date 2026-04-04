@@ -1,6 +1,7 @@
 mod app;
 mod config_store;
 mod render;
+mod render_parts;
 pub(crate) mod state;
 
 use std::error::Error;

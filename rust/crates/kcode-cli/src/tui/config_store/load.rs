@@ -259,7 +259,7 @@ fn load_appearance_settings(raw: &toml::map::Map<String, Value>) -> AppearanceSe
             .and_then(|table| table.get("theme"))
             .and_then(Value::as_str)
             .map(ThemePreset::parse)
-            .unwrap_or(ThemePreset::Default),
+            .unwrap_or(ThemePreset::Graphite),
         redact_secrets: ui
             .and_then(|table| table.get("redactSecrets"))
             .and_then(Value::as_bool)

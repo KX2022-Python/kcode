@@ -81,6 +81,31 @@ impl Completer for SlashCommandHelper {
 
 impl Hinter for SlashCommandHelper {
     type Hint = String;
+
+    fn hint(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> Option<String> {
+        let prefix = slash_command_prefix(line, pos)?;
+        let matches = self
+            .completions
+            .iter()
+            .filter(|candidate| candidate.starts_with(prefix))
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>();
+        if matches.is_empty() {
+            return None;
+        }
+
+        if prefix == "/" {
+            return Some(format!(" {}", matches.join("  ")));
+        }
+
+        let first = matches.first()?;
+        let suffix = first.strip_prefix(prefix).unwrap_or_default();
+        if suffix.is_empty() {
+            return None;
+        }
+        Some(suffix.to_string())
+    }
 }
 
 impl Highlighter for SlashCommandHelper {
@@ -224,6 +249,7 @@ mod tests {
     use super::{slash_command_prefix, LineEditor, SlashCommandHelper};
     use rustyline::completion::Completer;
     use rustyline::highlight::Highlighter;
+    use rustyline::hint::Hinter;
     use rustyline::history::{DefaultHistory, History};
     use rustyline::Context;
 
@@ -296,6 +322,35 @@ mod tests {
             .expect("completion should work");
 
         assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn slash_root_shows_inline_command_preview_hint() {
+        let helper = SlashCommandHelper::new(vec![
+            "/help".to_string(),
+            "/status".to_string(),
+            "/model".to_string(),
+        ]);
+        let history = DefaultHistory::new();
+        let ctx = Context::new(&history);
+
+        let hint = helper.hint("/", 1, &ctx).expect("hint should exist");
+        assert!(hint.contains("/help"));
+        assert!(hint.contains("/status"));
+    }
+
+    #[test]
+    fn partial_slash_command_shows_first_completion_suffix() {
+        let helper = SlashCommandHelper::new(vec![
+            "/help".to_string(),
+            "/hello".to_string(),
+            "/status".to_string(),
+        ]);
+        let history = DefaultHistory::new();
+        let ctx = Context::new(&history);
+
+        let hint = helper.hint("/he", 3, &ctx).expect("hint should exist");
+        assert_eq!(hint, "lp");
     }
 
     #[test]
