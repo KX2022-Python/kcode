@@ -13,10 +13,11 @@ reqwest = { version = "0.12", features = ["json", "stream"] }
 tracing = "0.1"
 bridge = { path = "../bridge" }
 runtime = { path = "../runtime" }
-tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "net"] }
 sha2 = "0.10"
 hmac = "0.12"
 hex = "0.4"
+axum = "0.7"
 
 [lints]
 workspace = true

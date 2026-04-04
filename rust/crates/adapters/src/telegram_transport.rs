@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent, DeliveryMode};
 use reqwest::Client;
 use serde::Deserialize;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use super::transport::{Transport, TransportConfig};
 
@@ -118,11 +118,11 @@ impl TelegramTransport {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl Transport for TelegramTransport {
     async fn run(
         &self,
-        handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + 'static>,
+        handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + Send + Sync + 'static>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         match &self.config.mode {
             TelegramMode::Polling { timeout } => {
@@ -160,7 +160,7 @@ impl Transport for TelegramTransport {
 impl TelegramTransport {
     async fn run_polling(
         &self,
-        handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + 'static>,
+        handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + Send + Sync + 'static>,
         timeout: u32,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         info!("Starting Telegram Long Polling transport (timeout={}s)...", timeout);
@@ -274,4 +274,42 @@ struct TelegramUser {
 #[derive(Debug, Deserialize)]
 struct TelegramChat {
     id: i64,
+}
+
+/// Telegram Webhook Payload (single update object).
+#[derive(Debug, Deserialize)]
+pub struct TelegramWebhookUpdate {
+    pub update_id: i64,
+    pub message: Option<TelegramMessage>,
+}
+
+/// Parse a Telegram webhook payload into a list of BridgeInboundEvents.
+pub fn parse_telegram_webhook(body: &[u8]) -> Result<Vec<BridgeInboundEvent>, Box<dyn Error>> {
+    let update: TelegramWebhookUpdate = serde_json::from_slice(body)?;
+    let mut events = Vec::new();
+
+    if let Some(message) = update.message {
+        if let Some(text) = message.text {
+            let chat_id = message.chat.id.to_string();
+            let user_id = message.from.map(|u| u.id.to_string()).unwrap_or_else(|| "unknown".to_string());
+            let reply_to = message.reply_to_message.as_ref().map(|m| m.message_id.to_string());
+
+            events.push(BridgeInboundEvent {
+                bridge_event_id: format!("tg-{}-{}", chat_id, update.update_id),
+                channel: "telegram".to_string(),
+                channel_user_id: user_id,
+                channel_chat_id: chat_id.clone(),
+                channel_message_id: update.update_id.to_string(),
+                text,
+                attachments: vec![],
+                received_at: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0),
+                reply_to,
+                metadata: std::collections::BTreeMap::new(),
+            });
+        }
+    }
+    Ok(events)
 }

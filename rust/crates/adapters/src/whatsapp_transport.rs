@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent, DeliveryMode};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use super::transport::{Transport, TransportConfig};
 
@@ -92,11 +92,11 @@ impl WhatsAppTransport {
     }
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl Transport for WhatsAppTransport {
     async fn run(
         &self,
-        _handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + 'static>,
+        _handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + Send + Sync + 'static>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         // WhatsApp requires Webhook mode (no polling support)
         // This would require an HTTP server like axum

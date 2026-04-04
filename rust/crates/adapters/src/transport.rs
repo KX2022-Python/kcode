@@ -14,7 +14,7 @@ pub trait TransportConfig: Send + Sync + 'static {
 
 /// Unified transport trait for all channels.
 /// Implementors handle low-level network details and convert them to bridge events.
-#[async_trait(?Send)]
+#[async_trait]
 pub trait Transport: Send + Sync {
     /// Start the transport message loop.
     /// In Long Polling mode, this runs indefinitely.
@@ -23,7 +23,7 @@ pub trait Transport: Send + Sync {
     /// The `handler` callback processes each inbound event and returns an outbound event.
     async fn run(
         &self,
-        handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + 'static>,
+        handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + Send + Sync + 'static>,
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
 
     /// Send an outbound event to the channel.
