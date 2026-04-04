@@ -4,6 +4,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
+use super::text_cursor::{clamp_cursor_to_boundary, next_char_boundary, previous_char_boundary};
+
 /// Prompt 输入框状态
 #[derive(Debug, Clone)]
 pub struct PromptInput {
@@ -45,6 +47,7 @@ impl PromptInput {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> PromptAction {
+        self.cursor = clamp_cursor_to_boundary(&self.text, self.cursor);
         match key.code {
             KeyCode::Enter if key.modifiers.is_empty() => PromptAction::Submit,
             KeyCode::Enter
@@ -52,38 +55,40 @@ impl PromptInput {
                     || key.modifiers.contains(KeyModifiers::CONTROL) =>
             {
                 self.text.insert(self.cursor, '\n');
-                self.cursor += 1;
+                self.cursor += '\n'.len_utf8();
                 PromptAction::Edited
             }
             KeyCode::Char('j') if key.modifiers == KeyModifiers::CONTROL => {
                 self.text.insert(self.cursor, '\n');
-                self.cursor += 1;
+                self.cursor += '\n'.len_utf8();
                 PromptAction::Edited
             }
             KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => {
                 self.text.insert(self.cursor, c);
-                self.cursor += 1;
+                self.cursor += c.len_utf8();
                 PromptAction::Edited
             }
             KeyCode::Backspace => {
                 if self.cursor > 0 {
-                    self.text.remove(self.cursor - 1);
-                    self.cursor -= 1;
+                    let previous = previous_char_boundary(&self.text, self.cursor);
+                    self.text.drain(previous..self.cursor);
+                    self.cursor = previous;
                 }
                 PromptAction::Edited
             }
             KeyCode::Delete => {
                 if self.cursor < self.text.len() {
-                    self.text.remove(self.cursor);
+                    let next = next_char_boundary(&self.text, self.cursor);
+                    self.text.drain(self.cursor..next);
                 }
                 PromptAction::Edited
             }
             KeyCode::Left if key.modifiers == KeyModifiers::NONE => {
-                self.cursor = self.cursor.saturating_sub(1);
+                self.cursor = previous_char_boundary(&self.text, self.cursor);
                 PromptAction::Moved
             }
             KeyCode::Right if key.modifiers == KeyModifiers::NONE => {
-                self.cursor = (self.cursor + 1).min(self.text.len());
+                self.cursor = next_char_boundary(&self.text, self.cursor);
                 PromptAction::Moved
             }
             KeyCode::Home => {
@@ -186,7 +191,7 @@ pub fn render_prompt_input(
         (false, _) => Color::DarkGray,
     };
 
-    let cursor = input.cursor.min(input.text.len());
+    let cursor = clamp_cursor_to_boundary(&input.text, input.cursor);
     let (before_cursor, after_cursor) = input.text.split_at(cursor);
     let cursor_char = after_cursor.chars().next().unwrap_or(' ');
     let after_visible = after_cursor
@@ -284,5 +289,36 @@ mod tests {
         let action = input.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(matches!(action, PromptAction::Submit));
+    }
+
+    #[test]
+    fn utf8_input_uses_char_boundaries_for_cursor_movement_and_delete() {
+        let mut input = PromptInput::new();
+
+        assert!(matches!(
+            input.handle_key(KeyEvent::new(KeyCode::Char('你'), KeyModifiers::NONE)),
+            PromptAction::Edited
+        ));
+        assert_eq!(input.text, "你");
+        assert_eq!(input.cursor, "你".len());
+
+        assert!(matches!(
+            input.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)),
+            PromptAction::Moved
+        ));
+        assert_eq!(input.cursor, 0);
+
+        assert!(matches!(
+            input.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
+            PromptAction::Moved
+        ));
+        assert_eq!(input.cursor, "你".len());
+
+        assert!(matches!(
+            input.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+            PromptAction::Edited
+        ));
+        assert!(input.text.is_empty());
+        assert_eq!(input.cursor, 0);
     }
 }

@@ -1,9 +1,9 @@
     #[test]
-    fn defaults_to_repl_when_no_args() {
+    fn defaults_to_repl_tui_when_no_args() {
         let permission_mode = super::default_permission_mode();
         assert_eq!(
             parse_args(&[]).expect("args should parse"),
-            CliAction::Repl {
+            CliAction::ReplTui {
                 model: DEFAULT_MODEL.to_string(),
                 model_explicit: false,
                 profile: None,
@@ -175,7 +175,7 @@
         let args = vec!["--permission-mode=read-only".to_string()];
         assert_eq!(
             parse_args(&args).expect("args should parse"),
-            CliAction::Repl {
+            CliAction::ReplTui {
                 model: DEFAULT_MODEL.to_string(),
                 model_explicit: false,
                 profile: None,
@@ -195,7 +195,7 @@
         ];
         assert_eq!(
             parse_args(&args).expect("args should parse"),
-            CliAction::Repl {
+            CliAction::ReplTui {
                 model: DEFAULT_MODEL.to_string(),
                 model_explicit: false,
                 profile: None,
@@ -308,7 +308,7 @@ supports_streaming = false
 
         assert_eq!(
             action,
-            CliAction::Repl {
+            CliAction::ReplTui {
                 model: DEFAULT_MODEL.to_string(),
                 model_explicit: false,
                 profile: Some("cliproxyapi".to_string()),

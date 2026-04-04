@@ -1,8 +1,8 @@
 mod app;
 mod config_store;
-pub(crate) mod repl;
 mod render;
 mod render_parts;
+pub(crate) mod repl;
 pub(crate) mod state;
 
 use std::error::Error;
@@ -83,11 +83,26 @@ fn parse_section(value: &str) -> Result<Section, Box<dyn Error>> {
     }
 }
 
-pub(crate) fn run_repl(
+/// REPL TUI 入口 — 全屏 AI 编程会话界面
+pub fn run_repl<F>(
     model: String,
     profile: String,
     session_id: String,
     permission_mode: String,
-) -> Result<Vec<String>, Box<dyn Error>> {
-    repl::run_repl(model, profile, session_id, permission_mode)
+    profile_supports_tools: bool,
+    welcome_messages: Vec<repl::RenderableMessage>,
+    executor: F,
+) -> Result<(), Box<dyn Error>>
+where
+    F: FnMut(repl::SubmittedCommand) -> Result<repl::BackendResult, String>,
+{
+    repl::run_repl(
+        model,
+        profile,
+        session_id,
+        permission_mode,
+        profile_supports_tools,
+        welcome_messages,
+        executor,
+    )
 }

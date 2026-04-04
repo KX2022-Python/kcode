@@ -108,29 +108,26 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             profile,
             allowed_tools,
             permission_mode,
-        } => {
-            if maybe_bootstrap_first_run(
-                model_explicit.then_some(model.as_str()),
-                profile.as_deref(),
-                permission_mode,
-            )? {
-                return Ok(());
-            }
-            run_repl(
-                model,
-                model_explicit,
-                profile,
-                allowed_tools,
-                permission_mode,
-            )?
-        }
+        } => run_repl(
+            model,
+            model_explicit,
+            profile,
+            allowed_tools,
+            permission_mode,
+        )?,
         CliAction::ReplTui {
             model,
             model_explicit,
             profile,
             allowed_tools,
             permission_mode,
-        } => run_repl_tui(model, profile, permission_mode)?,
+        } => run_repl_tui(
+            model,
+            model_explicit,
+            profile,
+            allowed_tools,
+            permission_mode,
+        )?,
         CliAction::Bridge {
             model,
             model_explicit,
@@ -145,52 +142,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         CliAction::Help { profile } => print_help(profile.as_deref()),
     }
     Ok(())
-}
-
-fn maybe_bootstrap_first_run(
-    model_override: Option<&str>,
-    profile_override: Option<&str>,
-    permission_mode: PermissionMode,
-) -> Result<bool, Box<dyn std::error::Error>> {
-    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
-        return Ok(false);
-    }
-
-    let setup = load_setup_context(
-        SetupMode::Interactive,
-        model_override,
-        profile_override,
-        permission_mode,
-        None,
-    )?;
-    if ensure_setup_ready_for_runtime(&setup).is_ok() {
-        return Ok(false);
-    }
-
-    let report = initialize_user_config(&setup.resolved_config.config_home)?;
-    let section = bootstrap_section(&setup);
-    println!("{}", report.render());
-    println!();
-    println!("Opening setup TUI on `{}` so you can configure your provider before first use.", section);
-    tui::run(Some(section))?;
-    Ok(true)
-}
-
-fn bootstrap_section(setup: &SetupContext) -> &'static str {
-    if !setup.resolved_config.config_file_present
-        || setup
-            .resolved_config
-            .base_url
-            .as_deref()
-            .is_none_or(|value| value.trim().is_empty())
-        || !setup.resolved_config.api_key_present
-    {
-        "provider"
-    } else if !path_or_parent_writeable(&setup.resolved_config.session_dir) {
-        "runtime"
-    } else {
-        "overview"
-    }
 }
 
 // ... (other existing code)
@@ -290,22 +241,51 @@ fn print_version() {
 
 fn run_repl_tui(
     model: String,
+    model_explicit: bool,
     profile: Option<String>,
+    allowed_tools: Option<AllowedToolSet>,
     permission_mode: PermissionMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let profile_name = profile.unwrap_or_else(|| "default".to_string());
-    let session_id = format!("repl-{}", chrono_id());
-    let permission_mode = permission_mode.as_str().to_string();
+    let mut cli = LiveCli::new(
+        model,
+        model_explicit,
+        profile,
+        true,
+        allowed_tools,
+        permission_mode,
+        None,
+    )?;
+    let welcome_messages = cli.tui_welcome_messages();
+    let profile_name = cli.active_profile.profile_name.clone();
+    let profile_supports_tools = cli.active_profile.profile.supports_tools;
+    let session_id = cli.session.id.clone();
+    let permission_label = cli.permission_mode.as_str().to_string();
+    let model = cli.model.clone();
 
-    let _submitted = tui::run_repl(model, profile_name, session_id, permission_mode)?;
-    Ok(())
+    tui::repl::run_repl(
+        model,
+        profile_name,
+        session_id,
+        permission_label,
+        profile_supports_tools,
+        welcome_messages,
+        move |command| match command {
+            tui::repl::SubmittedCommand::Prompt(prompt) => cli
+                .run_turn_tui(&prompt)
+                .map_err(|error| error.to_string()),
+            tui::repl::SubmittedCommand::Slash(command) => cli
+                .handle_tui_command(&command)
+                .map_err(|error| error.to_string()),
+        },
+    )
 }
 
 fn chrono_id() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    format!("{:x}", now.as_secs())
+    let secs = now.as_secs();
+    format!("{:x}", secs)
 }
 
 fn resume_session(session_path: &Path, commands: &[String]) {

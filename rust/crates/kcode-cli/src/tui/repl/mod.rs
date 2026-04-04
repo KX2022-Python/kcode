@@ -13,47 +13,33 @@ mod notifications;
 mod permission;
 mod permission_enhanced;
 mod prompt;
+mod runtime_loop;
 mod state;
+mod text_cursor;
 mod theme;
 mod tool_group;
 mod virtual_scroll;
 
-use std::error::Error;
-use std::io::{self, IsTerminal};
-use std::time::Duration;
-
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use crossterm::execute;
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
-use ratatui::backend::CrosstermBackend;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
-use ratatui::Terminal;
 
-use self::command_palette::{
-    render_slash_command_picker, SlashCommandEntry, SlashCommandPicker, SlashPickerAction,
-};
-use self::dialog::{handle_dialog_key, render_dialog, DialogAction, DialogState, DialogType};
-use self::diff_viewer::{render_diff_viewer, DiffViewer};
+use self::command_palette::{SlashCommandEntry, SlashCommandPicker, SlashPickerAction};
+use self::dialog::{handle_dialog_key, DialogAction, DialogState, DialogType};
+use self::diff_viewer::DiffViewer;
 use self::footer_pills::FooterPills;
-use self::header::header;
 use self::input_enhance::{HistorySearch, HistorySearchAction, InputStash};
-use self::layout::build_layout;
-use self::messages::{auto_scroll_to_bottom, render_messages};
-use self::notification_render::render_notifications;
+use self::messages::auto_scroll_to_bottom;
 use self::notifications::{NotificationPriority, NotificationQueue};
-use self::permission::render_permission_dialog;
 use self::permission_enhanced::{EnhancedPermissionRequest, PermissionMode as PermMode};
-use self::prompt::{prompt_height, render_prompt_input, PromptAction, PromptInput};
-use self::state::{PermissionRequest, RenderableMessage, SessionState, SysLevel};
+use self::prompt::{PromptAction, PromptInput};
+use self::runtime_loop::default_welcome_messages;
+use self::state::{PermissionRequest, SessionState};
 use self::theme::{TerminalType, ThemePalette, ThemePreset};
-use self::tool_group::group_tool_calls;
 use self::virtual_scroll::VirtualWindow;
 
 pub use self::prompt::InputMode;
-
-const KCODE_BANNER: &str = "Kcode REPL";
+pub(crate) use self::runtime_loop::run_repl;
+pub use self::state::{BackendResult, RenderableMessage, SubmittedCommand, SysLevel, ToolStatus};
 
 pub struct ReplApp {
     pub messages: Vec<RenderableMessage>,
@@ -96,6 +82,7 @@ impl ReplApp {
         session_id: String,
         permission_mode: String,
         profile_supports_tools: bool,
+        welcome_messages: Vec<RenderableMessage>,
     ) -> Self {
         let term_type = TerminalType::detect();
         let theme = term_type.recommended_theme();
@@ -112,24 +99,14 @@ impl ReplApp {
         let cwd = std::env::current_dir().unwrap_or_default();
         picker.refresh_commands(profile_supports_tools, &cwd);
 
+        let messages = if welcome_messages.is_empty() {
+            default_welcome_messages(&model, &profile, &permission_mode_label, &session_id)
+        } else {
+            welcome_messages
+        };
+
         Self {
-            messages: vec![
-                RenderableMessage::System {
-                    message: KCODE_BANNER.to_string(),
-                    level: SysLevel::Info,
-                },
-                RenderableMessage::System {
-                    message: format!(
-                        "Model: {}  |  Profile: {}  |  Perm: {}  |  Session: {}",
-                        model, profile, permission_mode_label, session_id
-                    ),
-                    level: SysLevel::Info,
-                },
-                RenderableMessage::System {
-                    message: "输入消息开始对话 · / 命令 · F1 帮助 · F3 换主题".to_string(),
-                    level: SysLevel::Info,
-                },
-            ],
+            messages,
             state: SessionState::Idle,
             input: PromptInput::new(),
             picker,
@@ -419,226 +396,5 @@ impl ReplApp {
             PromptAction::HistorySearch => self.history_search.activate(),
             PromptAction::Moved | PromptAction::None => {}
         }
-    }
-}
-
-pub fn run_repl(
-    model: String,
-    profile: String,
-    session_id: String,
-    permission_mode: String,
-) -> Result<Vec<String>, Box<dyn Error>> {
-    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
-        return Err("kcode repl requires an interactive terminal".into());
-    }
-
-    let mut app = ReplApp::new(model, profile, session_id, permission_mode, true);
-
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
-    terminal.hide_cursor()?;
-
-    while event::poll(Duration::from_millis(10)).unwrap_or(false) {
-        let _ = event::read();
-    }
-
-    let submitted = run_repl_loop(&mut terminal, &mut app)?;
-
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-
-    Ok(submitted)
-}
-
-fn run_repl_loop(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut ReplApp,
-) -> Result<Vec<String>, Box<dyn Error>> {
-    let mut submitted = Vec::new();
-    terminal.draw(|frame| draw_frame(frame, app))?;
-
-    while !app.quit {
-        let has_event = event::poll(Duration::from_millis(200)).unwrap_or(false);
-        if has_event {
-            match event::read() {
-                Ok(Event::Key(key)) => {
-                    app.handle_key(key);
-                    process_pending_command(app, &mut submitted);
-                }
-                Ok(Event::Resize(_, _)) => {
-                    let _ = terminal.autoresize();
-                }
-                Ok(_) | Err(_) => {}
-            }
-        }
-        terminal.draw(|frame| draw_frame(frame, app))?;
-    }
-
-    Ok(submitted)
-}
-
-fn process_pending_command(app: &mut ReplApp, submitted: &mut Vec<String>) {
-    let Some(command) = app.pending_command.take() else {
-        return;
-    };
-
-    match command.as_str() {
-        "__permission_allow" => {
-            app.add_message(RenderableMessage::System {
-                message: "权限已授予".to_string(),
-                level: SysLevel::Success,
-            });
-            app.notify_success("权限已授予".to_string());
-            app.set_state(SessionState::Idle);
-        }
-        "__permission_deny" => {
-            app.add_message(RenderableMessage::System {
-                message: "权限已拒绝".to_string(),
-                level: SysLevel::Warning,
-            });
-            app.notify_warning("权限已拒绝".to_string());
-            app.set_state(SessionState::Idle);
-        }
-        _ if command.starts_with('/') => {
-            app.add_message(RenderableMessage::System {
-                message: format!("执行命令: {}", command),
-                level: SysLevel::Info,
-            });
-            app.notify_info(format!("执行: {}", command));
-            submitted.push(command);
-        }
-        _ => {
-            app.add_message(RenderableMessage::User {
-                text: command.clone(),
-            });
-            submitted.push(command);
-            app.set_state(SessionState::Thinking {
-                text: "Processing...".to_string(),
-            });
-            app.add_message(RenderableMessage::AssistantText {
-                text: "TUI 预览模式已记录这条消息。".to_string(),
-                streaming: false,
-            });
-            app.set_state(SessionState::Completed {
-                summary: "preview-complete".to_string(),
-            });
-            app.usage_input_tokens += 150;
-            app.usage_output_tokens += 280;
-            app.footer_pills.token_usage = Some(self::footer_pills::TokenUsage {
-                input_tokens: app.usage_input_tokens,
-                output_tokens: app.usage_output_tokens,
-            });
-        }
-    }
-}
-
-fn draw_frame(frame: &mut ratatui::Frame<'_>, app: &mut ReplApp) {
-    let prompt_h = prompt_height(&app.input, frame.area().width);
-    let layout = build_layout(frame.area(), prompt_h);
-    app.set_message_viewport(layout.messages);
-    let display_messages = if app.tools_collapsed {
-        group_tool_calls(&app.messages)
-    } else {
-        app.messages.clone()
-    };
-
-    if layout.header.height > 0 {
-        frame.render_widget(
-            header(
-                layout.header.width,
-                &app.model,
-                &app.profile,
-                &app.session_id,
-                &app.permission_mode_label,
-                app.state.label(),
-            ),
-            layout.header,
-        );
-    }
-
-    render_notifications(frame, &mut app.notifications, frame.area());
-    render_messages(
-        frame,
-        &display_messages,
-        layout.messages,
-        &mut app.scroll_offset,
-    );
-
-    let input_active = !app.permission_pending
-        && !app.dialog.is_active()
-        && !app.history_search.active
-        && !app.diff_viewer.visible;
-    render_prompt_input(frame, &app.input, layout.prompt, input_active);
-    render_slash_command_picker(frame, &app.picker, layout.prompt, frame.area());
-    render_dialog(frame, &app.dialog, frame.area());
-    render_diff_viewer(frame, &app.diff_viewer, frame.area());
-
-    if app.permission_pending {
-        let request = PermissionRequest::new(
-            "example_tool".to_string(),
-            "这是一个演示权限请求".to_string(),
-        );
-        render_permission_dialog(frame, &request, frame.area(), 0);
-    }
-
-    app.footer_pills.has_active_query = app.state.is_active();
-    app.footer_pills.has_pending_permission = app.permission_pending;
-    app.footer_pills.has_notifications = !app.notifications.is_empty();
-    if layout.footer.height > 0 {
-        frame.render_widget(app.footer_pills.render(layout.footer.width), layout.footer);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::ReplApp;
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
-    #[test]
-    fn slash_palette_follows_the_current_input() {
-        let mut app = ReplApp::new(
-            "gpt-4.1".to_string(),
-            "default".to_string(),
-            "session-1".to_string(),
-            "workspace-write".to_string(),
-            true,
-        );
-
-        app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
-        app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE));
-
-        assert!(app.picker.visible);
-        assert_eq!(app.picker.filter, "r");
-    }
-
-    #[test]
-    fn paging_up_breaks_follow_mode_until_the_user_reaches_bottom_again() {
-        let mut app = ReplApp::new(
-            "gpt-4.1".to_string(),
-            "default".to_string(),
-            "session-1".to_string(),
-            "workspace-write".to_string(),
-            true,
-        );
-        app.message_area_height = 4;
-        app.message_area_width = 24;
-
-        for index in 0..10 {
-            app.add_message(crate::tui::repl::state::RenderableMessage::AssistantText {
-                text: format!("message-{index}"),
-                streaming: false,
-            });
-        }
-
-        app.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
-        assert!(!app.stick_to_bottom);
-
-        app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
-        app.scroll_to_bottom();
-        assert!(app.stick_to_bottom);
     }
 }

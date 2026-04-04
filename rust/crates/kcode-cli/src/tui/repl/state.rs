@@ -89,6 +89,19 @@ pub enum RenderableMessage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubmittedCommand {
+    Prompt(String),
+    Slash(String),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BackendResult {
+    pub messages: Vec<RenderableMessage>,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolStatus {
     Pending,
     Running,

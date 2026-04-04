@@ -131,6 +131,8 @@ include!("main_parts/bridge_repl_types.rs");
 include!("main_parts/hook_abort.rs");
 
 include!("main_parts/live_cli_core.rs");
+include!("main_parts/live_cli_tui_support.rs");
+include!("main_parts/live_cli_tui.rs");
 include!("main_parts/live_cli_repl_command.rs");
 include!("main_parts/live_cli_session_state.rs");
 include!("main_parts/live_cli_session_ops.rs");
