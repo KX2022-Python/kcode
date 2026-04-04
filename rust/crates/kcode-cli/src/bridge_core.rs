@@ -42,6 +42,7 @@ impl SessionManager {
     }
 
     /// Get an existing session or create a new one for the given chat_id.
+    /// Implements graceful fallback: if session file is corrupted, creates a new one.
     pub fn get_or_create_session(
         &mut self,
         chat_id: &str,
@@ -53,17 +54,42 @@ impl SessionManager {
 
             let session_path = self.session_dir.join(format!("{}.jsonl", chat_id));
 
+            // Ensure session directory exists
+            if let Err(e) = std::fs::create_dir_all(&self.session_dir) {
+                eprintln!("⚠ Failed to create session directory: {}", e);
+            }
+
             let cli = if session_path.exists() {
-                LiveCli::new(
+                // Try to load existing session, fallback to new if corrupted
+                match LiveCli::new(
                     default_config.model.clone(),
                     default_config.model_explicit,
                     default_config.profile.clone(),
                     true,
                     None,
                     default_config.permission_mode,
-                    Some(session_path),
-                )
-                .map_err(|e| e.to_string())?
+                    Some(session_path.clone()),
+                ) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        eprintln!("⚠ Session file corrupted for {}: {}. Creating new session.", chat_id, e);
+                        // Backup corrupted file
+                        let backup_path = session_path.with_extension("jsonl.bak");
+                        let _ = std::fs::rename(&session_path, &backup_path);
+                        
+                        // Create fresh session
+                        LiveCli::new(
+                            default_config.model.clone(),
+                            default_config.model_explicit,
+                            default_config.profile.clone(),
+                            true,
+                            None,
+                            default_config.permission_mode,
+                            None,
+                        )
+                        .map_err(|e| e.to_string())?
+                    }
+                }
             } else {
                 LiveCli::new(
                     default_config.model.clone(),
@@ -157,7 +183,7 @@ impl BridgeCore {
 }
 
 /// Entry point for the Bridge service.
-/// Reads environment variables and starts the webhook server + bridge core.
+/// Reads environment variables, validates config, and starts the webhook server + bridge core.
 pub fn run_bridge_service(
     model: String,
     model_explicit: bool,
@@ -166,9 +192,24 @@ pub fn run_bridge_service(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use adapters::{
         FeishuConfig, SessionRouter, WhatsAppConfig,
+        validate_bridge_config, print_config_summary,
     };
     use std::sync::Arc;
     use tokio::runtime::Builder;
+
+    // Validate configuration before startup
+    let errors = validate_bridge_config();
+    if !errors.is_empty() {
+        eprintln!("❌ Configuration errors found:");
+        for err in &errors {
+            eprintln!("  ⚠ {}: {}", err.var_name, err.message);
+        }
+        eprintln!("\nPlease fix these issues and restart.");
+        return Ok(());
+    }
+
+    // Print configuration summary
+    print_config_summary();
 
     // 1. Load Credentials
     let bot_token = std::env::var("KCODE_TELEGRAM_BOT_TOKEN").ok();

@@ -64,6 +64,7 @@ pub async fn start_webhook_server(
     };
 
     let app = Router::new()
+        .route("/health", get(handle_health_check))
         .route("/webhook/telegram", post(handle_telegram_webhook))
         .route("/webhook/whatsapp", get(handle_whatsapp_verify).post(handle_whatsapp_webhook))
         .route("/webhook/feishu", get(handle_feishu_ping).post(handle_feishu_webhook))
@@ -74,6 +75,18 @@ pub async fn start_webhook_server(
     axum::serve(listener, app).await?;
 
     Ok(())
+}
+
+/// Health check endpoint for monitoring and load balancers.
+async fn handle_health_check() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "status": "healthy",
+        "service": "kcode-bridge",
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+    }))
 }
 
 // --- Telegram Handlers ---

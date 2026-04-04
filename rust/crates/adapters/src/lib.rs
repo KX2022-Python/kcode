@@ -36,6 +36,9 @@ pub use media_download::{
     media_storage_dir,
 };
 
+pub mod config_validator;
+pub use config_validator::{print_config_summary, validate_bridge_config, EnvError};
+
 // Re-exports for convenience
 pub use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent};
 pub use bridge::DeliveryMode;
