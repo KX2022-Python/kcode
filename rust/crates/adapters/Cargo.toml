@@ -8,7 +8,12 @@ publish.workspace = true
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
+async-trait = "0.1"
+reqwest = { version = "0.12", features = ["json", "stream"] }
+tracing = "0.1"
 bridge = { path = "../bridge" }
+runtime = { path = "../runtime" }
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
 
 [lints]
 workspace = true
