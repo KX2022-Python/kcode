@@ -1,5 +1,6 @@
 mod app;
 mod config_store;
+pub(crate) mod repl;
 mod render;
 pub(crate) mod state;
 
@@ -79,4 +80,14 @@ fn parse_section(value: &str) -> Result<Section, Box<dyn Error>> {
         )
         .into()),
     }
+}
+
+/// REPL TUI 入口 — 全屏 AI 编程会话界面
+pub fn run_repl(
+    model: String,
+    profile: String,
+    session_id: String,
+    permission_mode: String,
+) -> Result<Vec<String>, Box<dyn Error>> {
+    repl::run_repl(model, profile, session_id, permission_mode)
 }

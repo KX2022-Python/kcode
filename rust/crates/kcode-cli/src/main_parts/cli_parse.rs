@@ -190,6 +190,13 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
         "init" => Ok(CliAction::Init),
         "tui" => parse_tui_args(&rest[1..]),
         "configure" => parse_tui_args(&rest[1..]),
+        "repl-tui" => Ok(CliAction::ReplTui {
+            model,
+            model_explicit,
+            profile,
+            allowed_tools,
+            permission_mode,
+        }),
         "bridge" => Ok(CliAction::Bridge {
             model,
             model_explicit,
@@ -260,6 +267,13 @@ fn parse_single_word_command_alias(
         })),
         "tui" => Some(Ok(CliAction::Tui { section: None })),
         "configure" => Some(Ok(CliAction::Tui { section: None })),
+        "repl-tui" => Some(Ok(CliAction::ReplTui {
+            model: model.to_string(),
+            model_explicit,
+            profile: profile.map(ToOwned::to_owned),
+            allowed_tools: normalize_allowed_tools(&[], profile.as_deref()).ok().flatten(),
+            permission_mode,
+        })),
         "sandbox" => Some(Ok(CliAction::Sandbox)),
         other => bare_slash_command_guidance(other).map(Err),
     }

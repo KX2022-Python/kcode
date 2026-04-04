@@ -72,6 +72,13 @@ enum CliAction {
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
     },
+    ReplTui {
+        model: String,
+        model_explicit: bool,
+        profile: Option<String>,
+        allowed_tools: Option<AllowedToolSet>,
+        permission_mode: PermissionMode,
+    },
     Bridge {
         model: String,
         model_explicit: bool,

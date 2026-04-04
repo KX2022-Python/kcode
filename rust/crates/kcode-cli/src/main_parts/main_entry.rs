@@ -115,6 +115,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             allowed_tools,
             permission_mode,
         )?,
+        CliAction::ReplTui {
+            model,
+            model_explicit,
+            profile,
+            allowed_tools,
+            permission_mode,
+        } => run_repl_tui(
+            model,
+            profile,
+            permission_mode,
+        )?,
         CliAction::Bridge {
             model,
             model_explicit,
@@ -224,6 +235,37 @@ fn print_system_prompt(cwd: PathBuf, date: String) {
 
 fn print_version() {
     println!("{}", render_version_report());
+}
+
+fn run_repl_tui(
+    model: String,
+    profile: Option<String>,
+    permission_mode: PermissionMode,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let profile_name = profile.unwrap_or_else(|| "default".to_string());
+    let session_id = format!("repl-{}", chrono_id());
+    let perm_str = permission_mode.as_str().to_string();
+
+    let submitted = tui::run_repl(model, profile_name, session_id, perm_str)?;
+
+    // 如果有提交的命令，继续执行
+    for cmd in submitted {
+        if cmd.starts_with('/') {
+            println!("执行斜杠命令: {}", cmd);
+            // 斜杠命令在 TUI 外执行，这里简化处理
+        } else if !cmd.starts_with("__permission_") {
+            println!("普通消息: {}", cmd);
+        }
+    }
+    Ok(())
+}
+
+fn chrono_id() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs();
+    format!("{:x}", secs)
 }
 
 fn resume_session(session_path: &Path, commands: &[String]) {
