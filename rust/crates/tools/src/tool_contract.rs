@@ -111,9 +111,7 @@ mod tests {
             test_spec("read_file", PermissionMode::ReadOnly),
         ];
 
-        let pool = ToolPoolAssembler::new()
-            .with_specs(specs)
-            .assemble();
+        let pool = ToolPoolAssembler::new().with_specs(specs).assemble();
 
         assert_eq!(pool.len(), 2);
         assert!(pool.contains("bash"));

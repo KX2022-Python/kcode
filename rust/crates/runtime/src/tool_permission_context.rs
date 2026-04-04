@@ -52,7 +52,10 @@ mod tests {
             PermissionOverride::Allow,
             "hook approved".to_string(),
         );
-        assert_eq!(ctx.base.override_decision(), Some(PermissionOverride::Allow));
+        assert_eq!(
+            ctx.base.override_decision(),
+            Some(PermissionOverride::Allow)
+        );
         assert_eq!(ctx.base.override_reason(), Some("hook approved"));
     }
 }

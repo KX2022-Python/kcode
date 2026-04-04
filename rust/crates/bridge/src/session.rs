@@ -41,10 +41,7 @@ impl ChannelSessionKey {
 
     /// Stable string representation for use as map keys or session IDs.
     pub fn as_session_id(&self) -> String {
-        let thread = self
-            .thread_scope
-            .as_deref()
-            .unwrap_or("");
+        let thread = self.thread_scope.as_deref().unwrap_or("");
         format!(
             "{}:{}:{}:{}:{}",
             self.channel, self.tenant_or_bot_id, self.chat_scope, self.user_scope, thread
@@ -78,7 +75,11 @@ impl SessionMapping {
     }
 
     /// Resolve or create a session ID for the given channel key.
-    pub fn resolve_or_create(&self, key: &ChannelSessionKey, creator: impl FnOnce() -> String) -> String {
+    pub fn resolve_or_create(
+        &self,
+        key: &ChannelSessionKey,
+        creator: impl FnOnce() -> String,
+    ) -> String {
         let mut map = self.mappings.lock().expect("session mapping poisoned");
 
         if let Some(session_id) = map.get(key) {
@@ -101,7 +102,10 @@ impl SessionMapping {
     }
 
     pub fn count(&self) -> usize {
-        self.mappings.lock().expect("session mapping poisoned").len()
+        self.mappings
+            .lock()
+            .expect("session mapping poisoned")
+            .len()
     }
 }
 

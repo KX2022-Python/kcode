@@ -64,8 +64,8 @@ impl BridgeCommandPolicy {
     /// Check if a command type is bridge-safe.
     pub fn is_command_type_allowed(&self, command_kind: &str) -> bool {
         match command_kind {
-            "prompt" => true,   // prompt commands are bridge-safe by default
-            "local" => true,    // filtered by allowed_local_commands
+            "prompt" => true,    // prompt commands are bridge-safe by default
+            "local" => true,     // filtered by allowed_local_commands
             "local-ui" => false, // blocked by default
             _ => false,
         }

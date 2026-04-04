@@ -3,12 +3,12 @@
 
 use std::error::Error;
 
+use super::transport::{Transport, TransportConfig};
 use async_trait::async_trait;
-use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent};
 use bridge::attachment::{AttachmentEnvelope, AttachmentKind};
+use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use super::transport::{Transport, TransportConfig};
 
 /// WhatsApp Cloud API configuration.
 #[derive(Debug, Clone)]
@@ -24,7 +24,9 @@ pub struct WhatsAppConfig {
 }
 
 impl TransportConfig for WhatsAppConfig {
-    fn channel_id(&self) -> &str { "whatsapp" }
+    fn channel_id(&self) -> &str {
+        "whatsapp"
+    }
 }
 
 /// WhatsApp Transport.
@@ -42,14 +44,17 @@ impl WhatsAppTransport {
     }
 
     fn api_url(&self, path: &str) -> String {
-        format!("https://graph.facebook.com/v18.0/{}{}", self.config.phone_number_id, path)
+        format!(
+            "https://graph.facebook.com/v18.0/{}{}",
+            self.config.phone_number_id, path
+        )
     }
 
     /// Send a text message to WhatsApp.
     async fn send_text(&self, to: &str, text: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
         // WhatsApp has a ~4096 character limit for text messages
         const MAX_LEN: usize = 4096;
-        
+
         let chunks: Vec<&str> = if text.len() <= MAX_LEN {
             vec![text]
         } else {
@@ -73,8 +78,13 @@ impl WhatsAppTransport {
                 template: None,
             };
 
-            let resp = self.client.post(&url)
-                .header("Authorization", format!("Bearer {}", self.config.access_token))
+            let resp = self
+                .client
+                .post(&url)
+                .header(
+                    "Authorization",
+                    format!("Bearer {}", self.config.access_token),
+                )
                 .header("Content-Type", "application/json")
                 .json(&body)
                 .send()
@@ -105,9 +115,14 @@ impl Transport for WhatsAppTransport {
         &self,
         event: &BridgeOutboundEvent,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let to = event.reply_target.as_ref().ok_or("Missing reply_target (phone number)")?;
-        
-        let text = event.render_items.iter()
+        let to = event
+            .reply_target
+            .as_ref()
+            .ok_or("Missing reply_target (phone number)")?;
+
+        let text = event
+            .render_items
+            .iter()
             .map(|(_, t)| t.as_str())
             .collect::<Vec<&str>>()
             .join("\n");
@@ -118,9 +133,7 @@ impl Transport for WhatsAppTransport {
 
 /// Parse an incoming WhatsApp webhook payload into a BridgeInboundEvent.
 /// This should be called by the external HTTP server handling webhooks.
-pub fn parse_whatsapp_webhook(
-    payload: &WhatsAppWebhookPayload,
-) -> Vec<BridgeInboundEvent> {
+pub fn parse_whatsapp_webhook(payload: &WhatsAppWebhookPayload) -> Vec<BridgeInboundEvent> {
     let mut events = Vec::new();
     for entry in &payload.entry {
         for change in &entry.changes {
@@ -138,11 +151,16 @@ pub fn parse_whatsapp_webhook(
                             kind: AttachmentKind::Image,
                             name: "image.jpg".to_string(),
                             mime_type: image.mime_type.clone().or(Some("image/jpeg".to_string())),
-                            url_or_path: Some(format!("https://graph.facebook.com/v18.0/{}", image.id)),
+                            url_or_path: Some(format!(
+                                "https://graph.facebook.com/v18.0/{}",
+                                image.id
+                            )),
                             text_content: image.caption.clone(),
                             size_bytes: None,
                         });
-                        if text.is_empty() { text = "[Received an image]".to_string(); }
+                        if text.is_empty() {
+                            text = "[Received an image]".to_string();
+                        }
                     }
 
                     if let Some(audio) = &msg.audio {
@@ -150,23 +168,37 @@ pub fn parse_whatsapp_webhook(
                             kind: AttachmentKind::PlatformMetadata,
                             name: "audio.ogg".to_string(),
                             mime_type: audio.mime_type.clone().or(Some("audio/ogg".to_string())),
-                            url_or_path: Some(format!("https://graph.facebook.com/v18.0/{}", audio.id)),
+                            url_or_path: Some(format!(
+                                "https://graph.facebook.com/v18.0/{}",
+                                audio.id
+                            )),
                             text_content: None,
                             size_bytes: None,
                         });
-                        if text.is_empty() { text = "[Received an audio message]".to_string(); }
+                        if text.is_empty() {
+                            text = "[Received an audio message]".to_string();
+                        }
                     }
 
                     if let Some(doc) = &msg.document {
                         attachments.push(AttachmentEnvelope {
                             kind: AttachmentKind::Document,
-                            name: doc.filename.clone().unwrap_or_else(|| "document".to_string()),
+                            name: doc
+                                .filename
+                                .clone()
+                                .unwrap_or_else(|| "document".to_string()),
                             mime_type: doc.mime_type.clone(),
-                            url_or_path: Some(format!("https://graph.facebook.com/v18.0/{}", doc.id)),
+                            url_or_path: Some(format!(
+                                "https://graph.facebook.com/v18.0/{}",
+                                doc.id
+                            )),
                             text_content: doc.caption.clone(),
                             size_bytes: None,
                         });
-                        if text.is_empty() { text = format!("[Received a file: {}]", attachments.last().unwrap().name); }
+                        if text.is_empty() {
+                            text =
+                                format!("[Received a file: {}]", attachments.last().unwrap().name);
+                        }
                     }
 
                     events.push(BridgeInboundEvent {
@@ -195,19 +227,19 @@ pub fn parse_whatsapp_webhook(
 pub fn verify_whatsapp_signature(payload: &[u8], signature: &str, app_secret: &str) -> bool {
     use hmac::Mac;
     use sha2::Sha256;
-    
+
     // Signature format: sha256=<hex_hash>
     if !signature.starts_with("sha256=") {
         return false;
     }
     let expected_hash = &signature[7..];
-    
+
     let mut mac = hmac::Hmac::<Sha256>::new_from_slice(app_secret.as_bytes())
         .expect("HMAC can take key of any size");
     mac.update(payload);
     let result = mac.finalize();
     let actual_hash = hex::encode(result.into_bytes());
-    
+
     actual_hash == expected_hash
 }
 

@@ -9,7 +9,7 @@ use runtime::{
 };
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use telemetry::{AnalyticsEvent, KcodeRequestProfile, ClientIdentity, SessionTracer};
+use telemetry::{AnalyticsEvent, ClientIdentity, KcodeRequestProfile, SessionTracer};
 
 use crate::error::ApiError;
 use crate::prompt_cache::{PromptCache, PromptCacheRecord, PromptCacheStats};

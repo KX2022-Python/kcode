@@ -377,9 +377,8 @@ where
             let events = match api_result {
                 Some(events) => events,
                 None => {
-                    let error = last_error.unwrap_or_else(|| {
-                        RuntimeError::new("API call failed after retries")
-                    });
+                    let error = last_error
+                        .unwrap_or_else(|| RuntimeError::new("API call failed after retries"));
                     self.record_turn_failed(iterations, &error);
                     return Err(error);
                 }
@@ -536,10 +535,10 @@ where
             .count();
 
         // Auto-dream: trigger background extraction without blocking REPL
-        if self.memory_extraction_state.should_extract(
-            cumulative_input_tokens,
-            cumulative_tool_calls,
-        ) {
+        if self
+            .memory_extraction_state
+            .should_extract(cumulative_input_tokens, cumulative_tool_calls)
+        {
             crate::memory_extraction::trigger_auto_dream(
                 self.auto_dream_state.clone(),
                 self.session.messages.clone(),

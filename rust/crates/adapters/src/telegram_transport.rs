@@ -6,8 +6,8 @@ use std::collections::HashMap;
 use std::error::Error;
 
 use async_trait::async_trait;
-use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent, DeliveryMode};
 use bridge::attachment::{AttachmentEnvelope, AttachmentKind};
+use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent, DeliveryMode};
 use reqwest::Client;
 use serde::Deserialize;
 use tracing::{error, info};
@@ -30,7 +30,9 @@ pub enum TelegramMode {
 }
 
 impl TransportConfig for TelegramConfig {
-    fn channel_id(&self) -> &str { "telegram" }
+    fn channel_id(&self) -> &str {
+        "telegram"
+    }
 }
 
 impl Default for TelegramConfig {
@@ -76,7 +78,10 @@ impl TelegramTransport {
     }
 
     fn api_url(&self, method: &str) -> String {
-        format!("https://api.telegram.org/bot{}/{}", self.config.bot_token, method)
+        format!(
+            "https://api.telegram.org/bot{}/{}",
+            self.config.bot_token, method
+        )
     }
 
     /// Call Telegram setWebhook API.
@@ -85,7 +90,10 @@ impl TelegramTransport {
             let api_url = self.api_url("setWebhook");
             let mut body = HashMap::new();
             body.insert("url", url.clone());
-            body.insert("allowed_updates", serde_json::json!(["message"]).to_string());
+            body.insert(
+                "allowed_updates",
+                serde_json::json!(["message"]).to_string(),
+            );
 
             let resp = self.client.post(&api_url).json(&body).send().await?;
             let status = resp.status();
@@ -99,11 +107,16 @@ impl TelegramTransport {
     }
 
     /// Send a text message to Telegram, auto-splitting if > 4096 chars.
-    async fn send_text(&self, chat_id: &str, text: &str, reply_to: Option<&str>) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn send_text(
+        &self,
+        chat_id: &str,
+        text: &str,
+        reply_to: Option<&str>,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         // Telegram max message length is 4096 UTF-8 characters
         const MAX_LEN: usize = 4096;
         let escaped = escape_markdown_v2(text);
-        
+
         // Split into chunks if needed
         let chunks: Vec<String> = if escaped.len() <= MAX_LEN {
             vec![escaped]
@@ -145,12 +158,14 @@ impl Transport for TelegramTransport {
         handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + Send + Sync + 'static>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         match &self.config.mode {
-            TelegramMode::Polling { timeout } => {
-                self.run_polling(handler, *timeout).await
-            }
+            TelegramMode::Polling { timeout } => self.run_polling(handler, *timeout).await,
             TelegramMode::Webhook { url: _, port } => {
                 // Webhook mode requires a separate HTTP server (not implemented here)
-                Err(format!("Webhook mode requires external HTTP server on port {}", port).into())
+                Err(format!(
+                    "Webhook mode requires external HTTP server on port {}",
+                    port
+                )
+                .into())
             }
         }
     }
@@ -159,10 +174,15 @@ impl Transport for TelegramTransport {
         &self,
         event: &BridgeOutboundEvent,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let chat_id = event.reply_target.as_ref().ok_or("Missing reply_target (chat_id)")?;
-        
+        let chat_id = event
+            .reply_target
+            .as_ref()
+            .ok_or("Missing reply_target (chat_id)")?;
+
         // Extract text from render items
-        let text = event.render_items.iter()
+        let text = event
+            .render_items
+            .iter()
             .map(|(_, t)| t.as_str())
             .collect::<Vec<&str>>()
             .join("\n");
@@ -183,7 +203,10 @@ impl TelegramTransport {
         handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + Send + Sync + 'static>,
         timeout: u32,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        info!("Starting Telegram Long Polling transport (timeout={}s)...", timeout);
+        info!(
+            "Starting Telegram Long Polling transport (timeout={}s)...",
+            timeout
+        );
 
         loop {
             let offset = self.offset.load(std::sync::atomic::Ordering::SeqCst);
@@ -193,7 +216,10 @@ impl TelegramTransport {
             params.insert("offset", offset.to_string());
             params.insert("timeout", timeout.to_string());
             // Serialize allowed_updates as a JSON array string
-            params.insert("allowed_updates", serde_json::json!(["message"]).to_string());
+            params.insert(
+                "allowed_updates",
+                serde_json::json!(["message"]).to_string(),
+            );
 
             let resp = match self.client.post(&url).json(&params).send().await {
                 Ok(r) => r,
@@ -228,8 +254,14 @@ impl TelegramTransport {
                 if let Some(message) = update.message {
                     if let Some(text) = message.text {
                         let chat_id = message.chat.id.to_string();
-                        let user_id = message.from.map(|u| u.id.to_string()).unwrap_or_else(|| "unknown".to_string());
-                        let reply_to = message.reply_to_message.as_ref().map(|m| m.message_id.to_string());
+                        let user_id = message
+                            .from
+                            .map(|u| u.id.to_string())
+                            .unwrap_or_else(|| "unknown".to_string());
+                        let reply_to = message
+                            .reply_to_message
+                            .as_ref()
+                            .map(|m| m.message_id.to_string());
 
                         let event = BridgeInboundEvent {
                             bridge_event_id: format!("tg-{}-{}", chat_id, update.update_id),
@@ -248,7 +280,7 @@ impl TelegramTransport {
                         };
 
                         let outbound = handler(event);
-                        
+
                         // Send response back to Telegram
                         if let Err(e) = self.send_outbound(&outbound).await {
                             error!("Failed to send outbound to Telegram: {}", e);
@@ -257,7 +289,8 @@ impl TelegramTransport {
                 }
 
                 // Update offset for next poll
-                self.offset.store(update.update_id + 1, std::sync::atomic::Ordering::SeqCst);
+                self.offset
+                    .store(update.update_id + 1, std::sync::atomic::Ordering::SeqCst);
             }
         }
     }
@@ -335,8 +368,15 @@ pub fn parse_telegram_webhook(body: &[u8]) -> Result<Vec<BridgeInboundEvent>, Bo
 
     if let Some(message) = update.message {
         let chat_id = message.chat.id.to_string();
-        let user_id = message.from.as_ref().map(|u| u.id.to_string()).unwrap_or_else(|| "unknown".to_string());
-        let reply_to = message.reply_to_message.as_ref().map(|m| m.message_id.to_string());
+        let user_id = message
+            .from
+            .as_ref()
+            .map(|u| u.id.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        let reply_to = message
+            .reply_to_message
+            .as_ref()
+            .map(|m| m.message_id.to_string());
 
         let mut text = String::new();
         let mut attachments = Vec::new();
@@ -357,7 +397,9 @@ pub fn parse_telegram_webhook(body: &[u8]) -> Result<Vec<BridgeInboundEvent>, Bo
                     text_content: None,
                     size_bytes: best_photo.file_size.map(|s| s as u64),
                 });
-                if text.is_empty() { text = "[Received a photo]".to_string(); }
+                if text.is_empty() {
+                    text = "[Received a photo]".to_string();
+                }
             }
         }
 
@@ -371,7 +413,9 @@ pub fn parse_telegram_webhook(body: &[u8]) -> Result<Vec<BridgeInboundEvent>, Bo
                 text_content: None,
                 size_bytes: doc.file_size.map(|s| s as u64),
             });
-            if text.is_empty() { text = format!("[Received a file: {}]", attachments.last().unwrap().name); }
+            if text.is_empty() {
+                text = format!("[Received a file: {}]", attachments.last().unwrap().name);
+            }
         }
 
         // 4. Parse Voice
@@ -384,7 +428,9 @@ pub fn parse_telegram_webhook(body: &[u8]) -> Result<Vec<BridgeInboundEvent>, Bo
                 text_content: None,
                 size_bytes: voice.file_size.map(|s| s as u64),
             });
-            if text.is_empty() { text = "[Received a voice message]".to_string(); }
+            if text.is_empty() {
+                text = "[Received a voice message]".to_string();
+            }
         }
 
         events.push(BridgeInboundEvent {

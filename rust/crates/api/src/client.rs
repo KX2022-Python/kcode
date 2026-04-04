@@ -176,7 +176,10 @@ mod tests {
     #[test]
     fn provider_detection_prefers_model_family() {
         assert_eq!(detect_provider_kind("grok-3"), ProviderKind::Xai);
-        assert_eq!(detect_provider_kind("claude-sonnet-4-6"), ProviderKind::Anthropic);
+        assert_eq!(
+            detect_provider_kind("claude-sonnet-4-6"),
+            ProviderKind::Anthropic
+        );
         assert_eq!(detect_provider_kind("gpt-4.1"), ProviderKind::OpenAi);
     }
 }

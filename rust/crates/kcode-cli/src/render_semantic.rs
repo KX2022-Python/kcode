@@ -187,23 +187,26 @@ impl SemanticRole {
     /// ANSI foreground color code for this role.
     fn ansi_fg(self) -> &'static str {
         match self {
-            Self::User => "\x1b[36m",       // cyan
-            Self::Assistant => "\x1b[0m",    // default
-            Self::Tool => "\x1b[33m",        // yellow
-            Self::System => "\x1b[90m",      // dark grey
-            Self::Warning => "\x1b[38;5;208m", // orange
-            Self::Error => "\x1b[31m",       // red
-            Self::Success => "\x1b[32m",     // green
-            Self::Memory => "\x1b[38;5;141m",  // purple
-            Self::Compact => "\x1b[38;5;146m", // grey-blue
+            Self::User => "\x1b[36m",             // cyan
+            Self::Assistant => "\x1b[0m",         // default
+            Self::Tool => "\x1b[33m",             // yellow
+            Self::System => "\x1b[90m",           // dark grey
+            Self::Warning => "\x1b[38;5;208m",    // orange
+            Self::Error => "\x1b[31m",            // red
+            Self::Success => "\x1b[32m",          // green
+            Self::Memory => "\x1b[38;5;141m",     // purple
+            Self::Compact => "\x1b[38;5;146m",    // grey-blue
             Self::Permission => "\x1b[38;5;172m", // brown-orange
-            Self::Diff => "\x1b[38;5;117m",  // light blue
-            Self::Progress => "\x1b[34m",    // blue
+            Self::Diff => "\x1b[38;5;117m",       // light blue
+            Self::Progress => "\x1b[34m",         // blue
         }
     }
 
     fn needs_bold(self) -> bool {
-        matches!(self, Self::Error | Self::Warning | Self::Success | Self::Progress)
+        matches!(
+            self,
+            Self::Error | Self::Warning | Self::Success | Self::Progress
+        )
     }
 }
 
@@ -266,7 +269,11 @@ mod tests {
         ];
         for role in roles {
             assert!(!role.as_str().is_empty(), "role {:?} missing as_str", role);
-            assert!(!role.prefix_label().is_empty(), "role {:?} missing prefix", role);
+            assert!(
+                !role.prefix_label().is_empty(),
+                "role {:?} missing prefix",
+                role
+            );
         }
     }
 }

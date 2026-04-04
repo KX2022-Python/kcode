@@ -92,10 +92,7 @@ impl KcodeRequestProfile {
     #[must_use]
     pub fn header_pairs(&self) -> Vec<(String, String)> {
         let mut headers = vec![
-            (
-                "x-kcode-api-version".to_string(),
-                self.api_version.clone(),
-            ),
+            ("x-kcode-api-version".to_string(), self.api_version.clone()),
             ("user-agent".to_string(), self.client_identity.user_agent()),
         ];
         if !self.betas.is_empty() {
@@ -449,8 +446,7 @@ mod tests {
                 ("user-agent".to_string(), "kcode/1.2.3".to_string()),
                 (
                     "x-kcode-beta".to_string(),
-                    "kcode-20250219,prompt-caching-scope-2026-01-05,tools-2026-04-01"
-                        .to_string(),
+                    "kcode-20250219,prompt-caching-scope-2026-01-05,tools-2026-04-01".to_string(),
                 ),
             ]
         );

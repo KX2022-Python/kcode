@@ -126,21 +126,33 @@ impl McpRegistrySnapshot {
         }
 
         if !self.disabled_servers.is_empty() {
-            lines.push(format!("Disabled servers ({}):", self.disabled_servers.len()));
+            lines.push(format!(
+                "Disabled servers ({}):",
+                self.disabled_servers.len()
+            ));
             for server in &self.disabled_servers {
-                lines.push(format!("  \u{2717} {} \u{2014} {}", server.name, server.reason));
+                lines.push(format!(
+                    "  \u{2717} {} \u{2014} {}",
+                    server.name, server.reason
+                ));
             }
         }
 
         if !self.blocked_servers.is_empty() {
             lines.push(format!("Blocked servers ({}):", self.blocked_servers.len()));
             for server in &self.blocked_servers {
-                lines.push(format!("  \u{1F6AB} {} \u{2014} {}", server.name, server.reason));
+                lines.push(format!(
+                    "  \u{1F6AB} {} \u{2014} {}",
+                    server.name, server.reason
+                ));
             }
         }
 
         if !self.duplicate_servers.is_empty() {
-            lines.push(format!("Duplicate servers ({}):", self.duplicate_servers.len()));
+            lines.push(format!(
+                "Duplicate servers ({}):",
+                self.duplicate_servers.len()
+            ));
             for dup in &self.duplicate_servers {
                 lines.push(format!(
                     "  \u{21C4} {} suppressed by {}",
@@ -150,7 +162,10 @@ impl McpRegistrySnapshot {
         }
 
         if !self.validation_errors.is_empty() {
-            lines.push(format!("Validation errors ({}):", self.validation_errors.len()));
+            lines.push(format!(
+                "Validation errors ({}):",
+                self.validation_errors.len()
+            ));
             for err in &self.validation_errors {
                 lines.push(format!("  \u{26A0} {:?}: {}", err.source, err.message));
             }
@@ -492,9 +507,18 @@ fn parse_single_server_config(value: &serde_json::Value) -> Option<ScopedMcpServ
 
 fn parse_optional_mcp_oauth(value: &serde_json::Value) -> Option<crate::config::McpOAuthConfig> {
     let oauth = value.get("oauth")?;
-    let client_id = oauth.get("clientId").or_else(|| oauth.get("client_id")).and_then(|v| v.as_str()).map(String::from);
-    let callback_port = oauth.get("callbackPort").or_else(|| oauth.get("callback_port")).and_then(|v| v.as_u64()).map(|v| v as u16);
-    let auth_server_metadata_url = oauth.get("authorizationUrl")
+    let client_id = oauth
+        .get("clientId")
+        .or_else(|| oauth.get("client_id"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let callback_port = oauth
+        .get("callbackPort")
+        .or_else(|| oauth.get("callback_port"))
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u16);
+    let auth_server_metadata_url = oauth
+        .get("authorizationUrl")
         .or_else(|| oauth.get("authServerMetadataUrl"))
         .or_else(|| oauth.get("auth_server_metadata_url"))
         .and_then(|v| v.as_str())
@@ -622,7 +646,10 @@ mod tests {
         match &servers[0].config {
             McpServerConfig::Sse(cfg) => {
                 assert_eq!(cfg.url, "https://mcp.example.com/sse");
-                assert_eq!(cfg.headers.get("Authorization"), Some(&"Bearer token".to_string()));
+                assert_eq!(
+                    cfg.headers.get("Authorization"),
+                    Some(&"Bearer token".to_string())
+                );
             }
             _ => panic!("expected SSE config"),
         }
@@ -665,14 +692,19 @@ mod tests {
         // With managed-exclusive: only managed should be active
         let snapshot = assembler.with_managed_exclusive(true).assemble();
         assert_eq!(snapshot.active_servers.len(), 1);
-        assert_eq!(snapshot.active_servers[0].config, McpServerConfig::Stdio(McpStdioServerConfig {
-            command: "managed-tool".into(),
-            args: vec![],
-            env: BTreeMap::new(),
-            tool_call_timeout_ms: None,
-        }));
+        assert_eq!(
+            snapshot.active_servers[0].config,
+            McpServerConfig::Stdio(McpStdioServerConfig {
+                command: "managed-tool".into(),
+                args: vec![],
+                env: BTreeMap::new(),
+                tool_call_timeout_ms: None,
+            })
+        );
         assert_eq!(snapshot.blocked_servers.len(), 1);
-        assert!(snapshot.blocked_servers[0].reason.contains("managed-exclusive"));
+        assert!(snapshot.blocked_servers[0]
+            .reason
+            .contains("managed-exclusive"));
     }
 }
 

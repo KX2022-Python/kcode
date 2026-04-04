@@ -122,7 +122,10 @@ mod tests {
 
     #[test]
     fn attachment_kind_from_mime_maps_correctly() {
-        assert_eq!(AttachmentKind::from_mime("text/plain"), AttachmentKind::Text);
+        assert_eq!(
+            AttachmentKind::from_mime("text/plain"),
+            AttachmentKind::Text
+        );
         assert_eq!(
             AttachmentKind::from_mime("image/png"),
             AttachmentKind::Image

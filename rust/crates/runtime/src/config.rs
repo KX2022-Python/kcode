@@ -271,12 +271,16 @@ impl ConfigLoader {
         push_unique_config_entry(
             &mut entries,
             ConfigSource::Local,
-            self.cwd.join(CLAW_CONFIG_DIR_NAME).join("settings.local.json"),
+            self.cwd
+                .join(CLAW_CONFIG_DIR_NAME)
+                .join("settings.local.json"),
         );
         push_unique_config_entry(
             &mut entries,
             ConfigSource::Local,
-            self.cwd.join(KCODE_CONFIG_DIR_NAME).join("settings.local.json"),
+            self.cwd
+                .join(KCODE_CONFIG_DIR_NAME)
+                .join("settings.local.json"),
         );
 
         entries
@@ -358,7 +362,9 @@ impl RuntimeConfig {
             current = if index == 0 {
                 self.merged.get(*key)
             } else {
-                current.and_then(JsonValue::as_object).and_then(|object| object.get(*key))
+                current
+                    .and_then(JsonValue::as_object)
+                    .and_then(|object| object.get(*key))
             };
         }
 

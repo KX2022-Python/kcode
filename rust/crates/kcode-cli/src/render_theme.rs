@@ -28,22 +28,22 @@ impl ThemePalette {
             entries: &[
                 ThemeEntry {
                     role: SemanticRole::User,
-                    ansi_fg: "\x1b[36m",       // cyan
+                    ansi_fg: "\x1b[36m", // cyan
                     bold: false,
                 },
                 ThemeEntry {
                     role: SemanticRole::Assistant,
-                    ansi_fg: "\x1b[0m",        // default
+                    ansi_fg: "\x1b[0m", // default
                     bold: false,
                 },
                 ThemeEntry {
                     role: SemanticRole::Tool,
-                    ansi_fg: "\x1b[33m",       // yellow
+                    ansi_fg: "\x1b[33m", // yellow
                     bold: false,
                 },
                 ThemeEntry {
                     role: SemanticRole::System,
-                    ansi_fg: "\x1b[90m",       // dark grey
+                    ansi_fg: "\x1b[90m", // dark grey
                     bold: false,
                 },
                 ThemeEntry {
@@ -53,12 +53,12 @@ impl ThemePalette {
                 },
                 ThemeEntry {
                     role: SemanticRole::Error,
-                    ansi_fg: "\x1b[31m",       // red
+                    ansi_fg: "\x1b[31m", // red
                     bold: true,
                 },
                 ThemeEntry {
                     role: SemanticRole::Success,
-                    ansi_fg: "\x1b[32m",       // green
+                    ansi_fg: "\x1b[32m", // green
                     bold: true,
                 },
                 ThemeEntry {
@@ -83,7 +83,7 @@ impl ThemePalette {
                 },
                 ThemeEntry {
                     role: SemanticRole::Progress,
-                    ansi_fg: "\x1b[34m",       // blue
+                    ansi_fg: "\x1b[34m", // blue
                     bold: true,
                 },
             ],
@@ -182,7 +182,8 @@ mod tests {
     #[test]
     fn render_with_palette_no_color_uses_prefix() {
         let palette = ThemePalette::default_terminal();
-        let rendered = render_with_palette(&palette, "build failed", SemanticRole::Error, false, false);
+        let rendered =
+            render_with_palette(&palette, "build failed", SemanticRole::Error, false, false);
         assert!(rendered.contains("build failed"));
         assert!(rendered.starts_with("✗ "));
         assert!(!rendered.contains("\x1b["));

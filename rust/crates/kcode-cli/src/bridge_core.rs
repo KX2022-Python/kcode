@@ -72,11 +72,14 @@ impl SessionManager {
                 ) {
                     Ok(c) => c,
                     Err(e) => {
-                        eprintln!("⚠ Session file corrupted for {}: {}. Creating new session.", chat_id, e);
+                        eprintln!(
+                            "⚠ Session file corrupted for {}: {}. Creating new session.",
+                            chat_id, e
+                        );
                         // Backup corrupted file
                         let backup_path = session_path.with_extension("jsonl.bak");
                         let _ = std::fs::rename(&session_path, &backup_path);
-                        
+
                         // Create fresh session
                         LiveCli::new(
                             default_config.model.clone(),
@@ -142,11 +145,18 @@ impl BridgeCore {
     }
 
     /// Route an incoming event to the correct session and process it.
-    fn handle_message(&mut self, msg: &BridgeMessage, config: &SessionConfig) -> Option<BridgeOutboundEvent> {
+    fn handle_message(
+        &mut self,
+        msg: &BridgeMessage,
+        config: &SessionConfig,
+    ) -> Option<BridgeOutboundEvent> {
         let chat_id = msg.event.channel_chat_id.clone();
         let channel = msg.event.channel.clone();
 
-        let cli = match self.session_manager.get_or_create_session(&chat_id, &channel, config) {
+        let cli = match self
+            .session_manager
+            .get_or_create_session(&chat_id, &channel, config)
+        {
             Ok(cli) => cli,
             Err(e) => {
                 eprintln!("❌ Session creation failed: {}", e);
@@ -170,14 +180,20 @@ impl BridgeCore {
         }
     }
 
-    fn create_error_response(&self, event: &BridgeInboundEvent, error: String) -> BridgeOutboundEvent {
+    fn create_error_response(
+        &self,
+        event: &BridgeInboundEvent,
+        error: String,
+    ) -> BridgeOutboundEvent {
         BridgeOutboundEvent {
             bridge_event_id: event.bridge_event_id.clone(),
             session_id: event.channel_chat_id.clone(),
             channel_capability_hint: event.channel.clone(),
             reply_target: Some(event.channel_chat_id.clone()),
             render_items: vec![("text".to_string(), format!("⚠ Error: {}", error))],
-            delivery_mode: DeliveryMode::Reply { reply_to: event.channel_chat_id.clone() },
+            delivery_mode: DeliveryMode::Reply {
+                reply_to: event.channel_chat_id.clone(),
+            },
         }
     }
 }
@@ -191,8 +207,7 @@ pub fn run_bridge_service(
     permission_mode: PermissionMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use adapters::{
-        FeishuConfig, SessionRouter, WhatsAppConfig,
-        validate_bridge_config, print_config_summary,
+        print_config_summary, validate_bridge_config, FeishuConfig, SessionRouter, WhatsAppConfig,
     };
     use std::sync::Arc;
     use tokio::runtime::Builder;
@@ -241,7 +256,8 @@ pub fn run_bridge_service(
 
     let feishu_config = feishu_app_id.map(|app_id| FeishuConfig {
         app_id,
-        app_secret: std::env::var("KCODE_FEISHU_APP_SECRET").expect("Missing KCODE_FEISHU_APP_SECRET"),
+        app_secret: std::env::var("KCODE_FEISHU_APP_SECRET")
+            .expect("Missing KCODE_FEISHU_APP_SECRET"),
         webhook_verify_token: std::env::var("KCODE_WEBHOOK_VERIFY_TOKEN").unwrap_or_default(),
     });
 

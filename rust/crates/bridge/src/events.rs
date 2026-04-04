@@ -79,10 +79,7 @@ impl BridgeInboundEvent {
         if !trimmed.starts_with('/') {
             return None;
         }
-        trimmed[1..]
-            .split_whitespace()
-            .next()
-            .map(String::from)
+        trimmed[1..].split_whitespace().next().map(String::from)
     }
 }
 

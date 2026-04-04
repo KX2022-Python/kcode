@@ -212,7 +212,15 @@ pub fn update_memory(
     atomic_write(&file_path, &content)?;
     set_file_permissions(&file_path, 0o600)?;
 
-    update_memory_index(dir, name, description, &memory_type, &file_name, created_at, now)?;
+    update_memory_index(
+        dir,
+        name,
+        description,
+        &memory_type,
+        &file_name,
+        created_at,
+        now,
+    )?;
 
     Ok(file_path)
 }
@@ -351,7 +359,14 @@ fn parse_memory_content(path: &Path, content: &str) -> Result<MemoryEntry, Memor
 }
 
 /// Format a memory file content string with timestamps.
-fn format_memory_file(name: &str, description: &str, memory_type: &MemoryType, body: &str, created_at: u64, updated_at: u64) -> String {
+fn format_memory_file(
+    name: &str,
+    description: &str,
+    memory_type: &MemoryType,
+    body: &str,
+    created_at: u64,
+    updated_at: u64,
+) -> String {
     format!(
         "---\nname: {name}\ndescription: {description}\ntype: {}\ncreated_at: {created_at}\nupdated_at: {updated_at}\n---\n\n{body}\n",
         memory_type.as_str()
@@ -407,7 +422,10 @@ fn format_timestamp(ts: u64) -> String {
     let day_of_year = days % 365;
     let month = (day_of_year * 12 / 365) + 1;
     let day = day_of_year - (month - 1) * 365 / 12 + 1;
-    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", year, month, day, hours, mins, secs)
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        year, month, day, hours, mins, secs
+    )
 }
 
 // --- File permission helpers ---
@@ -444,9 +462,7 @@ fn atomic_write(path: &Path, content: &str) -> Result<(), MemoryError> {
     let parent = path.parent().unwrap_or(Path::new("."));
     let temp_path = parent.join(format!(
         ".tmp_{}",
-        path.file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
+        path.file_name().unwrap_or_default().to_string_lossy()
     ));
     fs::write(&temp_path, content).map_err(MemoryError::Io)?;
     fs::rename(&temp_path, path).map_err(MemoryError::Io)?;
@@ -466,7 +482,11 @@ fn file_modified_timestamp(path: &Path) -> u64 {
     fs::metadata(path)
         .ok()
         .and_then(|m| m.modified().ok())
-        .map(|t| t.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0))
+        .map(|t| {
+            t.duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+        })
         .unwrap_or(0)
 }
 
@@ -475,7 +495,11 @@ fn file_created_timestamp(path: &Path) -> u64 {
     fs::metadata(path)
         .ok()
         .and_then(|m| m.created().ok().or_else(|| m.modified().ok()))
-        .map(|t| t.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0))
+        .map(|t| {
+            t.duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+        })
         .unwrap_or(0)
 }
 fn home_dir() -> PathBuf {
@@ -486,13 +510,20 @@ fn home_dir() -> PathBuf {
 mod tests {
     use super::*;
     use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir() -> PathBuf {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be after epoch")
+            .as_nanos();
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!(
-            "kcode_memory_test_{}",
+            "kcode_memory_test_{}_{nanos}_{id}",
             std::process::id()
         ));
-        let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -557,8 +588,14 @@ mod tests {
     #[test]
     fn updates_index_on_create() {
         let dir = temp_dir();
-        create_memory(&dir, "indexed", "Should appear in index", MemoryType::Reference, "body")
-            .unwrap();
+        create_memory(
+            &dir,
+            "indexed",
+            "Should appear in index",
+            MemoryType::Reference,
+            "body",
+        )
+        .unwrap();
 
         let index_path = dir.join(MEMORY_INDEX_NAME);
         assert!(index_path.exists());
@@ -601,7 +638,10 @@ mod tests {
         assert_eq!(MemoryType::from_str("user"), Some(MemoryType::User));
         assert_eq!(MemoryType::from_str("feedback"), Some(MemoryType::Feedback));
         assert_eq!(MemoryType::from_str("project"), Some(MemoryType::Project));
-        assert_eq!(MemoryType::from_str("reference"), Some(MemoryType::Reference));
+        assert_eq!(
+            MemoryType::from_str("reference"),
+            Some(MemoryType::Reference)
+        );
         assert_eq!(MemoryType::from_str("invalid"), None);
     }
 }

@@ -132,7 +132,8 @@ impl ProfileResolver {
         cli_profile: Option<&str>,
         cli_model: Option<&str>,
     ) -> Result<ResolvedProviderProfile, ProviderProfileError> {
-        let (profile_name, profile_source) = resolve_active_profile_name(runtime_config, cli_profile);
+        let (profile_name, profile_source) =
+            resolve_active_profile_name(runtime_config, cli_profile);
         resolve_named_profile(runtime_config, &profile_name, profile_source, cli_model)
     }
 
@@ -141,7 +142,12 @@ impl ProfileResolver {
         profile_name: &str,
         cli_model: Option<&str>,
     ) -> Result<ResolvedProviderProfile, ProviderProfileError> {
-        resolve_named_profile(runtime_config, profile_name, ResolutionSource::Cli, cli_model)
+        resolve_named_profile(
+            runtime_config,
+            profile_name,
+            ResolutionSource::Cli,
+            cli_model,
+        )
     }
 
     #[must_use]
@@ -150,7 +156,10 @@ impl ProfileResolver {
             .into_iter()
             .map(|profile| profile.name)
             .collect::<Vec<_>>();
-        if let Some(profiles) = runtime_config.get("profiles").and_then(JsonValue::as_object) {
+        if let Some(profiles) = runtime_config
+            .get("profiles")
+            .and_then(JsonValue::as_object)
+        {
             for name in profiles.keys() {
                 if !names.iter().any(|candidate| candidate == name) {
                     names.push(name.clone());
@@ -168,25 +177,29 @@ fn resolve_named_profile(
     profile_source: ResolutionSource,
     cli_model: Option<&str>,
 ) -> Result<ResolvedProviderProfile, ProviderProfileError> {
-        let mut profile = builtin_profile(&profile_name)
-            .or_else(|| profile_block(runtime_config, profile_name).map(|_| custom_profile(profile_name)))
-            .ok_or_else(|| ProviderProfileError::new(format!("unsupported profile `{profile_name}`")))?;
-        apply_profile_overrides(runtime_config, &profile_name, &mut profile);
-
-        let (model, model_source) = resolve_model(runtime_config, cli_model, &profile);
-        let (base_url, base_url_source) = resolve_base_url(runtime_config, &profile);
-        let credential = resolve_credential(runtime_config, &profile);
-
-        Ok(ResolvedProviderProfile {
-            profile_name: profile_name.to_string(),
-            profile_source,
-            model,
-            model_source,
-            base_url,
-            base_url_source,
-            credential,
-            profile,
+    let mut profile = builtin_profile(&profile_name)
+        .or_else(|| {
+            profile_block(runtime_config, profile_name).map(|_| custom_profile(profile_name))
         })
+        .ok_or_else(|| {
+            ProviderProfileError::new(format!("unsupported profile `{profile_name}`"))
+        })?;
+    apply_profile_overrides(runtime_config, &profile_name, &mut profile);
+
+    let (model, model_source) = resolve_model(runtime_config, cli_model, &profile);
+    let (base_url, base_url_source) = resolve_base_url(runtime_config, &profile);
+    let credential = resolve_credential(runtime_config, &profile);
+
+    Ok(ResolvedProviderProfile {
+        profile_name: profile_name.to_string(),
+        profile_source,
+        model,
+        model_source,
+        base_url,
+        base_url_source,
+        credential,
+        profile,
+    })
 }
 
 fn custom_profile(name: &str) -> ProviderProfile {
@@ -416,14 +429,10 @@ fn apply_profile_overrides(
     if let Some(value) = object_bool(profile_block, &["supports_tools", "supportsTools"]) {
         profile.supports_tools = value;
     }
-    if let Some(value) =
-        object_bool(profile_block, &["supports_streaming", "supportsStreaming"])
-    {
+    if let Some(value) = object_bool(profile_block, &["supports_streaming", "supportsStreaming"]) {
         profile.supports_streaming = value;
     }
-    if let Some(value) =
-        object_u64(profile_block, &["request_timeout_ms", "requestTimeoutMs"])
-    {
+    if let Some(value) = object_u64(profile_block, &["request_timeout_ms", "requestTimeoutMs"]) {
         profile.request_timeout_ms = value;
     }
     if let Some(value) = object_u64(profile_block, &["max_retries", "maxRetries"]) {
@@ -504,8 +513,7 @@ fn non_empty(value: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CredentialResolver, CredentialSource, ProfileResolver, ProviderLauncher,
-        ResolutionSource,
+        CredentialResolver, CredentialSource, ProfileResolver, ProviderLauncher, ResolutionSource,
     };
     use crate::{test_env_lock, ConfigLoader, RuntimeConfig};
     use std::fs;
@@ -528,8 +536,7 @@ mod tests {
         let home = root.join("home").join(".kcode");
         fs::create_dir_all(&home).expect("home config dir");
         fs::create_dir_all(&cwd).expect("cwd");
-        fs::write(home.join("config.toml"), "profile = \"opencode\"\n")
-            .expect("write config");
+        fs::write(home.join("config.toml"), "profile = \"opencode\"\n").expect("write config");
         let runtime_config = ConfigLoader::new(&cwd, &home)
             .load()
             .expect("config should load");
@@ -540,16 +547,22 @@ mod tests {
         assert_eq!(resolved.profile_source, ResolutionSource::Cli);
 
         std::env::set_var("KCODE_PROFILE", "custom");
-        let resolved = ProfileResolver::resolve(&runtime_config, None, None)
-            .expect("profile should resolve");
+        let resolved =
+            ProfileResolver::resolve(&runtime_config, None, None).expect("profile should resolve");
         assert_eq!(resolved.profile_name, "custom");
-        assert_eq!(resolved.profile_source, ResolutionSource::Env("KCODE_PROFILE"));
+        assert_eq!(
+            resolved.profile_source,
+            ResolutionSource::Env("KCODE_PROFILE")
+        );
         std::env::remove_var("KCODE_PROFILE");
 
-        let resolved = ProfileResolver::resolve(&runtime_config, None, None)
-            .expect("profile should resolve");
+        let resolved =
+            ProfileResolver::resolve(&runtime_config, None, None).expect("profile should resolve");
         assert_eq!(resolved.profile_name, "opencode");
-        assert_eq!(resolved.profile_source, ResolutionSource::Config("config.profile"));
+        assert_eq!(
+            resolved.profile_source,
+            ResolutionSource::Config("config.profile")
+        );
 
         fs::remove_dir_all(root).expect("cleanup");
     }
@@ -581,9 +594,12 @@ max_retries = 4
             .load()
             .expect("config should load");
 
-        let resolved = ProfileResolver::resolve(&runtime_config, None, None)
-            .expect("profile should resolve");
-        assert_eq!(resolved.base_url.as_deref(), Some("https://router.example.test/v1"));
+        let resolved =
+            ProfileResolver::resolve(&runtime_config, None, None).expect("profile should resolve");
+        assert_eq!(
+            resolved.base_url.as_deref(),
+            Some("https://router.example.test/v1")
+        );
         assert_eq!(resolved.profile.api_key_env, "ROUTER_TOKEN");
         assert_eq!(resolved.profile.default_model, "gpt-4.1-mini");
         assert_eq!(resolved.profile.request_timeout_ms, 90_000);
@@ -622,13 +638,12 @@ max_retries = 4
         let home = root.join("home").join(".kcode");
         fs::create_dir_all(&home).expect("home config dir");
         fs::create_dir_all(&cwd).expect("cwd");
-        fs::write(home.join("config.toml"), "profile = \"custom\"\n")
-            .expect("write config");
+        fs::write(home.join("config.toml"), "profile = \"custom\"\n").expect("write config");
         let runtime_config = ConfigLoader::new(&cwd, &home)
             .load()
             .expect("config should load");
-        let resolved = ProfileResolver::resolve(&runtime_config, None, None)
-            .expect("profile should resolve");
+        let resolved =
+            ProfileResolver::resolve(&runtime_config, None, None).expect("profile should resolve");
         let error = ProviderLauncher::prepare(&resolved).expect_err("launch should fail");
         assert!(error.to_string().contains("does not have a base URL"));
 

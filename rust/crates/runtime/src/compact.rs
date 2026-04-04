@@ -183,11 +183,8 @@ pub fn compact_session(session: &Session, config: CompactionConfig) -> Compactio
     // Heavy blocks (large tool results, images, documents) are replaced with references
     // so the summarizer doesn't waste tokens on them. References are preserved for
     // post-compact reinjection.
-    let messages_for_summary: Vec<ConversationMessage> = session
-        .messages
-        .iter()
-        .map(strip_heavy_media)
-        .collect();
+    let messages_for_summary: Vec<ConversationMessage> =
+        session.messages.iter().map(strip_heavy_media).collect();
 
     let existing_summary = session
         .messages
@@ -203,8 +200,10 @@ pub fn compact_session(session: &Session, config: CompactionConfig) -> Compactio
 
     // Summarize with heavy blocks stripped to save tokens
     let stripped_for_summary = &messages_for_summary[compacted_prefix_len..keep_from];
-    let summary =
-        merge_compact_summaries(existing_summary.as_deref(), &summarize_messages(stripped_for_summary));
+    let summary = merge_compact_summaries(
+        existing_summary.as_deref(),
+        &summarize_messages(stripped_for_summary),
+    );
     let formatted_summary = format_compact_summary(&summary);
     let continuation = get_compact_continuation_message(&summary, true, !preserved.is_empty());
 
@@ -788,10 +787,14 @@ mod tests {
     fn head_truncation_retry_succeeds_on_first_attempt() {
         // Normal session should succeed without retries
         let mut session = Session::new();
-        session.messages.push(ConversationMessage::user_text("one ".repeat(200)));
-        session.messages.push(ConversationMessage::assistant(vec![ContentBlock::Text {
-            text: "two ".repeat(200),
-        }]));
+        session
+            .messages
+            .push(ConversationMessage::user_text("one ".repeat(200)));
+        session
+            .messages
+            .push(ConversationMessage::assistant(vec![ContentBlock::Text {
+                text: "two ".repeat(200),
+            }]));
 
         let result = compact_with_head_truncation_retry(
             &session,

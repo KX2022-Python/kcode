@@ -64,7 +64,10 @@ pub async fn download_telegram_file(
     extension: &str,
 ) -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
     // Step 1: Get file path from Telegram API
-    let api_url = format!("https://api.telegram.org/bot{}/getFile?file_id={}", bot_token, file_id);
+    let api_url = format!(
+        "https://api.telegram.org/bot{}/getFile?file_id={}",
+        bot_token, file_id
+    );
     let client = reqwest::Client::new();
     let resp = client.get(&api_url).send().await?;
     let json: serde_json::Value = resp.json().await?;
@@ -77,7 +80,10 @@ pub async fn download_telegram_file(
         .as_str()
         .ok_or("Missing file_path in response")?;
 
-    let download_url = format!("https://api.telegram.org/file/bot{}/{}", bot_token, file_path);
+    let download_url = format!(
+        "https://api.telegram.org/file/bot{}/{}",
+        bot_token, file_path
+    );
 
     // Step 2: Download the actual file
     download_file(&download_url, None, extension).await

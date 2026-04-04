@@ -91,7 +91,10 @@ impl UserConfigInitReport {
                 artifact.status.label()
             ));
         }
-        lines.push("  Next step        Set KCODE_API_KEY, review config.toml, then run `kcode doctor`".to_string());
+        lines.push(
+            "  Next step        Set KCODE_API_KEY, review config.toml, then run `kcode doctor`"
+                .to_string(),
+        );
         lines.join("\n")
     }
 }
@@ -404,14 +407,17 @@ mod tests {
     use super::{initialize_repo, render_init_kcode_md};
     use std::fs;
     use std::path::Path;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir() -> std::path::PathBuf {
+        static NEXT_ID: AtomicU64 = AtomicU64::new(0);
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("time should be after epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!("kcode-init-{nanos}"))
+        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("kcode-init-{nanos}-{id}"))
     }
 
     #[test]

@@ -424,7 +424,9 @@ pub fn load_system_prompt(
 fn render_config_section(config: &RuntimeConfig) -> String {
     let mut lines = vec!["# Runtime config".to_string()];
     if config.loaded_entries().is_empty() {
-        lines.extend(prepend_bullets(vec!["No Kcode settings files loaded.".to_string()]));
+        lines.extend(prepend_bullets(vec![
+            "No Kcode settings files loaded.".to_string()
+        ]));
         return lines.join("\n");
     }
 

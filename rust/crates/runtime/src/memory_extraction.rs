@@ -3,12 +3,12 @@
 //! Implements auto-dream: non-blocking background extraction using tokio::spawn.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crate::memory::{
-    create_memory, default_memory_dir, ensure_memory_dir, list_memories, read_memory, update_memory,
-    MemoryType,
+    create_memory, default_memory_dir, ensure_memory_dir, list_memories, read_memory,
+    update_memory, MemoryType,
 };
 use crate::session::{ContentBlock, ConversationMessage, MessageRole};
 
@@ -41,9 +41,15 @@ impl MemoryExtractionState {
     }
 
     /// Check if memory extraction should be triggered.
-    pub fn should_extract(&self, cumulative_input_tokens: u32, cumulative_tool_calls: usize) -> bool {
-        let token_delta = cumulative_input_tokens.saturating_sub(self.cumulative_input_tokens_at_last_extraction);
-        let tool_call_delta = cumulative_tool_calls.saturating_sub(self.cumulative_tool_calls_at_last_extraction);
+    pub fn should_extract(
+        &self,
+        cumulative_input_tokens: u32,
+        cumulative_tool_calls: usize,
+    ) -> bool {
+        let token_delta =
+            cumulative_input_tokens.saturating_sub(self.cumulative_input_tokens_at_last_extraction);
+        let tool_call_delta =
+            cumulative_tool_calls.saturating_sub(self.cumulative_tool_calls_at_last_extraction);
 
         token_delta >= MEMORY_EXTRACTION_TOKEN_THRESHOLD
             || tool_call_delta >= MEMORY_EXTRACTION_TOOL_CALL_THRESHOLD
@@ -105,15 +111,16 @@ pub fn extract_memory_from_session(
             &tool_patterns,
             &key_files,
         );
-        let updated_body = build_updated_memory_body(
-            &existing.body,
-            &tool_patterns,
-            &key_files,
-            &error_patterns,
-        );
+        let updated_body =
+            build_updated_memory_body(&existing.body, &tool_patterns, &key_files, &error_patterns);
 
-        update_memory(memory_dir, &existing.name, &updated_description, &updated_body)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+        update_memory(
+            memory_dir,
+            &existing.name,
+            &updated_description,
+            &updated_body,
+        )
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
 
         return Ok(Some(format!("updated:{}", existing.name)));
     }
@@ -138,8 +145,17 @@ pub fn extract_memory_from_session(
 /// Detect explicit user memory instructions like "记住这个", "remember this", "以后都..."
 fn detect_explicit_memory_instructions(messages: &[ConversationMessage]) -> Vec<String> {
     let memory_keywords = [
-        "记住", "记下", "保存", "remember", "note that", "以后都", "always",
-        "don't forget", "keep in mind", "重要", "important",
+        "记住",
+        "记下",
+        "保存",
+        "remember",
+        "note that",
+        "以后都",
+        "always",
+        "don't forget",
+        "keep in mind",
+        "重要",
+        "important",
     ];
 
     messages
@@ -375,8 +391,22 @@ fn has_interesting_extension(candidate: &str) -> bool {
         .is_some_and(|ext| {
             matches!(
                 ext,
-                "rs" | "ts" | "tsx" | "js" | "json" | "md" | "toml" | "yaml" | "yml" | "py"
-                    | "go" | "java" | "c" | "cpp" | "h" | "rb" | "sh"
+                "rs" | "ts"
+                    | "tsx"
+                    | "js"
+                    | "json"
+                    | "md"
+                    | "toml"
+                    | "yaml"
+                    | "yml"
+                    | "py"
+                    | "go"
+                    | "java"
+                    | "c"
+                    | "cpp"
+                    | "h"
+                    | "rb"
+                    | "sh"
             )
         })
 }
@@ -428,22 +458,39 @@ mod tests {
 
     #[test]
     fn extract_memory_from_session_with_tools() {
-        let dir = std::env::temp_dir().join(format!(
-            "kcode_mem_extract_{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("kcode_mem_extract_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
 
         let mut session = Session::new();
-        session.messages.push(ConversationMessage::user_text("Find all rust files"));
+        session
+            .messages
+            .push(ConversationMessage::user_text("Find all rust files"));
         session.messages.push(ConversationMessage::assistant(vec![
-            ContentBlock::ToolUse { id: "1".into(), name: "glob_search".into(), input: "{}".into() },
+            ContentBlock::ToolUse {
+                id: "1".into(),
+                name: "glob_search".into(),
+                input: "{}".into(),
+            },
         ]));
-        session.messages.push(ConversationMessage::tool_result("1", "glob_search", "*.rs", false));
+        session.messages.push(ConversationMessage::tool_result(
+            "1",
+            "glob_search",
+            "*.rs",
+            false,
+        ));
         session.messages.push(ConversationMessage::assistant(vec![
-            ContentBlock::ToolUse { id: "2".into(), name: "glob_search".into(), input: "{}".into() },
+            ContentBlock::ToolUse {
+                id: "2".into(),
+                name: "glob_search".into(),
+                input: "{}".into(),
+            },
         ]));
-        session.messages.push(ConversationMessage::tool_result("2", "glob_search", "src/lib.rs", false));
+        session.messages.push(ConversationMessage::tool_result(
+            "2",
+            "glob_search",
+            "src/lib.rs",
+            false,
+        ));
 
         let result = extract_memory_from_session(&session.messages, &dir, "test-session-12345")
             .expect("extraction should succeed");
@@ -483,7 +530,8 @@ impl AutoDreamState {
 
     /// Mark extraction as complete.
     pub fn finish_dream(&self, timestamp: u64) {
-        self.last_dream_timestamp.store(timestamp, Ordering::Release);
+        self.last_dream_timestamp
+            .store(timestamp, Ordering::Release);
         self.extraction_running.store(false, Ordering::Release);
     }
 

@@ -10,9 +10,9 @@
 use std::collections::VecDeque;
 use std::sync::Mutex;
 
-use crate::events::{BridgeInboundEvent, BridgeOutboundEvent};
 #[cfg(test)]
 use crate::events::DeliveryMode;
+use crate::events::{BridgeInboundEvent, BridgeOutboundEvent};
 use crate::policy::BridgeCommandPolicy;
 use crate::session::{ChannelSessionKey, SessionMapping, SessionMappingMode};
 
@@ -160,19 +160,31 @@ impl LoopbackAdapter {
 
     /// Count pending outbound messages.
     pub fn outbound_pending(&self) -> usize {
-        self.outbound_queue.lock().expect("outbound queue poisoned").len()
+        self.outbound_queue
+            .lock()
+            .expect("outbound queue poisoned")
+            .len()
     }
 
     /// Count pending inbound messages.
     pub fn inbound_pending(&self) -> usize {
-        self.inbound_queue.lock().expect("inbound queue poisoned").len()
+        self.inbound_queue
+            .lock()
+            .expect("inbound queue poisoned")
+            .len()
     }
 
     /// Reset all queues and counters (for testing).
     pub fn reset(&self) {
         *self.event_counter.lock().expect("counter poisoned") = 0;
-        self.inbound_queue.lock().expect("inbound queue poisoned").clear();
-        self.outbound_queue.lock().expect("outbound queue poisoned").clear();
+        self.inbound_queue
+            .lock()
+            .expect("inbound queue poisoned")
+            .clear();
+        self.outbound_queue
+            .lock()
+            .expect("outbound queue poisoned")
+            .clear();
     }
 }
 
@@ -239,19 +251,18 @@ mod tests {
         let inbound = adapter.send_inbound("test".into()).unwrap();
         let _ = adapter.take_inbound();
 
-        let outbound = BridgeOutboundEvent::new(
-            inbound,
-            adapter.session_id(),
-            "markdown".into(),
-        )
-        .with_render_item("assistant".into(), "Hello!".into())
-        .with_delivery_mode(DeliveryMode::Reply {
-            reply_to: "msg-1".into(),
-        });
+        let outbound = BridgeOutboundEvent::new(inbound, adapter.session_id(), "markdown".into())
+            .with_render_item("assistant".into(), "Hello!".into())
+            .with_delivery_mode(DeliveryMode::Reply {
+                reply_to: "msg-1".into(),
+            });
 
         adapter.submit_outbound(outbound);
         let delivered = adapter.take_outbound().expect("should deliver");
         assert_eq!(delivered.flattened_text(), "Hello!");
-        assert!(matches!(delivered.delivery_mode, DeliveryMode::Reply { .. }));
+        assert!(matches!(
+            delivered.delivery_mode,
+            DeliveryMode::Reply { .. }
+        ));
     }
 }

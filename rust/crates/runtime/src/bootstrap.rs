@@ -192,8 +192,8 @@ mod tests {
     };
     use crate::config::ConfigEntry;
     use crate::provider_profile::{
-        CredentialResolution, CredentialSource, ProviderProfile, ResolvedProviderProfile,
-        ResolutionSource,
+        CredentialResolution, CredentialSource, ProviderProfile, ResolutionSource,
+        ResolvedProviderProfile,
     };
     use crate::ConfigSource;
     use std::path::PathBuf;

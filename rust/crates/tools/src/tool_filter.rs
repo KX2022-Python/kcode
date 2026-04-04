@@ -43,8 +43,9 @@ impl ToolDenyRule {
             Self::NameMatch(pat) => tool_name.contains(pat),
             Self::CommandMatch(pat) => command.is_some_and(|c| c.contains(pat)),
             Self::UrlMatch(pat) => url.is_some_and(|u| u.contains(pat)),
-            Self::McpServerPrefix(prefix) => mcp_server_name
-                .is_some_and(|name| name.starts_with(prefix)),
+            Self::McpServerPrefix(prefix) => {
+                mcp_server_name.is_some_and(|name| name.starts_with(prefix))
+            }
         }
     }
 }
@@ -93,19 +94,38 @@ mod tests {
         mcp_server: Option<String>,
     }
 
-    fn name_fn(t: &TestTool) -> &str { &t.name }
-    fn command_fn(t: &TestTool) -> Option<&str> { t.command.as_deref() }
-    fn url_fn(t: &TestTool) -> Option<&str> { t.url.as_deref() }
-    fn mcp_fn(t: &TestTool) -> Option<&str> { t.mcp_server.as_deref() }
+    fn name_fn(t: &TestTool) -> &str {
+        &t.name
+    }
+    fn command_fn(t: &TestTool) -> Option<&str> {
+        t.command.as_deref()
+    }
+    fn url_fn(t: &TestTool) -> Option<&str> {
+        t.url.as_deref()
+    }
+    fn mcp_fn(t: &TestTool) -> Option<&str> {
+        t.mcp_server.as_deref()
+    }
 
     #[test]
     fn deny_by_name_match() {
         let rule = ToolDenyRule::name("danger");
         let tools = vec![
-            TestTool { name: "safe_tool".into(), command: None, url: None, mcp_server: None },
-            TestTool { name: "danger_bash".into(), command: None, url: None, mcp_server: None },
+            TestTool {
+                name: "safe_tool".into(),
+                command: None,
+                url: None,
+                mcp_server: None,
+            },
+            TestTool {
+                name: "danger_bash".into(),
+                command: None,
+                url: None,
+                mcp_server: None,
+            },
         ];
-        let (filtered, removed) = apply_deny_rules(tools, &[rule], name_fn, command_fn, url_fn, mcp_fn);
+        let (filtered, removed) =
+            apply_deny_rules(tools, &[rule], name_fn, command_fn, url_fn, mcp_fn);
         assert_eq!(removed, 1);
         assert_eq!(filtered[0].name, "safe_tool");
     }
@@ -114,10 +134,21 @@ mod tests {
     fn deny_by_command_match() {
         let rule = ToolDenyRule::command("rm -rf");
         let tools = vec![
-            TestTool { name: "bash".into(), command: Some("ls -la".into()), url: None, mcp_server: None },
-            TestTool { name: "bash".into(), command: Some("rm -rf /tmp".into()), url: None, mcp_server: None },
+            TestTool {
+                name: "bash".into(),
+                command: Some("ls -la".into()),
+                url: None,
+                mcp_server: None,
+            },
+            TestTool {
+                name: "bash".into(),
+                command: Some("rm -rf /tmp".into()),
+                url: None,
+                mcp_server: None,
+            },
         ];
-        let (filtered, removed) = apply_deny_rules(tools, &[rule], name_fn, command_fn, url_fn, mcp_fn);
+        let (filtered, removed) =
+            apply_deny_rules(tools, &[rule], name_fn, command_fn, url_fn, mcp_fn);
         assert_eq!(removed, 1);
         assert_eq!(filtered[0].command.as_deref(), Some("ls -la"));
     }
@@ -126,10 +157,21 @@ mod tests {
     fn deny_by_mcp_server_prefix() {
         let rule = ToolDenyRule::mcp_server("internal-");
         let tools = vec![
-            TestTool { name: "tool_a".into(), command: None, url: None, mcp_server: Some("public-mcp".into()) },
-            TestTool { name: "tool_b".into(), command: None, url: None, mcp_server: Some("internal-mcp".into()) },
+            TestTool {
+                name: "tool_a".into(),
+                command: None,
+                url: None,
+                mcp_server: Some("public-mcp".into()),
+            },
+            TestTool {
+                name: "tool_b".into(),
+                command: None,
+                url: None,
+                mcp_server: Some("internal-mcp".into()),
+            },
         ];
-        let (filtered, removed) = apply_deny_rules(tools, &[rule], name_fn, command_fn, url_fn, mcp_fn);
+        let (filtered, removed) =
+            apply_deny_rules(tools, &[rule], name_fn, command_fn, url_fn, mcp_fn);
         assert_eq!(removed, 1);
         assert_eq!(filtered[0].mcp_server.as_deref(), Some("public-mcp"));
     }
@@ -141,11 +183,27 @@ mod tests {
             ToolDenyRule::url("blocked.example"),
         ];
         let tools = vec![
-            TestTool { name: "test_tool".into(), command: None, url: None, mcp_server: None },
-            TestTool { name: "good_tool".into(), command: None, url: Some("https://blocked.example/api".into()), mcp_server: None },
-            TestTool { name: "safe_tool".into(), command: None, url: Some("https://safe.example/api".into()), mcp_server: None },
+            TestTool {
+                name: "test_tool".into(),
+                command: None,
+                url: None,
+                mcp_server: None,
+            },
+            TestTool {
+                name: "good_tool".into(),
+                command: None,
+                url: Some("https://blocked.example/api".into()),
+                mcp_server: None,
+            },
+            TestTool {
+                name: "safe_tool".into(),
+                command: None,
+                url: Some("https://safe.example/api".into()),
+                mcp_server: None,
+            },
         ];
-        let (filtered, removed) = apply_deny_rules(tools, &rules, name_fn, command_fn, url_fn, mcp_fn);
+        let (filtered, removed) =
+            apply_deny_rules(tools, &rules, name_fn, command_fn, url_fn, mcp_fn);
         assert_eq!(removed, 2);
         assert_eq!(filtered[0].name, "safe_tool");
     }
@@ -153,8 +211,18 @@ mod tests {
     #[test]
     fn empty_rules_returns_all_tools() {
         let tools = vec![
-            TestTool { name: "tool_a".into(), command: None, url: None, mcp_server: None },
-            TestTool { name: "tool_b".into(), command: None, url: None, mcp_server: None },
+            TestTool {
+                name: "tool_a".into(),
+                command: None,
+                url: None,
+                mcp_server: None,
+            },
+            TestTool {
+                name: "tool_b".into(),
+                command: None,
+                url: None,
+                mcp_server: None,
+            },
         ];
         let (filtered, removed) = apply_deny_rules(tools, &[], name_fn, command_fn, url_fn, mcp_fn);
         assert_eq!(removed, 0);

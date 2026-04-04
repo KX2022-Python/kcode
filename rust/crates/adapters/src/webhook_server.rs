@@ -17,7 +17,9 @@ use serde::Deserialize;
 use tokio::net::TcpListener;
 use tracing::{error, info};
 
-use crate::feishu_transport::{parse_feishu_webhook, verify_feishu_signature, FeishuWebhookPayload};
+use crate::feishu_transport::{
+    parse_feishu_webhook, verify_feishu_signature, FeishuWebhookPayload,
+};
 use crate::session_router::SessionRouter;
 use crate::telegram_transport::{parse_telegram_webhook, TelegramConfig, TelegramTransport};
 use crate::transport::Transport;
@@ -51,7 +53,8 @@ pub async fn start_webhook_server(
     let whatsapp_config_clone = whatsapp_config.clone();
     let whatsapp_transport = whatsapp_config.map(|c| Arc::new(WhatsAppTransport::new(c)));
     let feishu_config_clone = feishu_config.clone();
-    let feishu_transport = feishu_config.map(|c| Arc::new(crate::feishu_transport::FeishuTransport::new(c)));
+    let feishu_transport =
+        feishu_config.map(|c| Arc::new(crate::feishu_transport::FeishuTransport::new(c)));
 
     let state = WebhookState {
         session_router,
@@ -66,8 +69,14 @@ pub async fn start_webhook_server(
     let app = Router::new()
         .route("/health", get(handle_health_check))
         .route("/webhook/telegram", post(handle_telegram_webhook))
-        .route("/webhook/whatsapp", get(handle_whatsapp_verify).post(handle_whatsapp_webhook))
-        .route("/webhook/feishu", get(handle_feishu_ping).post(handle_feishu_webhook))
+        .route(
+            "/webhook/whatsapp",
+            get(handle_whatsapp_verify).post(handle_whatsapp_webhook),
+        )
+        .route(
+            "/webhook/feishu",
+            get(handle_feishu_ping).post(handle_feishu_webhook),
+        )
         .with_state(state);
 
     info!("Starting Webhook server on {}", addr);
@@ -199,7 +208,7 @@ async fn handle_feishu_webhook(
             let ts_str = ts.to_str().unwrap_or("");
             let nonce_str = nonce.to_str().unwrap_or("");
             let sig_str = sig.to_str().unwrap_or("");
-            
+
             if !verify_feishu_signature(ts_str, nonce_str, sig_str, &body, &config.app_secret) {
                 error!("Feishu signature verification failed");
                 return Err(StatusCode::UNAUTHORIZED);

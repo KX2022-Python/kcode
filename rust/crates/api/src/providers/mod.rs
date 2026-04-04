@@ -221,7 +221,10 @@ mod tests {
     #[test]
     fn detects_provider_from_model_name_first() {
         assert_eq!(detect_provider_kind("grok"), ProviderKind::Xai);
-        assert_eq!(detect_provider_kind("claude-sonnet-4-6"), ProviderKind::Anthropic);
+        assert_eq!(
+            detect_provider_kind("claude-sonnet-4-6"),
+            ProviderKind::Anthropic
+        );
         assert_eq!(detect_provider_kind("gpt-4.1"), ProviderKind::OpenAi);
     }
 

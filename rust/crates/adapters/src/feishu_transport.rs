@@ -3,12 +3,12 @@
 
 use std::error::Error;
 
+use super::transport::{Transport, TransportConfig};
 use async_trait::async_trait;
-use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent};
 use bridge::attachment::{AttachmentEnvelope, AttachmentKind};
+use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use super::transport::{Transport, TransportConfig};
 
 /// Feishu/Lark Bot API configuration.
 #[derive(Debug, Clone)]
@@ -19,7 +19,9 @@ pub struct FeishuConfig {
 }
 
 impl TransportConfig for FeishuConfig {
-    fn channel_id(&self) -> &str { "feishu" }
+    fn channel_id(&self) -> &str {
+        "feishu"
+    }
 }
 
 /// Feishu Transport.
@@ -57,9 +59,13 @@ impl FeishuTransport {
 
         let resp = self.client.post(url).json(&body).send().await?;
         let json: FeishuTokenResponse = resp.json().await?;
-        
+
         if json.code != 0 {
-            return Err(format!("Feishu token request failed: code={}, msg={}", json.code, json.msg).into());
+            return Err(format!(
+                "Feishu token request failed: code={}, msg={}",
+                json.code, json.msg
+            )
+            .into());
         }
 
         let token = json.tenant_access_token;
@@ -77,7 +83,10 @@ impl FeishuTransport {
 
     /// Handle Feishu webhook challenge verification.
     /// Returns Some(challenge_response) if this is a verification request, None otherwise.
-    pub fn handle_challenge(&self, payload: &FeishuWebhookPayload) -> Option<FeishuChallengeResponse> {
+    pub fn handle_challenge(
+        &self,
+        payload: &FeishuWebhookPayload,
+    ) -> Option<FeishuChallengeResponse> {
         if payload.r#type == "url_verification" {
             Some(FeishuChallengeResponse {
                 challenge: payload.challenge.clone().unwrap_or_default(),
@@ -88,10 +97,19 @@ impl FeishuTransport {
     }
 
     /// Send a text message to Feishu.
-    async fn send_text(&self, receive_id: &str, text: &str, receive_id_type: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn send_text(
+        &self,
+        receive_id: &str,
+        text: &str,
+        receive_id_type: &str,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let token = self.get_tenant_token().await?;
-        let url = format!("{}?receive_id_type={}", self.api_url("/im/v1/messages"), receive_id_type);
-        
+        let url = format!(
+            "{}?receive_id_type={}",
+            self.api_url("/im/v1/messages"),
+            receive_id_type
+        );
+
         let content = serde_json::json!({"text": text}).to_string();
         let body = FeishuSendBody {
             receive_id: receive_id.to_string(),
@@ -99,7 +117,9 @@ impl FeishuTransport {
             content,
         };
 
-        let resp = self.client.post(&url)
+        let resp = self
+            .client
+            .post(&url)
             .header("Authorization", format!("Bearer {}", token))
             .header("Content-Type", "application/json")
             .json(&body)
@@ -111,10 +131,10 @@ impl FeishuTransport {
         if !status.is_success() {
             return Err(format!("Feishu send failed ({}): {}", status, body_text).into());
         }
-        
+
         let json: FeishuSendResponse = serde_json::from_str(&body_text)
             .map_err(|e| format!("Failed to parse Feishu response: {}", e))?;
-        
+
         if json.code != 0 {
             return Err(format!("Feishu API error {}: {}", json.code, json.msg).into());
         }
@@ -124,17 +144,28 @@ impl FeishuTransport {
 
     /// Send an interactive card message to Feishu.
     #[allow(dead_code)]
-    async fn send_card(&self, receive_id: &str, card_json: &str, receive_id_type: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn send_card(
+        &self,
+        receive_id: &str,
+        card_json: &str,
+        receive_id_type: &str,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
         let token = self.get_tenant_token().await?;
-        let url = format!("{}?receive_id_type={}", self.api_url("/im/v1/messages"), receive_id_type);
-        
+        let url = format!(
+            "{}?receive_id_type={}",
+            self.api_url("/im/v1/messages"),
+            receive_id_type
+        );
+
         let body = FeishuSendBody {
             receive_id: receive_id.to_string(),
             msg_type: "interactive".to_string(),
             content: card_json.to_string(),
         };
 
-        let resp = self.client.post(&url)
+        let resp = self
+            .client
+            .post(&url)
             .header("Authorization", format!("Bearer {}", token))
             .header("Content-Type", "application/json")
             .json(&body)
@@ -164,9 +195,14 @@ impl Transport for FeishuTransport {
         &self,
         event: &BridgeOutboundEvent,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let chat_id = event.reply_target.as_ref().ok_or("Missing reply_target (chat_id/open_id)")?;
-        
-        let text = event.render_items.iter()
+        let chat_id = event
+            .reply_target
+            .as_ref()
+            .ok_or("Missing reply_target (chat_id/open_id)")?;
+
+        let text = event
+            .render_items
+            .iter()
             .map(|(_, t)| t.as_str())
             .collect::<Vec<&str>>()
             .join("\n");
@@ -191,7 +227,7 @@ pub fn verify_feishu_signature(
     body: &[u8],
     encrypt_key: &str,
 ) -> bool {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
 
     let mut hasher = Sha256::new();
     hasher.update(timestamp.as_bytes());
@@ -212,7 +248,7 @@ pub fn parse_feishu_webhook(payload: &FeishuWebhookPayload) -> Option<BridgeInbo
 
     let event_data = &payload.event;
     let message = &event_data.message;
-    
+
     // Parse the content field (it's a stringified JSON)
     let content: serde_json::Value = match serde_json::from_str(&message.content) {
         Ok(v) => v,
@@ -220,7 +256,11 @@ pub fn parse_feishu_webhook(payload: &FeishuWebhookPayload) -> Option<BridgeInbo
     };
 
     let text = if message.message_type == "text" {
-        content.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string()
+        content
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
     } else {
         format!("[{}] Message received", message.message_type)
     };
@@ -248,7 +288,10 @@ pub fn parse_feishu_webhook(payload: &FeishuWebhookPayload) -> Option<BridgeInbo
                     text: "[Received an image]".to_string(),
                     attachments,
                     received_at: event_data.message.create_time,
-                    reply_to: message.parent_id.clone().filter(|id| id != "0" && !id.is_empty()),
+                    reply_to: message
+                        .parent_id
+                        .clone()
+                        .filter(|id| id != "0" && !id.is_empty()),
                     metadata: std::collections::BTreeMap::new(),
                 });
             }
@@ -258,7 +301,11 @@ pub fn parse_feishu_webhook(payload: &FeishuWebhookPayload) -> Option<BridgeInbo
     // Parse File
     if message.message_type == "file" {
         if let Some(file_key) = content.get("file_key").and_then(|v| v.as_str()) {
-            let file_name = content.get("file_name").and_then(|v| v.as_str()).unwrap_or("document").to_string();
+            let file_name = content
+                .get("file_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("document")
+                .to_string();
             attachments.push(AttachmentEnvelope {
                 kind: AttachmentKind::Document,
                 name: file_name,
@@ -268,7 +315,7 @@ pub fn parse_feishu_webhook(payload: &FeishuWebhookPayload) -> Option<BridgeInbo
                 size_bytes: None,
             });
             if text.is_empty() || text.starts_with("[") {
-                 return Some(BridgeInboundEvent {
+                return Some(BridgeInboundEvent {
                     bridge_event_id: message.message_id.clone(),
                     channel: "feishu".to_string(),
                     channel_user_id: event_data.sender.sender_id.open_id.clone(),
@@ -277,7 +324,10 @@ pub fn parse_feishu_webhook(payload: &FeishuWebhookPayload) -> Option<BridgeInbo
                     text: format!("[Received a file: {}]", attachments.last().unwrap().name),
                     attachments,
                     received_at: event_data.message.create_time,
-                    reply_to: message.parent_id.clone().filter(|id| id != "0" && !id.is_empty()),
+                    reply_to: message
+                        .parent_id
+                        .clone()
+                        .filter(|id| id != "0" && !id.is_empty()),
                     metadata: std::collections::BTreeMap::new(),
                 });
             }
@@ -293,7 +343,10 @@ pub fn parse_feishu_webhook(payload: &FeishuWebhookPayload) -> Option<BridgeInbo
         text,
         attachments,
         received_at: event_data.message.create_time,
-        reply_to: message.parent_id.clone().filter(|id| id != "0" && !id.is_empty()),
+        reply_to: message
+            .parent_id
+            .clone()
+            .filter(|id| id != "0" && !id.is_empty()),
         metadata: std::collections::BTreeMap::new(),
     })
 }
