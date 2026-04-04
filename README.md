@@ -11,57 +11,67 @@
 - 🦀 **Rust Core**: Built entirely in Rust for maximum safety, speed, and zero dependencies.
 - 🧠 **Persistent Memory**: Automatically extracts insights from your sessions and saves them as local Markdown files.
 - 🌐 **Multi-Channel Bridge**: Connect to Telegram, WhatsApp, and Feishu with a single unified engine.
+- 🔄 **Native 24/7 Uptime**: Run as a robust Systemd service or via Docker with auto-restart policies.
+- 📷 **Rich Media Support**: Recognize and process images, documents, and voice messages from all supported channels.
 - 🔒 **Enterprise Security**: Managed configurations, deny-rule filtering, and strict permission modes.
-- 🛠️ **Rich Tool Ecosystem**: 30+ built-in tools including Bash, Git, Web Fetch, and MCP integration.
 - 🚀 **Production Ready**: Comprehensive test suite (364+ tests), automated regression checks, and maintenance playbooks.
 
 ---
 
-## 📦 Installation
+## 📦 Installation & Deployment
 
-### From Source (Recommended)
+We provide two official ways to run Kcode Bridge: as a **Native Systemd Service** (Recommended for VPS) or via **Docker**.
 
-```bash
-git clone https://github.com/KX2022-Python/kcode.git
-cd kcode/rust
-cargo install --path crates/kcode-cli
-```
+### Option 1: Native Systemd Service (Best Performance)
 
-### One-Liner Install
+This method runs Kcode directly on your host machine as a system service, providing the best performance and easiest log management.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/KX2022-Python/kcode/main/scripts/install.sh | bash
-```
+1.  **Clone & Install**:
+    ```bash
+    git clone https://github.com/KX2022-Python/kcode.git
+    cd kcode
+    ./scripts/install.sh
+    ```
+    *This script builds the binary, registers the system service, and creates a template for secrets.*
+
+2.  **Configure Secrets**:
+    Edit `/etc/kcode/bridge.env` and add your keys (e.g., `KCODE_TELEGRAM_BOT_TOKEN`, `KCODE_API_KEY`).
+
+3.  **Start Service**:
+    ```bash
+    sudo systemctl start kcode-bridge
+    sudo systemctl status kcode-bridge
+    ```
+    *The service is configured with `Restart=always`, ensuring it recovers automatically from any crash.*
+
+### Option 2: Docker Compose
+
+Use this method if you prefer containerization or want to isolate dependencies.
+
+1.  **Configure Environment**:
+    Copy `.env.example` to `.env` and fill in your API keys.
+    
+2.  **Run**:
+    ```bash
+    docker compose up -d --build
+    ```
 
 ---
 
-## ⚡ Quick Start
+## ⚡ Quick Start (CLI)
 
-### 1. Configuration
-
-Set your API credentials in the environment:
+If you just want to use the interactive terminal REPL:
 
 ```bash
 export KCODE_API_KEY="your-api-key"
-export KCODE_MODEL="your-model"
-# Optional: export KCODE_BASE_URL="your-custom-endpoint"
-```
-
-### 2. Run the REPL
-
-```bash
 kcode
 ```
 
-You will enter the interactive mode. Kcode automatically loads your project context, memory files, and plugins.
-
-### 3. Check Health
+### Check Health
 
 ```bash
 kcode doctor
 ```
-
-Verifies configuration, connectivity, and permission settings.
 
 ---
 
@@ -69,20 +79,19 @@ Verifies configuration, connectivity, and permission settings.
 
 Kcode supports running as a bot on multiple platforms simultaneously.
 
-### Telegram Example
+### Supported Channels
+| Platform | Features | Required Env Vars |
+|----------|----------|-------------------|
+| **Telegram** | Text, Photos, Files, Voice, Webhook | `KCODE_TELEGRAM_BOT_TOKEN` |
+| **WhatsApp** | Text, Images, Audio, Docs | `KCODE_WHATSAPP_PHONE_ID`, `KCODE_WHATSAPP_TOKEN` |
+| **Feishu** | Text, Images, Files, Cards | `KCODE_FEISHU_APP_ID`, `KCODE_FEISHU_APP_SECRET` |
 
+### Webhook Configuration
+To use Webhook mode (recommended for high concurrency), set:
 ```bash
-export KCODE_TELEGRAM_BOT_TOKEN="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11"
-
-# Long Polling Mode (Default)
-kcode bridge
-
-# Webhook Mode (High Concurrency)
 export KCODE_WEBHOOK_URL="https://your-domain.com/webhook/telegram"
-kcode bridge
 ```
-
-The bridge automatically isolates user sessions and persists memory per user.
+Kcode will automatically configure the Telegram API and listen on port `3000` for all active channels.
 
 ---
 
@@ -95,28 +104,6 @@ Kcode treats memory as a first-class citizen:
 - **Timestamps**: Every memory file includes creation and update timestamps.
 - **Privacy**: All memory files are stored locally in `~/.kcode/memory/` with `0600` permissions.
 
-### Manual Inspection
-
-```bash
-kcode /memory
-```
-
-Lists all loaded memories and their summaries.
-
----
-
-## 🔧 Command Reference
-
-| Command | Description |
-|---------|-------------|
-| `kcode` | Start interactive REPL |
-| `kcode bridge` | Start multi-channel bot bridge |
-| `kcode doctor` | Run environment & config diagnosis |
-| `kcode init` | Initialize a new Kcode project |
-| `kcode config show` | Display current configuration |
-| `kcode /help` | Show available slash commands |
-| `kcode /status` | Show current session status |
-
 ---
 
 ## 🏗️ Architecture
@@ -125,7 +112,7 @@ Kcode is organized into a modular Rust workspace:
 
 ```text
 rust/crates/
-├── api/              # Provider abstraction (OpenAI, etc.)
+├── api/              # Provider abstraction
 ├── bridge/           # Unified channel event system
 ├── commands/         # Slash command registry
 ├── kcode-cli/        # CLI entry point & REPL
@@ -133,6 +120,8 @@ rust/crates/
 ├── runtime/          # Core engine (Session, Tools, Memory)
 └── tools/            # 30+ built-in tools
 ```
+
+For detailed deployment instructions, see [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
 ---
 
