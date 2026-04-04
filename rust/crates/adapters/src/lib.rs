@@ -20,3 +20,9 @@ pub use feishu_transport::{
     parse_feishu_webhook,
     FeishuWebhookPayload, FeishuChallengeResponse,
 };
+
+pub mod session_router;
+pub use session_router::{ChannelSession, SessionRouter};
+
+pub mod webhook_server;
+pub use webhook_server::{WebhookServerConfig, WebhookHandler, start_webhook_server};
