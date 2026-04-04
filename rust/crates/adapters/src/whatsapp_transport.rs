@@ -6,6 +6,7 @@ use std::error::Error;
 
 use async_trait::async_trait;
 use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent, DeliveryMode};
+use bridge::attachment::{AttachmentEnvelope, AttachmentKind};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
@@ -122,33 +123,75 @@ impl Transport for WhatsAppTransport {
 /// This should be called by the external HTTP server handling webhooks.
 pub fn parse_whatsapp_webhook(
     payload: &WhatsAppWebhookPayload,
-) -> Option<BridgeInboundEvent> {
+) -> Vec<BridgeInboundEvent> {
+    let mut events = Vec::new();
     for entry in &payload.entry {
         for change in &entry.changes {
             if let Some(messages) = &change.value.messages {
                 for msg in messages {
+                    let mut text = String::new();
+                    let mut attachments = Vec::new();
+
                     if let Some(text_obj) = &msg.text {
-                        return Some(BridgeInboundEvent {
-                            bridge_event_id: msg.id.clone(),
-                            channel: "whatsapp".to_string(),
-                            channel_user_id: msg.from.clone(),
-                            channel_chat_id: msg.from.clone(),
-                            channel_message_id: msg.id.clone(),
-                            text: text_obj.body.clone(),
-                            attachments: vec![],
-                            received_at: std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_millis() as u64)
-                                .unwrap_or(0),
-                            reply_to: msg.context.as_ref().map(|c| c.id.clone()),
-                            metadata: std::collections::BTreeMap::new(),
-                        });
+                        text = text_obj.body.clone();
                     }
+
+                    if let Some(image) = &msg.image {
+                        attachments.push(AttachmentEnvelope {
+                            kind: AttachmentKind::Image,
+                            name: "image.jpg".to_string(),
+                            mime_type: image.mime_type.clone().or(Some("image/jpeg".to_string())),
+                            url_or_path: Some(format!("https://graph.facebook.com/v18.0/{}", image.id)),
+                            text_content: image.caption.clone(),
+                            size_bytes: None,
+                        });
+                        if text.is_empty() { text = "[Received an image]".to_string(); }
+                    }
+
+                    if let Some(audio) = &msg.audio {
+                        attachments.push(AttachmentEnvelope {
+                            kind: AttachmentKind::PlatformMetadata,
+                            name: "audio.ogg".to_string(),
+                            mime_type: audio.mime_type.clone().or(Some("audio/ogg".to_string())),
+                            url_or_path: Some(format!("https://graph.facebook.com/v18.0/{}", audio.id)),
+                            text_content: None,
+                            size_bytes: None,
+                        });
+                        if text.is_empty() { text = "[Received an audio message]".to_string(); }
+                    }
+
+                    if let Some(doc) = &msg.document {
+                        attachments.push(AttachmentEnvelope {
+                            kind: AttachmentKind::Document,
+                            name: doc.filename.clone().unwrap_or_else(|| "document".to_string()),
+                            mime_type: doc.mime_type.clone(),
+                            url_or_path: Some(format!("https://graph.facebook.com/v18.0/{}", doc.id)),
+                            text_content: doc.caption.clone(),
+                            size_bytes: None,
+                        });
+                        if text.is_empty() { text = format!("[Received a file: {}]", attachments.last().unwrap().name); }
+                    }
+
+                    events.push(BridgeInboundEvent {
+                        bridge_event_id: msg.id.clone(),
+                        channel: "whatsapp".to_string(),
+                        channel_user_id: msg.from.clone(),
+                        channel_chat_id: msg.from.clone(),
+                        channel_message_id: msg.id.clone(),
+                        text,
+                        attachments,
+                        received_at: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as u64)
+                            .unwrap_or(0),
+                        reply_to: msg.context.as_ref().map(|c| c.id.clone()),
+                        metadata: std::collections::BTreeMap::new(),
+                    });
                 }
             }
         }
     }
-    None
+    events
 }
 
 /// Verify the WhatsApp webhook signature (X-Hub-Signature-256).
@@ -255,6 +298,27 @@ pub struct WhatsAppMessage {
     pub r#type: Option<String>,
     pub text: Option<WhatsAppTextMessage>,
     pub context: Option<WhatsAppMessageContext>,
+    // Media fields
+    pub image: Option<WhatsAppMedia>,
+    pub audio: Option<WhatsAppMedia>,
+    pub document: Option<WhatsAppDocument>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WhatsAppMedia {
+    pub id: String,
+    pub mime_type: Option<String>,
+    pub sha256: Option<String>,
+    pub caption: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WhatsAppDocument {
+    pub id: String,
+    pub filename: Option<String>,
+    pub mime_type: Option<String>,
+    pub sha256: Option<String>,
+    pub caption: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

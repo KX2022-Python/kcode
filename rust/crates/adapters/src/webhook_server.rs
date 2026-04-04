@@ -148,7 +148,7 @@ async fn handle_whatsapp_webhook(
         }
     };
 
-    if let Some(event) = parse_whatsapp_webhook(&payload) {
+    for event in parse_whatsapp_webhook(&payload) {
         let outbound = (state.handler)(event);
         if let Some(transport) = &state.whatsapp_transport {
             if let Err(e) = transport.send_outbound(&outbound).await {
