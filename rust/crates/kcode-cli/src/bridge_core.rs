@@ -8,6 +8,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use adapters::{
     BridgeInboundEvent, BridgeOutboundEvent, DeliveryMode, TelegramTransport,
 };
+use runtime::PermissionMode;
 
 use crate::LiveCli;
 
@@ -40,18 +41,33 @@ impl SessionManager {
         default_config: &SessionConfig,
     ) -> Result<&mut LiveCli, String> {
         if !self.sessions.contains_key(chat_id) {
-            println!("✨ Creating new session for chat_id: {}", chat_id);
-            let cli = LiveCli::new(
-                default_config.model.clone(),
-                default_config.model_explicit,
-                default_config.profile.clone(),
-                true, // is_interactive
-                None, // allowed_tools
-                default_config.permission_mode,
-            )
-            .map_err(|e| format!("Failed to create LiveCli: {}", e))?;
-
-            // TODO: In Step 2, we will load persisted state here.
+            println!("✨ Creating/Loading session for chat_id: {}", chat_id);
+            
+            // Calculate session path
+            let session_path = self.session_dir.join(format!("{}.jsonl", chat_id));
+            
+            // Check if we should load existing session
+            let cli = if session_path.exists() {
+                LiveCli::new(
+                    default_config.model.clone(),
+                    default_config.model_explicit,
+                    default_config.profile.clone(),
+                    true,
+                    None,
+                    default_config.permission_mode,
+                    Some(session_path),
+                ).map_err(|e| e.to_string())?
+            } else {
+                LiveCli::new(
+                    default_config.model.clone(),
+                    default_config.model_explicit,
+                    default_config.profile.clone(),
+                    true,
+                    None,
+                    default_config.permission_mode,
+                    None,
+                ).map_err(|e| e.to_string())?
+            };
 
             self.sessions.insert(chat_id.to_string(), cli);
         }

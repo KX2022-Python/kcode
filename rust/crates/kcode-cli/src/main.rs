@@ -208,6 +208,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             true,
             allowed_tools,
             permission_mode,
+            None,
         )?
         .run_turn_with_output(&prompt, output_format)?,
         CliAction::Login => run_login()?,
@@ -2154,6 +2155,7 @@ fn run_repl(
         true,
         allowed_tools,
         permission_mode,
+        None,
     )?;
     let mut editor =
         input::LineEditor::new("> ", cli.repl_completion_candidates().unwrap_or_default());
@@ -2200,9 +2202,9 @@ fn run_repl(
 }
 
 #[derive(Debug, Clone)]
-struct SessionHandle {
-    id: String,
-    path: PathBuf,
+pub(crate) struct SessionHandle {
+    pub(crate) id: String,
+    pub(crate) path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -2359,10 +2361,18 @@ impl LiveCli {
         enable_tools: bool,
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
+        session_path_override: Option<PathBuf>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let system_prompt = build_system_prompt()?;
         let session_state = Session::new();
-        let session = create_managed_session_handle(&session_state.session_id)?;
+        
+        let session = if let Some(path) = session_path_override {
+            // Load existing session or create new at specific path
+            let id = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| session_state.session_id.clone());
+            SessionHandle { id, path }
+        } else {
+            create_managed_session_handle(&session_state.session_id)?
+        };
         let runtime = build_runtime(
             session_state.with_persistence_path(session.path.clone()),
             &session.id,
@@ -7936,6 +7946,7 @@ supports_streaming = false
                 true,
                 None,
                 PermissionMode::DangerFullAccess,
+                None,
             )
             .expect("cli should initialize")
             .startup_banner()
