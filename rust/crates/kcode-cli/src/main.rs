@@ -124,7 +124,10 @@ fn main() {
             eprintln!(
                 "error: {message}
 
-Run `{CLI_NAME} --help` for usage."
+Run `{CLI_NAME} --help` for usage.
+💡 If you are experiencing persistent issues, run:
+   `{CLI_NAME} doctor` to diagnose
+   `{CLI_NAME} doctor --fix` to automatically repair common problems"
             );
         }
         std::process::exit(1);
@@ -2180,9 +2183,31 @@ fn run_bridge(
             whatsapp_config,
             feishu_config,
             handler,
-        ).await.map_err(|e| -> Box<dyn std::error::Error> { e })
+        ).await.map_err(|e| -> Box<dyn std::error::Error> { 
+            eprintln!("\n❌ Bridge server failed to start: {}", e);
+            eprintln!("💡 Run `kcode doctor --fix` to automatically repair configuration issues.");
+            e 
+        })
     })?;
 
+    Ok(())
+}
+
+/// Lightweight pre-flight check to catch obvious issues before starting.
+fn quick_preflight_check() -> Result<(), String> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    let kcode_dir = format!("{}/.kcode", home);
+    
+    if !std::path::Path::new(&kcode_dir).exists() {
+        return Err(format!("{} directory not found", kcode_dir));
+    }
+    
+    // Check session directory is writeable
+    let sessions_dir = format!("{}/sessions", kcode_dir);
+    if !std::path::Path::new(&sessions_dir).exists() {
+        return Err("sessions directory missing".to_string());
+    }
+    
     Ok(())
 }
 fn run_repl(
@@ -2192,7 +2217,13 @@ fn run_repl(
     allowed_tools: Option<AllowedToolSet>,
     permission_mode: PermissionMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut cli = LiveCli::new(
+    // Quick pre-flight check before starting REPL
+    if let Err(e) = quick_preflight_check() {
+        eprintln!("⚠ Pre-flight warning: {}", e);
+        eprintln!("💡 Run `kcode doctor` to diagnose or `kcode doctor --fix` to repair.\n");
+    }
+
+    let mut cli = match LiveCli::new(
         model,
         model_explicit,
         profile,
@@ -2200,7 +2231,14 @@ fn run_repl(
         allowed_tools,
         permission_mode,
         None,
-    )?;
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("❌ Failed to initialize Kcode runtime: {}", e);
+            eprintln!("💡 Run `kcode doctor --fix` to automatically repair common issues.");
+            return Err(e);
+        }
+    };
     let mut editor =
         input::LineEditor::new("> ", cli.repl_completion_candidates().unwrap_or_default());
     println!("{}", cli.startup_banner());
