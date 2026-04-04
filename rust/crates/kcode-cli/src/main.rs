@@ -2066,10 +2066,22 @@ fn run_bridge(
     let bot_token = std::env::var("KCODE_TELEGRAM_BOT_TOKEN")
         .map_err(|_| "Environment variable KCODE_TELEGRAM_BOT_TOKEN is not set.")?;
 
-    let telegram_config = TelegramConfig {
-        bot_token,
-        mode: TelegramMode::Polling { timeout: 30 },
+    // Webhook URL (Optional, defaults to polling if not set)
+    let webhook_url = std::env::var("KCODE_WEBHOOK_URL").ok();
+
+    let telegram_config = if let Some(url) = webhook_url {
+        TelegramConfig {
+            bot_token,
+            mode: TelegramMode::Webhook { url, port: 3000 },
+        }
+    } else {
+        println!("ℹ KCODE_WEBHOOK_URL not set, using Long Polling mode.");
+        TelegramConfig {
+            bot_token,
+            mode: TelegramMode::Polling { timeout: 30 },
+        }
     };
+    
     let telegram_transport = TelegramTransport::new(telegram_config.clone());
 
     // Setup Session Router for persistence
@@ -2079,6 +2091,10 @@ fn run_bridge(
 
     // Create channel for BridgeCore
     let (core_tx, core_rx) = std::sync::mpsc::channel::<BridgeMessage>();
+
+    // If using Webhook mode, configure Telegram API first (using a clone for setup)
+    let webhook_transport = TelegramTransport::new(telegram_config.clone());
+    let is_webhook_mode = matches!(telegram_config.mode, adapters::TelegramMode::Webhook { .. });
 
     // Spawn BridgeCore in a dedicated thread to handle !Send LiveCli
     std::thread::spawn(move || {
@@ -2096,9 +2112,10 @@ fn run_bridge(
     });
 
     // Webhook handler that forwards events to BridgeCore
+    let webhook_tx = core_tx.clone();
     let handler = Box::new(move |event: adapters::BridgeInboundEvent| -> adapters::BridgeOutboundEvent {
         let (reply_tx, rx) = std::sync::mpsc::channel();
-        if let Err(e) = core_tx.send(BridgeMessage { event, reply_tx }) {
+        if let Err(e) = webhook_tx.send(BridgeMessage { event, reply_tx }) {
             eprintln!("Failed to send event to BridgeCore: {}", e);
             return adapters::BridgeOutboundEvent {
                 bridge_event_id: "error".to_string(),
@@ -2124,11 +2141,17 @@ fn run_bridge(
         }
     });
 
-    println!("Kcode Bridge started (Telegram). Waiting for messages...");
+    println!("Kcode Bridge started. Waiting for messages...");
 
     // Run the webhook server
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     rt.block_on(async {
+        // If using Webhook mode, configure Telegram API first
+        if is_webhook_mode {
+            webhook_transport.set_webhook().await
+                .map_err(|e| format!("Failed to set Telegram webhook: {}", e))?;
+        }
+
         adapters::start_webhook_server(
             "0.0.0.0:3000".parse().unwrap(),
             session_router,

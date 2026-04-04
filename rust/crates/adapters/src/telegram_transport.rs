@@ -78,6 +78,25 @@ impl TelegramTransport {
         format!("https://api.telegram.org/bot{}/{}", self.config.bot_token, method)
     }
 
+    /// Call Telegram setWebhook API.
+    pub async fn set_webhook(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        if let TelegramMode::Webhook { url, .. } = &self.config.mode {
+            let api_url = self.api_url("setWebhook");
+            let mut body = HashMap::new();
+            body.insert("url", url.clone());
+            body.insert("allowed_updates", serde_json::json!(["message"]).to_string());
+
+            let resp = self.client.post(&api_url).json(&body).send().await?;
+            let status = resp.status();
+            if !status.is_success() {
+                let body_text = resp.text().await.unwrap_or_default();
+                return Err(format!("Failed to set webhook ({}): {}", status, body_text).into());
+            }
+            println!("✅ Telegram Webhook set to: {}", url);
+        }
+        Ok(())
+    }
+
     /// Send a text message to Telegram, auto-splitting if > 4096 chars.
     async fn send_text(&self, chat_id: &str, text: &str, reply_to: Option<&str>) -> Result<(), Box<dyn Error + Send + Sync>> {
         // Telegram max message length is 4096 UTF-8 characters
