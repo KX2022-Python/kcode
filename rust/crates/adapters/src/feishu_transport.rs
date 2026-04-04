@@ -6,6 +6,7 @@ use std::error::Error;
 
 use async_trait::async_trait;
 use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent, DeliveryMode};
+use bridge::attachment::{AttachmentEnvelope, AttachmentKind};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info};
@@ -204,6 +205,65 @@ pub fn parse_feishu_webhook(payload: &FeishuWebhookPayload) -> Option<BridgeInbo
         format!("[{}] Message received", message.message_type)
     };
 
+    let mut attachments = Vec::new();
+
+    // Parse Image
+    if message.message_type == "image" {
+        if let Some(image_key) = content.get("image_key").and_then(|v| v.as_str()) {
+            attachments.push(AttachmentEnvelope {
+                kind: AttachmentKind::Image,
+                name: "image.png".to_string(),
+                mime_type: Some("image/png".to_string()),
+                url_or_path: Some(format!("feishu://file?id={}", image_key)),
+                text_content: None,
+                size_bytes: None,
+            });
+            if text.is_empty() || text.starts_with("[") {
+                return Some(BridgeInboundEvent {
+                    bridge_event_id: message.message_id.clone(),
+                    channel: "feishu".to_string(),
+                    channel_user_id: event_data.sender.sender_id.open_id.clone(),
+                    channel_chat_id: event_data.message.chat_id.clone(),
+                    channel_message_id: message.message_id.clone(),
+                    text: "[Received an image]".to_string(),
+                    attachments,
+                    received_at: event_data.message.create_time,
+                    reply_to: message.parent_id.clone().filter(|id| id != "0" && !id.is_empty()),
+                    metadata: std::collections::BTreeMap::new(),
+                });
+            }
+        }
+    }
+
+    // Parse File
+    if message.message_type == "file" {
+        if let Some(file_key) = content.get("file_key").and_then(|v| v.as_str()) {
+            let file_name = content.get("file_name").and_then(|v| v.as_str()).unwrap_or("document").to_string();
+            attachments.push(AttachmentEnvelope {
+                kind: AttachmentKind::Document,
+                name: file_name,
+                mime_type: None,
+                url_or_path: Some(format!("feishu://file?id={}", file_key)),
+                text_content: None,
+                size_bytes: None,
+            });
+            if text.is_empty() || text.starts_with("[") {
+                 return Some(BridgeInboundEvent {
+                    bridge_event_id: message.message_id.clone(),
+                    channel: "feishu".to_string(),
+                    channel_user_id: event_data.sender.sender_id.open_id.clone(),
+                    channel_chat_id: event_data.message.chat_id.clone(),
+                    channel_message_id: message.message_id.clone(),
+                    text: format!("[Received a file: {}]", attachments.last().unwrap().name),
+                    attachments,
+                    received_at: event_data.message.create_time,
+                    reply_to: message.parent_id.clone().filter(|id| id != "0" && !id.is_empty()),
+                    metadata: std::collections::BTreeMap::new(),
+                });
+            }
+        }
+    }
+
     Some(BridgeInboundEvent {
         bridge_event_id: message.message_id.clone(),
         channel: "feishu".to_string(),
@@ -211,7 +271,7 @@ pub fn parse_feishu_webhook(payload: &FeishuWebhookPayload) -> Option<BridgeInbo
         channel_chat_id: event_data.message.chat_id.clone(),
         channel_message_id: message.message_id.clone(),
         text,
-        attachments: vec![],
+        attachments,
         received_at: event_data.message.create_time,
         reply_to: message.parent_id.clone().filter(|id| id != "0" && !id.is_empty()),
         metadata: std::collections::BTreeMap::new(),
