@@ -1,34 +1,64 @@
-//! Telegram Transport implementation using Long Polling.
-//! Connects to the Telegram Bot API and converts updates to BridgeInboundEvents.
+//! Telegram Transport implementation.
+//! Supports Long Polling and Webhook modes.
+//! Handles MarkdownV2 formatting and 4096 char message splitting.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::error::Error;
 
 use async_trait::async_trait;
-use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent};
+use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent, DeliveryMode};
 use reqwest::Client;
 use serde::Deserialize;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
-use super::transport::Transport;
+use super::transport::{Transport, TransportConfig};
 
 /// Telegram Bot API configuration.
 #[derive(Debug, Clone)]
 pub struct TelegramConfig {
     pub bot_token: String,
-    pub allowed_updates: Vec<String>,
+    pub mode: TelegramMode,
+}
+
+#[derive(Debug, Clone)]
+pub enum TelegramMode {
+    /// Long Polling mode (default, no server required).
+    Polling { timeout: u32 },
+    /// Webhook mode (requires public HTTPS endpoint).
+    Webhook { url: String, port: u16 },
+}
+
+impl TransportConfig for TelegramConfig {
+    fn channel_id(&self) -> &str { "telegram" }
 }
 
 impl Default for TelegramConfig {
     fn default() -> Self {
         Self {
             bot_token: String::new(),
-            allowed_updates: vec!["message".to_string()],
+            mode: TelegramMode::Polling { timeout: 30 },
         }
     }
 }
 
-/// Telegram Transport handling Long Polling.
+/// Characters that must be escaped in MarkdownV2.
+const MARKDOWN_V2_ESCAPE_CHARS: &[char] = &[
+    '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!',
+];
+
+/// Escape text for Telegram MarkdownV2.
+fn escape_markdown_v2(text: &str) -> String {
+    let mut result = String::with_capacity(text.len() * 2);
+    for c in text.chars() {
+        if MARKDOWN_V2_ESCAPE_CHARS.contains(&c) {
+            result.push('\\');
+        }
+        result.push(c);
+    }
+    result
+}
+
+/// Telegram Transport handling Long Polling or Webhook.
 pub struct TelegramTransport {
     config: TelegramConfig,
     client: Client,
@@ -48,17 +78,41 @@ impl TelegramTransport {
         format!("https://api.telegram.org/bot{}/{}", self.config.bot_token, method)
     }
 
-    async fn send_message(&self, chat_id: &str, text: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let url = self.api_url("sendMessage");
-        let mut body = HashMap::new();
-        body.insert("chat_id", chat_id.to_string());
-        body.insert("text", text.to_string());
+    /// Send a text message to Telegram, auto-splitting if > 4096 chars.
+    async fn send_text(&self, chat_id: &str, text: &str, reply_to: Option<&str>) -> Result<(), Box<dyn Error + Send + Sync>> {
+        // Telegram max message length is 4096 UTF-8 characters
+        const MAX_LEN: usize = 4096;
+        let escaped = escape_markdown_v2(text);
+        
+        // Split into chunks if needed
+        let chunks: Vec<String> = if escaped.len() <= MAX_LEN {
+            vec![escaped]
+        } else {
+            escaped
+                .as_bytes()
+                .chunks(MAX_LEN)
+                .map(|chunk| String::from_utf8_lossy(chunk).to_string())
+                .collect()
+        };
 
-        let resp = self.client.post(&url).json(&body).send().await?;
-        let status = resp.status();
-        if !status.is_success() {
-            let body_text = resp.text().await.unwrap_or_default();
-            return Err(format!("Telegram send failed: {} - {}", status, body_text).into());
+        for (i, chunk) in chunks.iter().enumerate() {
+            let url = self.api_url("sendMessage");
+            let mut body = HashMap::new();
+            body.insert("chat_id", chat_id.to_string());
+            body.insert("text", chunk.clone());
+            body.insert("parse_mode", "MarkdownV2".to_string());
+            if i == 0 {
+                if let Some(reply_to_id) = reply_to {
+                    body.insert("reply_to_message_id", reply_to_id.to_string());
+                }
+            }
+
+            let resp = self.client.post(&url).json(&body).send().await?;
+            let status = resp.status();
+            if !status.is_success() {
+                let body_text = resp.text().await.unwrap_or_default();
+                return Err(format!("Telegram send failed ({}): {}", status, body_text).into());
+            }
         }
         Ok(())
     }
@@ -70,16 +124,56 @@ impl Transport for TelegramTransport {
         &self,
         handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + 'static>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        info!("Starting Telegram Long Polling transport...");
+        match &self.config.mode {
+            TelegramMode::Polling { timeout } => {
+                self.run_polling(handler, *timeout).await
+            }
+            TelegramMode::Webhook { url: _, port } => {
+                // Webhook mode requires a separate HTTP server (not implemented here)
+                Err(format!("Webhook mode requires external HTTP server on port {}", port).into())
+            }
+        }
+    }
+
+    async fn send_outbound(
+        &self,
+        event: &BridgeOutboundEvent,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let chat_id = event.reply_target.as_ref().ok_or("Missing reply_target (chat_id)")?;
+        
+        // Extract text from render items
+        let text = event.render_items.iter()
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<&str>>()
+            .join("\n");
+
+        // Handle reply mode
+        let reply_to = match &event.delivery_mode {
+            DeliveryMode::Reply { reply_to } => Some(reply_to.as_str()),
+            _ => None,
+        };
+
+        self.send_text(chat_id, &text, reply_to).await
+    }
+}
+
+impl TelegramTransport {
+    async fn run_polling(
+        &self,
+        handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + 'static>,
+        timeout: u32,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        info!("Starting Telegram Long Polling transport (timeout={}s)...", timeout);
 
         loop {
             let offset = self.offset.load(std::sync::atomic::Ordering::SeqCst);
             let url = self.api_url("getUpdates");
 
-            // Build request params
             let mut params = HashMap::new();
             params.insert("offset", offset.to_string());
-            params.insert("timeout", "30".to_string());
+            params.insert("timeout", timeout.to_string());
+            // Serialize allowed_updates as a JSON array string
+            params.insert("allowed_updates", serde_json::json!(["message"]).to_string());
 
             let resp = match self.client.post(&url).json(&params).send().await {
                 Ok(r) => r,
@@ -115,6 +209,7 @@ impl Transport for TelegramTransport {
                     if let Some(text) = message.text {
                         let chat_id = message.chat.id.to_string();
                         let user_id = message.from.map(|u| u.id.to_string()).unwrap_or_else(|| "unknown".to_string());
+                        let reply_to = message.reply_to_message.as_ref().map(|m| m.message_id.to_string());
 
                         let event = BridgeInboundEvent {
                             bridge_event_id: format!("tg-{}-{}", chat_id, update.update_id),
@@ -128,31 +223,20 @@ impl Transport for TelegramTransport {
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .map(|d| d.as_millis() as u64)
                                 .unwrap_or(0),
-                            reply_to: message.reply_to_message.as_ref().map(|m| m.message_id.to_string()),
-                            metadata: BTreeMap::new(),
+                            reply_to,
+                            metadata: std::collections::BTreeMap::new(),
                         };
 
-                        // Call the handler to get the response event
-                        let outbound_event = handler(event);
-
-                        // Extract text from outbound event to send back
-                        let text_to_send = outbound_event.render_items.iter()
-                            .map(|(_, t)| t.as_str())
-                            .collect::<Vec<&str>>()
-                            .join("\n");
-
-                        // Send the response back to Telegram using reply_target from outbound
-                        if let Some(reply_target) = &outbound_event.reply_target {
-                            if let Err(e) = self.send_message(reply_target, &text_to_send).await {
-                                error!("Failed to send message to Telegram: {}", e);
-                            }
-                        } else {
-                            error!("No reply_target in outbound event, cannot send message");
+                        let outbound = handler(event);
+                        
+                        // Send response back to Telegram
+                        if let Err(e) = self.send_outbound(&outbound).await {
+                            error!("Failed to send outbound to Telegram: {}", e);
                         }
                     }
                 }
 
-                // Update offset
+                // Update offset for next poll
                 self.offset.store(update.update_id + 1, std::sync::atomic::Ordering::SeqCst);
             }
         }

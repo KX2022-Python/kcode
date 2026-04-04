@@ -2066,7 +2066,7 @@ fn run_bridge(
 
     let config = TelegramConfig {
         bot_token,
-        allowed_updates: vec!["message".to_string()],
+        mode: adapters::TelegramMode::Polling { timeout: 30 },
     };
     let transport = TelegramTransport::new(config);
 
