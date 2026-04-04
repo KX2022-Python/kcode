@@ -1,7 +1,7 @@
 //! Telegram Transport implementation using Long Polling.
 //! Connects to the Telegram Bot API and converts updates to BridgeInboundEvents.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 
 use async_trait::async_trait;
@@ -47,13 +47,28 @@ impl TelegramTransport {
     fn api_url(&self, method: &str) -> String {
         format!("https://api.telegram.org/bot{}/{}", self.config.bot_token, method)
     }
+
+    async fn send_message(&self, chat_id: &str, text: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let url = self.api_url("sendMessage");
+        let mut body = HashMap::new();
+        body.insert("chat_id", chat_id.to_string());
+        body.insert("text", text.to_string());
+
+        let resp = self.client.post(&url).json(&body).send().await?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body_text = resp.text().await.unwrap_or_default();
+            return Err(format!("Telegram send failed: {} - {}", status, body_text).into());
+        }
+        Ok(())
+    }
 }
 
-#[async_trait]
+#[async_trait(?Send)]
 impl Transport for TelegramTransport {
     async fn run(
         &self,
-        handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + Send + Sync + 'static>,
+        handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + 'static>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         info!("Starting Telegram Long Polling transport...");
 
@@ -113,15 +128,27 @@ impl Transport for TelegramTransport {
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .map(|d| d.as_millis() as u64)
                                 .unwrap_or(0),
-                            reply_to: message.reply_to_message.map(|m| m.message_id.to_string()),
-                            metadata: std::collections::BTreeMap::new(),
+                            reply_to: message.reply_to_message.as_ref().map(|m| m.message_id.to_string()),
+                            metadata: BTreeMap::new(),
                         };
 
                         // Call the handler to get the response event
                         let outbound_event = handler(event);
 
-                        // Send the response back to Telegram
-                        self.send(&outbound_event).await?;
+                        // Extract text from outbound event to send back
+                        let text_to_send = outbound_event.render_items.iter()
+                            .map(|(_, t)| t.as_str())
+                            .collect::<Vec<&str>>()
+                            .join("\n");
+
+                        // Send the response back to Telegram using reply_target from outbound
+                        if let Some(reply_target) = &outbound_event.reply_target {
+                            if let Err(e) = self.send_message(reply_target, &text_to_send).await {
+                                error!("Failed to send message to Telegram: {}", e);
+                            }
+                        } else {
+                            error!("No reply_target in outbound event, cannot send message");
+                        }
                     }
                 }
 
@@ -129,24 +156,6 @@ impl Transport for TelegramTransport {
                 self.offset.store(update.update_id + 1, std::sync::atomic::Ordering::SeqCst);
             }
         }
-    }
-
-    async fn send(&self, event: &BridgeOutboundEvent) -> Result<(), Box<dyn Error + Send + Sync>> {
-        let chat_id = event.reply_target.as_ref().ok_or("Missing chat_id in reply_target")?;
-        let text = event.render_items.iter().map(|(_, t)| t.as_str()).collect::<Vec<&str>>().join("\n");
-
-        let url = self.api_url("sendMessage");
-
-        let mut body = HashMap::new();
-        body.insert("chat_id", chat_id.clone());
-        body.insert("text", text);
-        
-        let resp = self.client.post(&url).json(&body).send().await?;
-        if !resp.status().is_success() {
-            return Err(format!("Telegram send failed: {}", resp.status()).into());
-        }
-
-        Ok(())
     }
 }
 
@@ -170,6 +179,7 @@ struct TelegramMessage {
     from: Option<TelegramUser>,
     chat: TelegramChat,
     text: Option<String>,
+    reply_to_message: Option<Box<TelegramMessage>>,
 }
 
 #[derive(Debug, Deserialize)]

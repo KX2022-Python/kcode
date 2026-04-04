@@ -62,6 +62,7 @@ use tools::GlobalToolRegistry;
 // v1.1 Bridge Imports
 use adapters::{TelegramConfig, TelegramTransport, Transport};
 use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent};
+use bridge::DeliveryMode;
 
 const DEFAULT_MODEL: &str = "claude-opus-4-6";
 const CLI_NAME: &str = "kcode";
@@ -2070,40 +2071,35 @@ fn run_bridge(
     let transport = TelegramTransport::new(config);
 
     // Initialize the Kcode Runtime (LiveCli)
-    // We wrap it in Arc<Mutex<>> to safely share it across the async bridge loop
-    let cli = std::sync::Arc::new(std::sync::Mutex::new(LiveCli::new(
+    // Use RefCell for interior mutability in the closure (Fn -> FnMut workaround)
+    let cli = std::cell::RefCell::new(LiveCli::new(
         model,
         model_explicit,
         profile,
         true,
         None,
         permission_mode,
-    )?));
+    )?);
 
     println!("Kcode Bridge started (Telegram). Waiting for messages...");
 
     // Run the async bridge loop
-    let rt = tokio::runtime::Runtime::new()?;
+    // Use current_thread runtime because LiveCli is !Send
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     rt.block_on(async {
-        let cli_clone = cli.clone();
-
         let handler = Box::new(move |event: BridgeInboundEvent| -> BridgeOutboundEvent {
-            let chat_id = event.reply_target.clone().unwrap_or_else(|| "unknown".to_string());
+            let chat_id = event.channel_chat_id.clone();
             
-            // Process message in a blocking manner
-            let mut cli_locked = cli_clone.lock().unwrap();
-            
-            // Capture output to return it via Telegram
-            // We use run_turn_with_output to get the text response
-            match cli_locked.run_turn_with_output(&event.text, CliOutputFormat::Text) {
+            // Process message via RefCell
+            match cli.borrow_mut().run_turn_capture(&event.text) {
                 Ok(response) => {
-                    // response is a string, send it back
                     BridgeOutboundEvent {
                         bridge_event_id: event.bridge_event_id,
-                        channel: "telegram".to_string(),
-                        reply_target: Some(chat_id),
+                        session_id: chat_id.clone(),
+                        channel_capability_hint: "telegram".to_string(),
+                        reply_target: Some(chat_id.clone()),
                         render_items: vec![("text".to_string(), response)],
-                        delivery_mode: bridge::DeliveryMode::Reply,
+                        delivery_mode: DeliveryMode::Reply { reply_to: chat_id.clone() },
                     }
                 }
                 Err(e) => {
@@ -2111,22 +2107,22 @@ fn run_bridge(
                     eprintln!("{}", error_msg);
                     BridgeOutboundEvent {
                         bridge_event_id: event.bridge_event_id,
-                        channel: "telegram".to_string(),
-                        reply_target: Some(chat_id),
+                        session_id: chat_id.clone(),
+                        channel_capability_hint: "telegram".to_string(),
+                        reply_target: Some(chat_id.clone()),
                         render_items: vec![("text".to_string(), error_msg)],
-                        delivery_mode: bridge::DeliveryMode::Reply,
+                        delivery_mode: DeliveryMode::Reply { reply_to: chat_id.clone() },
                     }
                 }
             }
         });
 
-        transport.run(handler).await?;
+        transport.run(handler).await.map_err(|e| -> Box<dyn std::error::Error> { e })?;
         Ok::<(), Box<dyn std::error::Error>>(())
     })?;
 
     Ok(())
 }
-
 fn run_repl(
     model: String,
     model_explicit: bool,
@@ -2175,6 +2171,7 @@ fn run_repl(
                 cli.run_turn(&trimmed)?;
             }
             input::ReadOutcome::Cancel => {}
+
             input::ReadOutcome::Exit => {
                 cli.persist_session()?;
                 break;
@@ -2465,6 +2462,37 @@ impl LiveCli {
         self.active_profile = runtime.active_profile.clone();
         self.runtime = runtime;
         Ok(())
+    }
+
+    fn run_turn_capture(&mut self, input: &str) -> Result<String, Box<dyn std::error::Error>> {
+        let (mut runtime, hook_abort_monitor) = self.prepare_turn_runtime(true)?;
+        let mut permission_prompter = CliPermissionPrompter::new(self.permission_mode);
+        let result = runtime.run_turn(input, Some(&mut permission_prompter));
+        hook_abort_monitor.stop();
+        match result {
+            Ok(_) => {
+                self.replace_runtime(runtime)?;
+                
+                // Extract the last assistant text from the current session
+                let session = self.runtime.runtime.as_ref().unwrap().session();
+                let mut response_text = String::new();
+                for msg in session.messages.iter().rev() {
+                    if msg.role == MessageRole::Assistant {
+                        for block in &msg.blocks {
+                            if let ContentBlock::Text { text } = block {
+                                response_text = text.clone();
+                                break;
+                            }
+                        }
+                        if !response_text.is_empty() { break; }
+                    }
+                }
+                Ok(response_text)
+            }
+            Err(error) => {
+                Err(Box::new(error))
+            }
+        }
     }
 
     fn run_turn(&mut self, input: &str) -> Result<(), Box<dyn std::error::Error>> {

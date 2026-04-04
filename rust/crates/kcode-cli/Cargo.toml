@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 adapters = { path = "../adapters" }
 api = { path = "../api" }
+bridge = { path = "../bridge" }
 commands = { path = "../commands" }
 crossterm = "0.28"
 pulldown-cmark = "0.13"

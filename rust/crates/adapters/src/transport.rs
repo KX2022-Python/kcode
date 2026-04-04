@@ -8,7 +8,7 @@ use std::error::Error;
 /// Transport trait for channel communication.
 /// Implementors handle the low-level network details (HTTP, WebSockets, etc.)
 /// and convert them into bridge events.
-#[async_trait]
+#[async_trait(?Send)]
 pub trait Transport: Send + Sync {
     /// Start receiving messages from the channel.
     /// This method runs the message loop indefinitely.
@@ -16,6 +16,6 @@ pub trait Transport: Send + Sync {
     /// an outbound event to be sent back to the channel.
     async fn run(
         &self,
-        handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + Send + Sync + 'static>,
+        handler: Box<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + 'static>,
     ) -> Result<(), Box<dyn Error + Send + Sync>>;
 }
