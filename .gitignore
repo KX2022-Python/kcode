@@ -1,7 +1,23 @@
-__pycache__/
-archive/
-.omx/
-.clawd-agents/
+# Rust build artifacts
+/target/
+**/target/
+debug/
+release/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Kcode local artifacts (sensitive paths)
+.kcode/sessions/
+.kcode/memory/
+
 # Claude Code local artifacts
-.claude/settings.local.json
-.claude/sessions/
+.claude/
+.claw/
