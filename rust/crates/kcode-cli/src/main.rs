@@ -150,7 +150,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             model,
             model_explicit,
             profile,
-        } => print_doctor(model_explicit.then_some(model.as_str()), profile.as_deref())?,
+            fix,
+        } => print_doctor(model_explicit.then_some(model.as_str()), profile.as_deref(), fix)?,
         CliAction::ConfigShow {
             section,
             model,
@@ -270,6 +271,7 @@ enum CliAction {
         model: String,
         model_explicit: bool,
         profile: Option<String>,
+        fix: bool,
     },
     ConfigShow {
         section: Option<String>,
@@ -560,11 +562,15 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             args: join_optional_args(&rest[1..]),
         }),
         "system-prompt" => parse_system_prompt_args(&rest[1..]),
-        "doctor" => Ok(CliAction::Doctor {
-            model,
-            model_explicit,
-            profile,
-        }),
+        "doctor" => {
+            let fix = rest.iter().any(|arg| arg == "--fix");
+            Ok(CliAction::Doctor {
+                model,
+                model_explicit,
+                profile,
+                fix,
+            })
+        }
         "config" => parse_config_args(&rest[1..], &model, model_explicit, profile.clone()),
         "commands" => parse_commands_args(&rest[1..], &model, model_explicit, profile.clone()),
         "profile" => parse_profile_args(&rest[1..], &model, model_explicit, profile.clone()),
@@ -625,6 +631,7 @@ fn parse_single_word_command_alias(
             model: model.to_string(),
             model_explicit,
             profile: profile.map(ToOwned::to_owned),
+            fix: false,
         })),
         "profile" => Some(Ok(CliAction::Profile {
             selection: ProfileCommandSelection::Show { profile_name: None },
@@ -3924,11 +3931,103 @@ fn print_sandbox_status_snapshot() -> Result<(), Box<dyn std::error::Error>> {
 fn print_doctor(
     model_override: Option<&str>,
     profile_override: Option<&str>,
+    fix: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    println!(
-        "{}",
-        render_doctor_report(model_override, profile_override)?
-    );
+    if fix {
+        run_doctor_fix(model_override, profile_override)?;
+    } else {
+        println!(
+            "{}",
+            render_doctor_report(model_override, profile_override)?
+        );
+    }
+    Ok(())
+}
+
+/// Self-healing mode: Automatically fix common configuration and environment issues.
+fn run_doctor_fix(
+    _model_override: Option<&str>,
+    _profile_override: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("🔧 Kcode Doctor: Self-Healing Mode\n");
+
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    let kcode_dir = format!("{}/.kcode", home);
+    let mut fixed_count = 0;
+
+    // 1. Ensure ~/.kcode directory exists with correct permissions
+    if !std::path::Path::new(&kcode_dir).exists() {
+        println!("📁 Creating {}...", kcode_dir);
+        std::fs::create_dir_all(&kcode_dir)?;
+        fixed_count += 1;
+    }
+    
+    // Fix permissions if needed
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(&kcode_dir) {
+            let current_mode = meta.permissions().mode() & 0o777;
+            if current_mode != 0o700 {
+                println!("🔒 Fixing permissions on {} (was {:o}, setting to 700)", kcode_dir, current_mode);
+                std::fs::set_permissions(&kcode_dir, std::fs::Permissions::from_mode(0o700))?;
+                fixed_count += 1;
+            }
+        }
+    }
+
+    // 2. Ensure subdirectories exist
+    for subdir in &["sessions", "memory", "bridge-sessions", "bridge-media"] {
+        let path = format!("{}/{}", kcode_dir, subdir);
+        if !std::path::Path::new(&path).exists() {
+            println!("📁 Creating {}...", path);
+            std::fs::create_dir_all(&path)?;
+            fixed_count += 1;
+        }
+    }
+
+    // 3. Scan and isolate corrupted session files
+    let sessions_dir = format!("{}/sessions", kcode_dir);
+    if std::path::Path::new(&sessions_dir).is_dir() {
+        for entry in std::fs::read_dir(&sessions_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                // Simple validation: check if file is readable and not empty
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    if content.is_empty() {
+                        let backup = path.with_extension("jsonl.corrupted");
+                        println!("⚠ Isolating empty session: {} -> {}", path.display(), backup.display());
+                        std::fs::rename(&path, &backup)?;
+                        fixed_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Check Environment Variables
+    let required_vars = ["KCODE_API_KEY", "KCODE_MODEL"];
+    for var in required_vars {
+        if std::env::var(var).is_err() {
+            println!("⚠ Missing environment variable: {}", var);
+            println!("   → Please add 'export {}=your_value' to your shell profile", var);
+        }
+    }
+
+    // 5. Check Bridge Config
+    let has_channel = ["KCODE_TELEGRAM_BOT_TOKEN", "KCODE_WHATSAPP_PHONE_ID", "KCODE_FEISHU_APP_ID"]
+        .iter()
+        .any(|v| std::env::var(v).is_ok());
+    
+    if !has_channel {
+        println!("ℹ No bridge channels configured.");
+        println!("   → Set KCODE_TELEGRAM_BOT_TOKEN or others to enable multi-channel mode.");
+    }
+
+    println!("\n✅ Self-healing complete. Fixed {} issue(s).", fixed_count);
+    println!("💡 Run 'kcode doctor' again to verify the system status.");
+    
     Ok(())
 }
 
@@ -7502,6 +7601,7 @@ supports_streaming = false
                 model: DEFAULT_MODEL.to_string(),
                 model_explicit: false,
                 profile: None,
+                fix: false,
             }
         );
         assert_eq!(
