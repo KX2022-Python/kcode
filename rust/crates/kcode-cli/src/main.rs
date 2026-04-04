@@ -2063,26 +2063,35 @@ fn run_bridge(
     permission_mode: PermissionMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Security: Load credentials from environment variables only.
-    let bot_token = std::env::var("KCODE_TELEGRAM_BOT_TOKEN")
-        .map_err(|_| "Environment variable KCODE_TELEGRAM_BOT_TOKEN is not set.")?;
+    let bot_token = std::env::var("KCODE_TELEGRAM_BOT_TOKEN").ok();
+    let whatsapp_phone = std::env::var("KCODE_WHATSAPP_PHONE_ID").ok();
+    let feishu_app_id = std::env::var("KCODE_FEISHU_APP_ID").ok();
 
-    // Webhook URL (Optional, defaults to polling if not set)
-    let webhook_url = std::env::var("KCODE_WEBHOOK_URL").ok();
+    if bot_token.is_none() && whatsapp_phone.is_none() && feishu_app_id.is_none() {
+        eprintln!("⚠ No channel credentials found. Please set KCODE_TELEGRAM_BOT_TOKEN, KCODE_WHATSAPP_PHONE_ID, or KCODE_FEISHU_APP_ID.");
+        return Ok(());
+    }
 
-    let telegram_config = if let Some(url) = webhook_url {
-        TelegramConfig {
-            bot_token,
-            mode: TelegramMode::Webhook { url, port: 3000 },
-        }
-    } else {
-        println!("ℹ KCODE_WEBHOOK_URL not set, using Long Polling mode.");
-        TelegramConfig {
-            bot_token,
-            mode: TelegramMode::Polling { timeout: 30 },
-        }
-    };
-    
-    let telegram_transport = TelegramTransport::new(telegram_config.clone());
+    // Telegram Config
+    let telegram_config = bot_token.map(|token| adapters::TelegramConfig {
+        bot_token: token,
+        mode: adapters::TelegramMode::Polling { timeout: 30 },
+    });
+
+    // WhatsApp Config
+    let whatsapp_config = whatsapp_phone.map(|phone_id| adapters::WhatsAppConfig {
+        access_token: std::env::var("KCODE_WHATSAPP_TOKEN").expect("KCODE_WHATSAPP_TOKEN required"),
+        phone_number_id: phone_id,
+        app_secret: std::env::var("KCODE_WHATSAPP_APP_SECRET").unwrap_or_default(),
+        webhook_verify_token: std::env::var("KCODE_WEBHOOK_VERIFY_TOKEN").unwrap_or_default(),
+    });
+
+    // Feishu Config
+    let feishu_config = feishu_app_id.map(|app_id| adapters::FeishuConfig {
+        app_id,
+        app_secret: std::env::var("KCODE_FEISHU_APP_SECRET").expect("KCODE_FEISHU_APP_SECRET required"),
+        webhook_verify_token: std::env::var("KCODE_WEBHOOK_VERIFY_TOKEN").unwrap_or_default(),
+    });
 
     // Setup Session Router for persistence
     let session_router = std::sync::Arc::new(adapters::SessionRouter::new(
@@ -2092,23 +2101,35 @@ fn run_bridge(
     // Create channel for BridgeCore
     let (core_tx, core_rx) = std::sync::mpsc::channel::<BridgeMessage>();
 
-    // If using Webhook mode, configure Telegram API first (using a clone for setup)
-    let webhook_transport = TelegramTransport::new(telegram_config.clone());
-    let is_webhook_mode = matches!(telegram_config.mode, adapters::TelegramMode::Webhook { .. });
+    // We create the telegram transport here for the BridgeCore thread
+    let telegram_transport = telegram_config.clone().map(adapters::TelegramTransport::new);
 
-    // Spawn BridgeCore in a dedicated thread to handle !Send LiveCli
+    // If using Webhook mode for Telegram, configure it first
+    if let Some(ref cfg) = telegram_config {
+        if let adapters::TelegramMode::Webhook { url: _, port: _ } = cfg.mode {
+            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
+            let transport = adapters::TelegramTransport::new(cfg.clone());
+            rt.block_on(async {
+                transport.set_webhook().await
+            }).map_err(|e| format!("Failed to set Telegram webhook: {}", e))?;
+        }
+    }
+
+    // Spawn BridgeCore in a dedicated thread
     std::thread::spawn(move || {
-        let core = BridgeCore::new(
-            std::path::PathBuf::from(".kcode/bridge-sessions"),
-            telegram_transport,
-        );
-        let config = SessionConfig {
-            model: model, // Moved from main thread
-            model_explicit: model_explicit,
-            profile: profile, // Moved from main thread
-            permission_mode: permission_mode, // Moved from main thread
-        };
-        core.run(core_rx, config);
+        if let Some(transport) = telegram_transport {
+            let core = BridgeCore::new(
+                std::path::PathBuf::from(".kcode/bridge-sessions"),
+                transport,
+            );
+            let config = SessionConfig {
+                model,
+                model_explicit,
+                profile,
+                permission_mode,
+            };
+            core.run(core_rx, config);
+        }
     });
 
     // Webhook handler that forwards events to BridgeCore
@@ -2127,7 +2148,6 @@ fn run_bridge(
             };
         }
 
-        // Block until BridgeCore processes the turn (sync reply for webhook response)
         match rx.recv() {
             Ok(outbound) => outbound,
             Err(_) => adapters::BridgeOutboundEvent {
@@ -2141,23 +2161,17 @@ fn run_bridge(
         }
     });
 
-    println!("Kcode Bridge started. Waiting for messages...");
+    println!("🌐 Kcode Bridge started. Waiting for messages on all active channels...");
 
     // Run the webhook server
     let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
     rt.block_on(async {
-        // If using Webhook mode, configure Telegram API first
-        if is_webhook_mode {
-            webhook_transport.set_webhook().await
-                .map_err(|e| format!("Failed to set Telegram webhook: {}", e))?;
-        }
-
         adapters::start_webhook_server(
             "0.0.0.0:3000".parse().unwrap(),
             session_router,
-            Some(telegram_config),
-            None, // whatsapp
-            None, // feishu
+            telegram_config,
+            whatsapp_config,
+            feishu_config,
             handler,
         ).await.map_err(|e| -> Box<dyn std::error::Error> { e })
     })?;
