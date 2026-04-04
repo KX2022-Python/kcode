@@ -7,6 +7,7 @@ use std::error::Error;
 
 use async_trait::async_trait;
 use bridge::events::{BridgeInboundEvent, BridgeOutboundEvent, DeliveryMode};
+use bridge::attachment::{AttachmentEnvelope, AttachmentKind};
 use reqwest::Client;
 use serde::Deserialize;
 use tracing::{error, info};
@@ -283,6 +284,34 @@ struct TelegramMessage {
     chat: TelegramChat,
     text: Option<String>,
     reply_to_message: Option<Box<TelegramMessage>>,
+    // Media fields
+    photo: Option<Vec<TelegramPhoto>>,
+    document: Option<TelegramDocument>,
+    voice: Option<TelegramVoice>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegramPhoto {
+    file_id: String,
+    width: u32,
+    height: u32,
+    file_size: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegramDocument {
+    file_name: Option<String>,
+    mime_type: Option<String>,
+    file_id: String,
+    file_size: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelegramVoice {
+    duration: Option<u32>,
+    mime_type: Option<String>,
+    file_id: String,
+    file_size: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -308,27 +337,74 @@ pub fn parse_telegram_webhook(body: &[u8]) -> Result<Vec<BridgeInboundEvent>, Bo
     let mut events = Vec::new();
 
     if let Some(message) = update.message {
-        if let Some(text) = message.text {
-            let chat_id = message.chat.id.to_string();
-            let user_id = message.from.map(|u| u.id.to_string()).unwrap_or_else(|| "unknown".to_string());
-            let reply_to = message.reply_to_message.as_ref().map(|m| m.message_id.to_string());
+        let chat_id = message.chat.id.to_string();
+        let user_id = message.from.as_ref().map(|u| u.id.to_string()).unwrap_or_else(|| "unknown".to_string());
+        let reply_to = message.reply_to_message.as_ref().map(|m| m.message_id.to_string());
 
-            events.push(BridgeInboundEvent {
-                bridge_event_id: format!("tg-{}-{}", chat_id, update.update_id),
-                channel: "telegram".to_string(),
-                channel_user_id: user_id,
-                channel_chat_id: chat_id.clone(),
-                channel_message_id: update.update_id.to_string(),
-                text,
-                attachments: vec![],
-                received_at: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0),
-                reply_to,
-                metadata: std::collections::BTreeMap::new(),
-            });
+        let mut text = String::new();
+        let mut attachments = Vec::new();
+
+        // 1. Parse text
+        if let Some(t) = message.text {
+            text = t;
         }
+
+        // 2. Parse Photos
+        if let Some(photos) = message.photo {
+            if let Some(best_photo) = photos.last() {
+                attachments.push(AttachmentEnvelope {
+                    kind: AttachmentKind::Image,
+                    name: "photo.jpg".to_string(),
+                    mime_type: Some("image/jpeg".to_string()),
+                    url_or_path: Some(format!("tg://file?id={}", best_photo.file_id)),
+                    text_content: None,
+                    size_bytes: best_photo.file_size.map(|s| s as u64),
+                });
+                if text.is_empty() { text = "[Received a photo]".to_string(); }
+            }
+        }
+
+        // 3. Parse Documents
+        if let Some(doc) = message.document {
+            attachments.push(AttachmentEnvelope {
+                kind: AttachmentKind::Document,
+                name: doc.file_name.unwrap_or_else(|| "document".to_string()),
+                mime_type: doc.mime_type,
+                url_or_path: Some(format!("tg://file?id={}", doc.file_id)),
+                text_content: None,
+                size_bytes: doc.file_size.map(|s| s as u64),
+            });
+            if text.is_empty() { text = format!("[Received a file: {}]", attachments.last().unwrap().name); }
+        }
+
+        // 4. Parse Voice
+        if let Some(voice) = message.voice {
+            attachments.push(AttachmentEnvelope {
+                kind: AttachmentKind::PlatformMetadata,
+                name: "voice.ogg".to_string(),
+                mime_type: voice.mime_type.or(Some("audio/ogg".to_string())),
+                url_or_path: Some(format!("tg://file?id={}", voice.file_id)),
+                text_content: None,
+                size_bytes: voice.file_size.map(|s| s as u64),
+            });
+            if text.is_empty() { text = "[Received a voice message]".to_string(); }
+        }
+
+        events.push(BridgeInboundEvent {
+            bridge_event_id: format!("tg-{}-{}", chat_id, update.update_id),
+            channel: "telegram".to_string(),
+            channel_user_id: user_id,
+            channel_chat_id: chat_id.clone(),
+            channel_message_id: update.update_id.to_string(),
+            text,
+            attachments,
+            received_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0),
+            reply_to,
+            metadata: std::collections::BTreeMap::new(),
+        });
     }
     Ok(events)
 }
