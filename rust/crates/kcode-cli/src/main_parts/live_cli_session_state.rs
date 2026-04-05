@@ -248,34 +248,22 @@ impl LiveCli {
     fn print_tasks(&self, args: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
         match args {
             None | Some("list") => {
-                println!(
-                    "Tasks
-  Background tasks are managed through the Agent tool.
-  Use /help Agent to see how to create and manage tasks.
-
-  To create a task: Use the Agent tool with action=create
-  To list tasks:   Use the Agent tool with action=list
-  To stop a task:  Use the Agent tool with action=stop"
-                );
+                println!("{}", render_todos_report(&env::current_dir()?)?);
             }
             Some("help") => {
                 println!(
-                    "Tasks
-  Background tasks allow running multiple agent sessions in parallel.
-
-  Commands:
-    /tasks              List active tasks
-    /tasks help         Show this help
-
-  Task management is done through the Agent tool:
-    Agent(action=create, description='...')   Create a new task
-    Agent(action=list)                        List all tasks
-    Agent(action=stop, task_id='...')         Stop a running task
-    Agent(action=output, task_id='...')       Get task output"
+                    "Todos
+  Usage            /todos
+  Usage            /todos help
+  Store            .clawd-todos.json
+  Source           TodoWrite tool updates this store during longer tasks"
                 );
             }
             other => {
-                println!("Unknown tasks argument: {}. Use /tasks help for usage.", other.unwrap_or(""));
+                println!(
+                    "Unknown todos argument: {}. Use /todos help for usage.",
+                    other.unwrap_or("")
+                );
             }
         }
         Ok(())

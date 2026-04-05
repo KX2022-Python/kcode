@@ -1,3 +1,4 @@
+use std::env;
 use std::fmt::Write as FmtWrite;
 use std::io::{self, Write};
 
@@ -7,11 +8,9 @@ use crossterm::terminal::{Clear, ClearType};
 use crossterm::{execute, queue};
 use pulldown_cmark::{CodeBlockKind, Event, Options, Parser, Tag, TagEnd};
 use syntect::easy::HighlightLines;
-use syntect::highlighting::{Theme, ThemeSet};
+use syntect::highlighting::{Color as SyntectColor, Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::util::{as_24_bit_terminal_escaped, LinesWithEndings};
-
-use crate::theme_settings::current_theme_name;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ColorTheme {
@@ -30,68 +29,67 @@ pub struct ColorTheme {
 
 impl Default for ColorTheme {
     fn default() -> Self {
-        Self::from_theme_name(current_theme_name())
+        Self {
+            heading: Color::Reset,
+            emphasis: Color::Reset,
+            strong: Color::Reset,
+            inline_code: Color::Cyan,
+            link: Color::Cyan,
+            quote: Color::Green,
+            table_border: Color::DarkCyan,
+            code_block_border: Color::DarkGrey,
+            spinner_active: Color::Cyan,
+            spinner_done: Color::Green,
+            spinner_failed: Color::Red,
+        }
     }
 }
 
-impl ColorTheme {
-    #[must_use]
-    pub fn from_theme_name(theme: crate::render_theme::ThemeName) -> Self {
-        match theme {
-            crate::render_theme::ThemeName::Graphite => Self {
-                heading: Color::Cyan,
-                emphasis: Color::Magenta,
-                strong: Color::Yellow,
-                inline_code: Color::Green,
-                link: Color::Blue,
-                quote: Color::DarkGrey,
-                table_border: Color::DarkCyan,
-                code_block_border: Color::DarkGrey,
-                spinner_active: Color::Blue,
-                spinner_done: Color::Green,
-                spinner_failed: Color::Red,
-            },
-            crate::render_theme::ThemeName::Sunset => Self {
-                heading: Color::DarkYellow,
-                emphasis: Color::Red,
-                strong: Color::Yellow,
-                inline_code: Color::Magenta,
-                link: Color::DarkYellow,
-                quote: Color::DarkRed,
-                table_border: Color::DarkYellow,
-                code_block_border: Color::DarkRed,
-                spinner_active: Color::DarkYellow,
-                spinner_done: Color::Green,
-                spinner_failed: Color::Red,
-            },
-            crate::render_theme::ThemeName::Amber => Self {
-                heading: Color::Yellow,
-                emphasis: Color::DarkYellow,
-                strong: Color::White,
-                inline_code: Color::Yellow,
-                link: Color::DarkYellow,
-                quote: Color::DarkGrey,
-                table_border: Color::DarkYellow,
-                code_block_border: Color::DarkYellow,
-                spinner_active: Color::Yellow,
-                spinner_done: Color::Green,
-                spinner_failed: Color::Red,
-            },
-            crate::render_theme::ThemeName::Ocean => Self {
-                heading: Color::Cyan,
-                emphasis: Color::Blue,
-                strong: Color::White,
-                inline_code: Color::Green,
-                link: Color::Blue,
-                quote: Color::DarkCyan,
-                table_border: Color::Cyan,
-                code_block_border: Color::DarkCyan,
-                spinner_active: Color::Cyan,
-                spinner_done: Color::Green,
-                spinner_failed: Color::Red,
-            },
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyntaxThemePreference {
+    Dark,
+    Light,
+}
+
+impl SyntaxThemePreference {
+    fn detect() -> Self {
+        env::var("TERM_THEME")
+            .ok()
+            .and_then(|value| parse_named_syntax_theme_preference(&value))
+            .or_else(|| {
+                env::var("COLORFGBG")
+                    .ok()
+                    .and_then(|value| parse_colorfgbg_preference(&value))
+            })
+            .unwrap_or(Self::Dark)
+    }
+
+    fn syntect_theme_name(self) -> &'static str {
+        match self {
+            Self::Dark => "base16-ocean.dark",
+            Self::Light => "InspiredGitHub",
         }
     }
+}
+
+fn parse_named_syntax_theme_preference(value: &str) -> Option<SyntaxThemePreference> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "light" => Some(SyntaxThemePreference::Light),
+        "dark" => Some(SyntaxThemePreference::Dark),
+        _ => None,
+    }
+}
+
+fn parse_colorfgbg_preference(value: &str) -> Option<SyntaxThemePreference> {
+    let bg = value.split(';').next_back()?.trim();
+    if bg.eq_ignore_ascii_case("default") {
+        return None;
+    }
+    let bg = bg.parse::<u8>().ok()?;
+    Some(match bg {
+        0..=6 | 8 => SyntaxThemePreference::Dark,
+        _ => SyntaxThemePreference::Light,
+    })
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -221,19 +219,17 @@ impl RenderState {
     fn style_text(&self, text: &str, theme: &ColorTheme) -> String {
         let mut style = text.stylize();
 
-        if matches!(self.heading_level, Some(1 | 2)) || self.strong > 0 {
+        if matches!(self.heading_level, Some(1 | 2 | 3)) || self.strong > 0 {
             style = style.bold();
         }
-        if self.emphasis > 0 {
+        if self.emphasis > 0 || matches!(self.heading_level, Some(3..=6)) {
             style = style.italic();
         }
 
         if let Some(level) = self.heading_level {
             style = match level {
-                1 => style.with(theme.heading),
-                2 => style.white(),
-                3 => style.with(Color::Blue),
-                _ => style.with(Color::Grey),
+                1 => style.underlined().with(theme.heading),
+                _ => style.with(theme.heading),
             };
         } else if self.strong > 0 {
             style = style.with(theme.strong);
@@ -273,16 +269,7 @@ pub struct TerminalRenderer {
 
 impl Default for TerminalRenderer {
     fn default() -> Self {
-        let syntax_set = SyntaxSet::load_defaults_newlines();
-        let syntax_theme = ThemeSet::load_defaults()
-            .themes
-            .remove("base16-ocean.dark")
-            .unwrap_or_default();
-        Self {
-            syntax_set,
-            syntax_theme,
-            color_theme: ColorTheme::default(),
-        }
+        Self::with_syntax_preference(SyntaxThemePreference::detect())
     }
 }
 
@@ -290,6 +277,21 @@ impl TerminalRenderer {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    #[must_use]
+    pub fn with_syntax_preference(preference: SyntaxThemePreference) -> Self {
+        let syntax_set = SyntaxSet::load_defaults_newlines();
+        let mut themes = ThemeSet::load_defaults().themes;
+        let syntax_theme = themes
+            .remove(preference.syntect_theme_name())
+            .or_else(|| themes.remove("base16-ocean.dark"))
+            .unwrap_or_default();
+        Self {
+            syntax_set,
+            syntax_theme,
+            color_theme: ColorTheme::default(),
+        }
     }
 
     #[must_use]
@@ -627,13 +629,20 @@ impl TerminalRenderer {
             match syntax_highlighter.highlight_line(line, &self.syntax_set) {
                 Ok(ranges) => {
                     let escaped = as_24_bit_terminal_escaped(&ranges[..], false);
-                    colored_output.push_str(&apply_code_block_background(&escaped));
+                    colored_output.push_str(&self.apply_code_block_background(&escaped));
                 }
-                Err(_) => colored_output.push_str(&apply_code_block_background(line)),
+                Err(_) => colored_output.push_str(&self.apply_code_block_background(line)),
             }
         }
 
         colored_output
+    }
+
+    fn apply_code_block_background(&self, line: &str) -> String {
+        apply_code_block_background(
+            line,
+            code_block_background_escape(&self.syntax_theme).as_deref(),
+        )
     }
 
     pub fn stream_markdown(&self, markdown: &str, out: &mut impl Write) -> io::Result<()> {
@@ -673,15 +682,30 @@ impl MarkdownStreamState {
     }
 }
 
-fn apply_code_block_background(line: &str) -> String {
+fn apply_code_block_background(line: &str, background_escape: Option<&str>) -> String {
     let trimmed = line.trim_end_matches('\n');
     let trailing_newline = if trimmed.len() == line.len() {
         ""
     } else {
         "\n"
     };
-    let with_background = trimmed.replace("\u{1b}[0m", "\u{1b}[0;48;5;236m");
-    format!("\u{1b}[48;5;236m{with_background}\u{1b}[0m{trailing_newline}")
+    let Some(background_escape) = background_escape else {
+        return format!("{trimmed}{trailing_newline}");
+    };
+    let reset_with_background = format!("\u{1b}[0;{background_escape}m");
+    let with_background = trimmed.replace("\u{1b}[0m", &reset_with_background);
+    format!("\u{1b}[{background_escape}m{with_background}\u{1b}[0m{trailing_newline}")
+}
+
+fn code_block_background_escape(theme: &Theme) -> Option<String> {
+    theme
+        .settings
+        .background
+        .map(|color| syntect_background_escape(color))
+}
+
+fn syntect_background_escape(color: SyntectColor) -> String {
+    format!("48;2;{};{};{}", color.r, color.g, color.b)
 }
 
 fn find_stream_safe_boundary(markdown: &str) -> Option<usize> {
@@ -742,7 +766,10 @@ fn strip_ansi(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{strip_ansi, MarkdownStreamState, Spinner, TerminalRenderer};
+    use super::{
+        code_block_background_escape, parse_colorfgbg_preference, strip_ansi, MarkdownStreamState,
+        Spinner, SyntaxThemePreference, TerminalRenderer,
+    };
 
     #[test]
     fn renders_markdown_with_styling_and_lists() {
@@ -777,7 +804,7 @@ mod tests {
         assert!(plain_text.contains("╭─ rust"));
         assert!(plain_text.contains("fn hi"));
         assert!(markdown_output.contains('\u{1b}'));
-        assert!(markdown_output.contains("[48;5;236m"));
+        assert!(markdown_output.contains("\u{1b}[48;"));
     }
 
     #[test]
@@ -842,5 +869,28 @@ mod tests {
 
         let output = String::from_utf8_lossy(&out);
         assert!(output.contains("Working"));
+    }
+
+    #[test]
+    fn colorfgbg_heuristic_distinguishes_light_and_dark_backgrounds() {
+        assert_eq!(
+            parse_colorfgbg_preference("15;0"),
+            Some(SyntaxThemePreference::Dark)
+        );
+        assert_eq!(
+            parse_colorfgbg_preference("0;15"),
+            Some(SyntaxThemePreference::Light)
+        );
+    }
+
+    #[test]
+    fn light_and_dark_syntax_preferences_use_different_code_backgrounds() {
+        let dark = TerminalRenderer::with_syntax_preference(SyntaxThemePreference::Dark);
+        let light = TerminalRenderer::with_syntax_preference(SyntaxThemePreference::Light);
+
+        assert_ne!(
+            code_block_background_escape(&dark.syntax_theme),
+            code_block_background_escape(&light.syntax_theme)
+        );
     }
 }

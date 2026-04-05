@@ -33,7 +33,7 @@ impl LiveCli {
         )?;
         let active_profile = runtime.active_profile.clone();
         let cli = Self {
-            model,
+            model: active_profile.model.clone(),
             model_explicit,
             profile_override: profile,
             allowed_tools,
@@ -131,6 +131,7 @@ impl LiveCli {
 
     fn replace_runtime(&mut self, runtime: BuiltRuntime) -> Result<(), Box<dyn std::error::Error>> {
         self.runtime.shutdown_plugins()?;
+        self.model = runtime.active_profile.model.clone();
         self.active_profile = runtime.active_profile.clone();
         self.runtime = runtime;
         Ok(())

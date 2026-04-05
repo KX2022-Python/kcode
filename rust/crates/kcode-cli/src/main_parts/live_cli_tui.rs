@@ -13,37 +13,36 @@ impl LiveCli {
             || "unknown".to_string(),
             |context| context.git_summary.headline(),
         );
+        let mut messages = tui::repl::default_welcome_messages(
+            &self.model,
+            &self.active_profile.profile_name,
+            self.permission_mode.as_str(),
+            &self.session.id,
+        );
 
-        vec![
-            tui::repl::RenderableMessage::AssistantText {
-                text: format!(
-                    "Interactive session ready\n\
-  Model        {}\n\
-  Profile      {}\n\
-  Permissions  {}\n\
-  Branch       {}\n\
-  Workspace    {}\n\
-  Directory    {}\n\
-  Session      {}\n\
-  Auto-save    {}",
-                    self.model,
-                    self.active_profile.profile_name,
-                    self.permission_mode.as_str(),
-                    branch,
-                    workspace,
-                    cwd,
-                    self.session.id,
-                    self.session.path.display(),
-                ),
-                streaming: false,
-            },
+        messages[0] = tui::repl::RenderableMessage::AssistantText {
+            text: tui::repl::render_welcome_banner(),
+            streaming: false,
+        };
+        messages.insert(
+            2,
             tui::repl::RenderableMessage::System {
-                message:
-                    "Enter 发送消息 · Shift+Enter 换行 · `/` 打开命令面板 · PgUp/PgDn 浏览历史"
-                        .to_string(),
+                message: format!("{branch} · {workspace} · {cwd}"),
                 level: tui::repl::SysLevel::Info,
             },
-        ]
+        );
+        messages.insert(
+            3,
+            tui::repl::RenderableMessage::System {
+                message: format!(
+                    "session {} · autosave {}",
+                    tui::repl::short_session_id(&self.session.id),
+                    self.session.path.display(),
+                ),
+                level: tui::repl::SysLevel::Info,
+            },
+        );
+        messages
     }
 
     fn prepare_tui_turn_runtime(
@@ -83,7 +82,6 @@ impl LiveCli {
             permission_mode,
         )?;
         self.replace_runtime(runtime)?;
-        self.model = model;
         self.model_explicit = model_explicit;
         self.permission_mode = permission_mode;
         Ok(())
@@ -219,7 +217,7 @@ impl LiveCli {
             ))),
             SlashCommand::Resume { session_path } => {
                 let Some(session_ref) = session_path else {
-                    return Ok(tui_text_result(render_resume_usage()));
+                    return self.tui_session_command_result(Some("list"), None);
                 };
 
                 let handle = resolve_session_reference(&session_ref)?;
@@ -310,6 +308,32 @@ impl LiveCli {
                 self.model_explicit.then_some(self.model.as_str()),
                 self.profile_override.as_deref(),
             )?)),
+            SlashCommand::Bughunter { scope } => Ok(tui_text_result(format_bug_report(
+                scope.as_deref(),
+                &self.session.id,
+                &self.session.path,
+            ))),
+            SlashCommand::Commit => {
+                let status = git_output(&["status", "--short", "--branch"])?;
+                let summary = parse_git_workspace_summary(Some(&status));
+                let branch = parse_git_status_branch(Some(&status));
+                Ok(tui_text_result(if summary.is_clean() {
+                    format_commit_skipped_report()
+                } else {
+                    format_commit_preflight_report(branch.as_deref(), summary)
+                }))
+            }
+            SlashCommand::Pr { context } => {
+                let branch = resolve_git_branch_for(&env::current_dir()?)
+                    .unwrap_or_else(|| "unknown".to_string());
+                Ok(tui_text_result(format_pr_report(&branch, context.as_deref())))
+            }
+            SlashCommand::Issue { context } => {
+                Ok(tui_text_result(format_issue_report(context.as_deref())))
+            }
+            SlashCommand::DebugToolCall => {
+                Ok(tui_text_result(render_last_tool_debug_report(self.runtime.session())?))
+            }
             SlashCommand::Mcp { action, target } => {
                 if let Err(message) =
                     ensure_session_command_available_for_profile("mcp", &self.active_profile)
@@ -327,17 +351,17 @@ impl LiveCli {
             }
             SlashCommand::Memory => Ok(tui_text_result(render_memory_report()?)),
             SlashCommand::Tasks { args } => Ok(tui_text_result(match args.as_deref() {
-                None | Some("list") => {
-                    "Tasks\n  Background tasks are managed through the Agent tool.\n  Use /help Agent to see how to create and manage tasks.".to_string()
-                }
+                None | Some("list") => render_todos_report(&env::current_dir()?)?,
                 Some("help") => {
-                    "Tasks\n  Background tasks allow running multiple agent sessions in parallel.\n\n  Commands:\n    /tasks              List active tasks\n    /tasks help         Show this help\n\n  Task management is done through the Agent tool:\n    Agent(action=create, description='...')   Create a new task\n    Agent(action=list)                        List all tasks\n    Agent(action=stop, task_id='...')         Stop a running task\n    Agent(action=output, task_id='...')       Get task output".to_string()
+                    "Todos\n  Usage            /todos\n  Usage            /todos help\n  Store            .clawd-todos.json\n  Source           TodoWrite tool updates this store during longer tasks".to_string()
                 }
                 other => format!(
-                    "Unknown tasks argument: {}. Use /tasks help for usage.",
+                    "Unknown todos argument: {}. Use /todos help for usage.",
                     other.unwrap_or("")
                 ),
             })),
+            SlashCommand::Powerup => Ok(tui_text_result(format_powerup_report())),
+            SlashCommand::Btw { question } => self.tui_btw_result(question.as_deref()),
             SlashCommand::Doctor => Ok(tui_text_result(render_doctor_report(
                 self.model_explicit.then_some(self.model.as_str()),
                 self.profile_override.as_deref(),
@@ -362,9 +386,34 @@ impl LiveCli {
                 let cwd = env::current_dir()?;
                 Ok(tui_text_result(handle_skills_slash_command(args.as_deref(), &cwd)?))
             }
-            SlashCommand::Hooks { .. } => Ok(tui_text_result(
-                "Run `kcode tui extensions` to manage hooks and plugins.".to_string(),
-            )),
+            SlashCommand::Session { action, target } => {
+                self.tui_session_command_result(action.as_deref(), target.as_deref())
+            }
+            SlashCommand::Plugins { action, target } => {
+                if let Err(message) =
+                    ensure_session_command_available_for_profile("plugin", &self.active_profile)
+                {
+                    return Ok(tui_text_result(message));
+                }
+                self.tui_plugins_command_result(action.as_deref(), target.as_deref())
+            }
+            SlashCommand::Hooks { .. } => Ok(tui_text_result(render_config_report(
+                Some("hooks"),
+                self.model_explicit.then_some(self.model.as_str()),
+                self.profile_override.as_deref(),
+            )?)),
+            SlashCommand::Login => Ok(tui_text_result(format_login_report(
+                &self.active_profile.profile_name,
+                &self.model,
+            ))),
+            SlashCommand::Feedback => Ok(tui_text_result(format_feedback_report(None))),
+            SlashCommand::Desktop => Ok(tui_text_result(format_desktop_report())),
+            SlashCommand::Schedule { args } => {
+                Ok(tui_text_result(format_schedule_report(args.as_deref())))
+            }
+            SlashCommand::Loop { args } => {
+                Ok(tui_text_result(format_loop_report(args.as_deref())))
+            }
             SlashCommand::Keybindings
             | SlashCommand::PrivacySettings
             | SlashCommand::Theme { .. }
@@ -374,25 +423,15 @@ impl LiveCli {
                 "Run `kcode tui appearance` to manage UI and privacy settings.".to_string(),
             )),
             SlashCommand::Unknown(name) => Err(format_unknown_slash_command(&name).into()),
-            SlashCommand::Bughunter { .. }
-            | SlashCommand::Commit
-            | SlashCommand::Pr { .. }
-            | SlashCommand::Issue { .. }
-            | SlashCommand::DebugToolCall { .. }
-            | SlashCommand::Session { .. }
-            | SlashCommand::Plugins { .. }
-            | SlashCommand::Login
-            | SlashCommand::Logout
+            SlashCommand::Logout
             | SlashCommand::Vim
             | SlashCommand::Upgrade
             | SlashCommand::Stats
             | SlashCommand::Share
-            | SlashCommand::Feedback
             | SlashCommand::Files
             | SlashCommand::Fast
             | SlashCommand::Exit
             | SlashCommand::Summary
-            | SlashCommand::Desktop
             | SlashCommand::Brief
             | SlashCommand::Advisor
             | SlashCommand::Stickers
@@ -407,13 +446,102 @@ impl LiveCli {
             | SlashCommand::Copy { .. }
             | SlashCommand::Context { .. }
             | SlashCommand::Effort { .. }
-            | SlashCommand::Branch { .. }
             | SlashCommand::Rewind { .. }
             | SlashCommand::Ide { .. }
             | SlashCommand::Tag { .. }
             | SlashCommand::AddDir { .. } => Ok(tui_text_result(
                 "Command registered but not yet implemented in the TUI flow.".to_string(),
             )),
+            SlashCommand::Branch { name } => {
+                self.tui_session_command_result(Some("fork"), name.as_deref())
+            }
         }
+    }
+
+    fn tui_session_command_result(
+        &mut self,
+        action: Option<&str>,
+        target: Option<&str>,
+    ) -> Result<tui::repl::BackendResult, Box<dyn std::error::Error>> {
+        match action {
+            None | Some("list") => Ok(tui_text_result(render_session_list(&self.session.id)?)),
+            Some("switch") => {
+                let Some(target) = target else {
+                    return Ok(tui_text_result("Usage: /session switch <session-id>".to_string()));
+                };
+                let handle = resolve_session_reference(target)?;
+                let session = Session::load_from_path(&handle.path)?;
+                let message_count = session.messages.len();
+                self.session = SessionHandle {
+                    id: session.session_id.clone(),
+                    path: handle.path,
+                };
+                self.replace_tui_runtime(
+                    session,
+                    self.model.clone(),
+                    self.model_explicit,
+                    self.permission_mode,
+                )?;
+                Ok(tui_text_result(format!(
+                    "Session switched\n  Active session   {}\n  File             {}\n  Messages         {}",
+                    self.session.id,
+                    self.session.path.display(),
+                    message_count,
+                )))
+            }
+            Some("fork") => {
+                let forked = self.runtime.fork_session(target.map(ToOwned::to_owned));
+                let parent_session_id = self.session.id.clone();
+                let handle = create_managed_session_handle(&forked.session_id)?;
+                let branch_name = forked.fork.as_ref().and_then(|fork| fork.branch_name.clone());
+                let forked = forked.with_persistence_path(handle.path.clone());
+                let message_count = forked.messages.len();
+                forked.save_to_path(&handle.path)?;
+                self.session = handle;
+                self.replace_tui_runtime(
+                    forked,
+                    self.model.clone(),
+                    self.model_explicit,
+                    self.permission_mode,
+                )?;
+                Ok(tui_text_result(format!(
+                    "Session forked\n  Parent session   {}\n  Active session   {}\n  Branch           {}\n  File             {}\n  Messages         {}",
+                    parent_session_id,
+                    self.session.id,
+                    branch_name.as_deref().unwrap_or("(unnamed)"),
+                    self.session.path.display(),
+                    message_count,
+                )))
+            }
+            Some(other) => Ok(tui_text_result(format!(
+                "Unknown /session action '{other}'. Use /session list, /session switch <session-id>, or /session fork [branch-name]."
+            ))),
+        }
+    }
+
+    fn tui_plugins_command_result(
+        &mut self,
+        action: Option<&str>,
+        target: Option<&str>,
+    ) -> Result<tui::repl::BackendResult, Box<dyn std::error::Error>> {
+        let cwd = env::current_dir()?;
+        let loader = ConfigLoader::default_for(&cwd);
+        let runtime_config = loader.load()?;
+        let mut manager = build_plugin_manager(&cwd, &loader, &runtime_config);
+        let result = handle_plugins_slash_command(action, target, &mut manager)?;
+        if result.reload_runtime {
+            self.reload_runtime_features()?;
+        }
+        Ok(tui_text_result(result.message))
+    }
+
+    fn tui_btw_result(
+        &self,
+        question: Option<&str>,
+    ) -> Result<tui::repl::BackendResult, Box<dyn std::error::Error>> {
+        let Some(question) = question.map(str::trim).filter(|value| !value.is_empty()) else {
+            return Ok(tui_text_result(render_btw_usage()));
+        };
+        Ok(tui_text_result(self.run_internal_prompt_text(question, false)?))
     }
 }

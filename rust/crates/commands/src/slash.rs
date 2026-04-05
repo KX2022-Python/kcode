@@ -60,6 +60,10 @@ pub enum SlashCommand {
     Skills {
         args: Option<String>,
     },
+    Powerup,
+    Btw {
+        question: Option<String>,
+    },
     Doctor,
     Login,
     Logout,
@@ -73,6 +77,12 @@ pub enum SlashCommand {
     Exit,
     Summary,
     Desktop,
+    Schedule {
+        args: Option<String>,
+    },
+    Loop {
+        args: Option<String>,
+    },
     Brief,
     Advisor,
     Stickers,

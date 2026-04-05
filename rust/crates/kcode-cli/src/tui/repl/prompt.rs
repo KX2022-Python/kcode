@@ -5,6 +5,8 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
 use super::text_cursor::{clamp_cursor_to_boundary, next_char_boundary, previous_char_boundary};
+use super::text_layout::display_line_count;
+use super::theme::ThemePalette;
 
 /// Prompt 输入框状态
 #[derive(Debug, Clone)]
@@ -166,11 +168,11 @@ pub enum PromptAction {
 pub fn prompt_height(input: &PromptInput, available_width: u16) -> u16 {
     let content_width = prompt_content_width(available_width);
     let visible_text = if input.text.is_empty() {
-        "输入消息，或 / 查看命令..."
+        "给 Kcode 下达任务，或输入 / 查看命令..."
     } else {
         &input.text
     };
-    let line_count = visual_line_count(visible_text, content_width);
+    let line_count = display_line_count(visible_text, content_width);
     (line_count as u16 + 2).clamp(3, 8)
 }
 
@@ -180,15 +182,16 @@ pub fn render_prompt_input(
     input: &PromptInput,
     area: ratatui::layout::Rect,
     is_active: bool,
+    palette: ThemePalette,
 ) {
-    let mode_label = match input.mode {
-        InputMode::Normal => "Prompt",
-        InputMode::Bash => "Shell",
+    let (prompt_prefix, active_color) = match input.mode {
+        InputMode::Normal => ("> ", palette.accent),
+        InputMode::Bash => ("! ", palette.warning),
     };
-    let border_color = match (is_active, &input.mode) {
-        (true, InputMode::Normal) => Color::Green,
-        (true, InputMode::Bash) => Color::Yellow,
-        (false, _) => Color::DarkGray,
+    let border_color = match (is_active, input.mode.clone()) {
+        (true, InputMode::Normal) => palette.accent,
+        (true, InputMode::Bash) => palette.warning,
+        (false, _) => palette.border,
     };
 
     let cursor = clamp_cursor_to_boundary(&input.text, input.cursor);
@@ -201,18 +204,18 @@ pub fn render_prompt_input(
     let placeholder = input.text.is_empty();
 
     let mut spans = vec![Span::styled(
-        if is_active { "› " } else { "  " },
+        prompt_prefix,
         Style::default().fg(if is_active {
-            Color::Green
+            active_color
         } else {
-            Color::DarkGray
+            palette.text_muted
         }),
     )];
 
     if placeholder {
         spans.push(Span::styled(
-            "输入消息，或 / 查看命令...",
-            Style::default().fg(Color::DarkGray),
+            "给 Kcode 下达任务，或输入 / 查看命令…",
+            Style::default().fg(palette.text_muted),
         ));
     } else {
         spans.push(Span::raw(before_cursor.to_string()));
@@ -220,8 +223,8 @@ pub fn render_prompt_input(
             spans.push(Span::styled(
                 cursor_char.to_string(),
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Green)
+                    .fg(palette.inverse_text)
+                    .bg(active_color)
                     .add_modifier(Modifier::BOLD),
             ));
         }
@@ -231,30 +234,23 @@ pub fn render_prompt_input(
     }
 
     let block = Block::default()
-        .title(format!(" {mode_label} "))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color))
-        .style(Style::default().bg(Color::Rgb(12, 18, 12)));
+        .style(Style::default().bg(palette.input_bg));
     let paragraph = Paragraph::new(vec![Line::from(spans)])
         .block(block)
         .wrap(Wrap { trim: false })
-        .style(Style::default().fg(if is_active { Color::White } else { Color::Gray }));
+        .style(Style::default().fg(if is_active {
+            palette.text
+        } else {
+            palette.text_muted
+        }));
 
     frame.render_widget(paragraph, area);
 }
 
 fn prompt_content_width(available_width: u16) -> usize {
-    available_width.saturating_sub(4).max(1) as usize
-}
-
-fn visual_line_count(text: &str, width: usize) -> usize {
-    text.lines()
-        .map(|line| {
-            let chars = line.chars().count().max(1);
-            (chars - 1) / width.max(1) + 1
-        })
-        .sum::<usize>()
-        .max(1)
+    available_width.saturating_sub(2).max(1) as usize
 }
 
 #[cfg(test)]
@@ -269,6 +265,15 @@ mod tests {
         input.cursor = input.text.len();
 
         assert!(prompt_height(&input, 20) > prompt_height(&input, 80));
+    }
+
+    #[test]
+    fn prompt_height_accounts_for_wide_characters() {
+        let mut input = PromptInput::new();
+        input.text = "你好世界你好世界".to_string();
+        input.cursor = input.text.len();
+
+        assert!(prompt_height(&input, 12) > prompt_height(&input, 24));
     }
 
     #[test]

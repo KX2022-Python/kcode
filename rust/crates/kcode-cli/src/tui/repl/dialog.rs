@@ -6,6 +6,8 @@ use ratatui::Frame;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use super::theme::ThemePalette;
+
 /// 对话框类型 — 对齐 CC-Haha ModalContext
 #[derive(Debug, Clone)]
 pub enum DialogType {
@@ -58,7 +60,12 @@ impl DialogState {
 }
 
 /// 渲染对话框 — 对齐 CC-Haha Overlay 系统
-pub fn render_dialog(frame: &mut Frame<'_>, dialog: &DialogState, area: Rect) {
+pub fn render_dialog(
+    frame: &mut Frame<'_>,
+    dialog: &DialogState,
+    area: Rect,
+    palette: ThemePalette,
+) {
     if !dialog.is_active() {
         return;
     }
@@ -68,13 +75,15 @@ pub fn render_dialog(frame: &mut Frame<'_>, dialog: &DialogState, area: Rect) {
     };
 
     let lines = match dialog_type {
-        DialogType::Help => build_help_dialog(),
-        DialogType::ModelPicker { models, selected } => build_model_picker(models, *selected),
-        DialogType::Keybindings => build_keybindings_dialog(),
-        DialogType::SessionPicker { sessions, selected } => {
-            build_session_picker(sessions, *selected)
+        DialogType::Help => build_help_dialog(palette),
+        DialogType::ModelPicker { models, selected } => {
+            build_model_picker(models, *selected, palette)
         }
-        DialogType::Info { title, content } => build_info_dialog(title, content),
+        DialogType::Keybindings => build_keybindings_dialog(palette),
+        DialogType::SessionPicker { sessions, selected } => {
+            build_session_picker(sessions, *selected, palette)
+        }
+        DialogType::Info { title, content } => build_info_dialog(title, content, palette),
     };
 
     let width = 64.min(area.width.saturating_sub(4));
@@ -91,8 +100,8 @@ pub fn render_dialog(frame: &mut Frame<'_>, dialog: &DialogState, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
-        .style(Style::default().bg(Color::Rgb(12, 16, 12)));
+        .border_style(Style::default().fg(palette.accent))
+        .style(Style::default().bg(palette.dialog_bg));
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(Clear, dialog_rect);
@@ -179,85 +188,103 @@ pub enum DialogAction {
     None,
 }
 
-fn build_help_dialog() -> Vec<Line<'static>> {
+fn build_help_dialog(palette: ThemePalette) -> Vec<Line<'static>> {
     let lines = vec![
         Line::from(vec![Span::styled(
             " ⌨ Kcode REPL 快捷键",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(palette.brand)
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(""),
         Line::from(vec![
-            Span::styled("  Enter", Style::default().fg(Color::Green)),
+            Span::styled("  Enter", Style::default().fg(palette.success)),
             Span::raw("          发送消息"),
         ]),
         Line::from(vec![
-            Span::styled("  Ctrl+C", Style::default().fg(Color::Red)),
+            Span::styled("  Ctrl+C", Style::default().fg(palette.error)),
             Span::raw("         中断请求"),
         ]),
         Line::from(vec![
-            Span::styled("  Ctrl+D", Style::default().fg(Color::Red)),
+            Span::styled("  Ctrl+D", Style::default().fg(palette.error)),
             Span::raw("         退出 REPL"),
         ]),
         Line::from(vec![
-            Span::styled("  Ctrl+R", Style::default().fg(Color::Yellow)),
+            Span::styled("  Ctrl+R", Style::default().fg(palette.warning)),
             Span::raw("         历史搜索"),
         ]),
         Line::from(vec![
-            Span::styled("  Ctrl+U", Style::default().fg(Color::Yellow)),
+            Span::styled("  Ctrl+U", Style::default().fg(palette.warning)),
             Span::raw("         清空输入"),
         ]),
         Line::from(vec![
-            Span::styled("  ↑/↓", Style::default().fg(Color::Yellow)),
+            Span::styled("  ↑/↓", Style::default().fg(palette.warning)),
             Span::raw("            历史导航"),
         ]),
         Line::from(vec![
-            Span::styled("  /", Style::default().fg(Color::Magenta)),
+            Span::styled("  /", Style::default().fg(palette.info)),
             Span::raw("              命令选择框"),
         ]),
         Line::from(vec![
-            Span::styled("  Tab", Style::default().fg(Color::Magenta)),
+            Span::styled("  Tab", Style::default().fg(palette.info)),
             Span::raw("            命令补全"),
         ]),
         Line::from(vec![
-            Span::styled("  F1", Style::default().fg(Color::Magenta)),
+            Span::styled("  F1", Style::default().fg(palette.info)),
             Span::raw("             显示此帮助"),
         ]),
         Line::from(vec![
-            Span::styled("  F2", Style::default().fg(Color::Magenta)),
+            Span::styled("  F2", Style::default().fg(palette.info)),
             Span::raw("             模型选择器"),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
             "  按 Esc 关闭",
-            Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(palette.text_muted)
+                .add_modifier(Modifier::DIM),
         )]),
     ];
     lines
 }
 
-fn build_keybindings_dialog() -> Vec<Line<'static>> {
-    build_help_dialog()
+fn build_keybindings_dialog(palette: ThemePalette) -> Vec<Line<'static>> {
+    build_help_dialog(palette)
 }
 
-fn build_model_picker(models: &[String], selected: usize) -> Vec<Line<'static>> {
+fn build_model_picker(
+    models: &[String],
+    selected: usize,
+    palette: ThemePalette,
+) -> Vec<Line<'static>> {
+    const MAX_VISIBLE_ROWS: usize = 8;
     let mut lines = vec![Line::from(vec![Span::styled(
         " 🤖 选择模型",
         Style::default()
-            .fg(Color::Cyan)
+            .fg(palette.accent)
             .add_modifier(Modifier::BOLD),
     )])];
     lines.push(Line::from(""));
 
-    for (i, model) in models.iter().enumerate() {
+    let (start, end) = visible_picker_bounds(models.len(), selected, MAX_VISIBLE_ROWS);
+    if !models.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            format!("  {}-{}/{}", start + 1, end, models.len()),
+            Style::default()
+                .fg(palette.text_muted)
+                .add_modifier(Modifier::DIM),
+        )]));
+        lines.push(Line::from(""));
+    }
+
+    for (offset, model) in models[start..end].iter().enumerate() {
+        let i = start + offset;
         let style = if i == selected {
             Style::default()
-                .fg(Color::Black)
-                .bg(Color::Green)
+                .fg(palette.accent)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::White)
+            Style::default().fg(palette.text)
         };
         let prefix = if i == selected { "▸ " } else { "  " };
         lines.push(Line::from(vec![Span::styled(
@@ -269,28 +296,46 @@ fn build_model_picker(models: &[String], selected: usize) -> Vec<Line<'static>> 
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
         "  ↑↓选择 · Enter确认 · Esc关闭",
-        Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
+        Style::default()
+            .fg(palette.text_muted)
+            .add_modifier(Modifier::DIM),
     )]));
     lines
 }
 
-fn build_session_picker(sessions: &[String], selected: usize) -> Vec<Line<'static>> {
+fn build_session_picker(
+    sessions: &[String],
+    selected: usize,
+    palette: ThemePalette,
+) -> Vec<Line<'static>> {
+    const MAX_VISIBLE_ROWS: usize = 8;
     let mut lines = vec![Line::from(vec![Span::styled(
         " 📋 选择会话",
         Style::default()
-            .fg(Color::Cyan)
+            .fg(palette.accent)
             .add_modifier(Modifier::BOLD),
     )])];
     lines.push(Line::from(""));
 
-    for (i, session) in sessions.iter().enumerate() {
+    let (start, end) = visible_picker_bounds(sessions.len(), selected, MAX_VISIBLE_ROWS);
+    if !sessions.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            format!("  {}-{}/{}", start + 1, end, sessions.len()),
+            Style::default()
+                .fg(palette.text_muted)
+                .add_modifier(Modifier::DIM),
+        )]));
+        lines.push(Line::from(""));
+    }
+
+    for (offset, session) in sessions[start..end].iter().enumerate() {
+        let i = start + offset;
         let style = if i == selected {
             Style::default()
-                .fg(Color::Black)
-                .bg(Color::Green)
+                .fg(palette.accent)
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::White)
+            Style::default().fg(palette.text)
         };
         let prefix = if i == selected { "▸ " } else { "  " };
         lines.push(Line::from(vec![Span::styled(
@@ -302,16 +347,18 @@ fn build_session_picker(sessions: &[String], selected: usize) -> Vec<Line<'stati
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
         "  ↑↓选择 · Enter确认 · Esc关闭",
-        Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
+        Style::default()
+            .fg(palette.text_muted)
+            .add_modifier(Modifier::DIM),
     )]));
     lines
 }
 
-fn build_info_dialog(title: &str, content: &str) -> Vec<Line<'static>> {
+fn build_info_dialog(title: &str, content: &str, palette: ThemePalette) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![Span::styled(
         format!(" ℹ {}", title),
         Style::default()
-            .fg(Color::Cyan)
+            .fg(palette.accent)
             .add_modifier(Modifier::BOLD),
     )])];
     lines.push(Line::from(""));
@@ -319,14 +366,28 @@ fn build_info_dialog(title: &str, content: &str) -> Vec<Line<'static>> {
     for line in content.lines().take(15) {
         lines.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled(line.to_string(), Style::default().fg(Color::Gray)),
+            Span::styled(line.to_string(), Style::default().fg(palette.text_muted)),
         ]));
     }
 
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
         "  按 Esc 关闭",
-        Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
+        Style::default()
+            .fg(palette.text_muted)
+            .add_modifier(Modifier::DIM),
     )]));
     lines
+}
+
+fn visible_picker_bounds(total: usize, selected: usize, rows: usize) -> (usize, usize) {
+    if total == 0 || rows == 0 {
+        return (0, 0);
+    }
+    let start = selected
+        .saturating_add(1)
+        .saturating_sub(rows)
+        .min(total.saturating_sub(rows));
+    let end = (start + rows).min(total);
+    (start, end)
 }

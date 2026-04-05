@@ -23,15 +23,13 @@ fn slash_command_category(name: &str) -> &'static str {
         | "export" | "plugin" | "branch" | "add-dir" | "files" | "hooks" | "release-notes" => {
             "Workspace & git"
         }
-        "agents" | "skills" | "debug-tool-call" | "mcp" | "context" | "tasks" | "doctor"
-        | "ide" | "desktop" => "Discovery & debugging",
-        "bughunter" | "review" | "security-review" | "advisor" | "insights" => {
-            "Analysis & automation"
-        }
+        "agents" | "skills" | "debug-tool-call" | "mcp" | "context" | "todos" | "doctor"
+        | "ide" | "desktop" | "powerup" | "schedule" | "loop" => "Discovery & debugging",
+        "review" | "security-review" | "advisor" | "insights" => "Analysis & automation",
         "theme" | "vim" | "voice" | "color" | "effort" | "fast" | "brief" | "output-style"
         | "keybindings" | "stickers" => "Appearance & input",
         "copy" | "share" | "feedback" | "summary" | "tag" | "thinkback" | "plan" | "exit"
-        | "upgrade" | "rewind" => "Communication & control",
+        | "upgrade" | "rewind" | "btw" | "bug" => "Communication & control",
         _ => "Other",
     }
 }

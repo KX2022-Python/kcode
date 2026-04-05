@@ -78,43 +78,57 @@ impl Section {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThemePreset {
-    Graphite,
-    Sunset,
+    Default,
     Amber,
     Ocean,
+    DarkHighContrast,
+    CatppuccinMocha,
+    Light,
 }
 
 impl ThemePreset {
-    pub const ALL: [Self; 4] = [Self::Graphite, Self::Sunset, Self::Amber, Self::Ocean];
+    pub const ALL: [Self; 6] = [
+        Self::Default,
+        Self::Amber,
+        Self::Ocean,
+        Self::CatppuccinMocha,
+        Self::DarkHighContrast,
+        Self::Light,
+    ];
 
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
-            Self::Graphite => "graphite",
-            Self::Sunset => "sunset",
+            Self::Default => "default",
             Self::Amber => "amber",
             Self::Ocean => "ocean",
+            Self::DarkHighContrast => "dark-hc",
+            Self::CatppuccinMocha => "catppuccin",
+            Self::Light => "light",
         }
     }
 
     #[must_use]
     pub fn parse(value: &str) -> Self {
         match value {
-            "graphite" => Self::Graphite,
-            "sunset" => Self::Sunset,
             "amber" => Self::Amber,
             "ocean" => Self::Ocean,
-            _ => Self::Graphite,
+            "dark-hc" => Self::DarkHighContrast,
+            "catppuccin" => Self::CatppuccinMocha,
+            "light" => Self::Light,
+            _ => Self::Default,
         }
     }
 
     #[must_use]
     pub fn next(self) -> Self {
         match self {
-            Self::Graphite => Self::Sunset,
-            Self::Sunset => Self::Amber,
+            Self::Default => Self::Amber,
             Self::Amber => Self::Ocean,
-            Self::Ocean => Self::Graphite,
+            Self::Ocean => Self::CatppuccinMocha,
+            Self::CatppuccinMocha => Self::DarkHighContrast,
+            Self::DarkHighContrast => Self::Light,
+            Self::Light => Self::Default,
         }
     }
 }
@@ -296,7 +310,7 @@ pub struct AppearanceSettings {
 impl Default for AppearanceSettings {
     fn default() -> Self {
         Self {
-            theme: ThemePreset::Graphite,
+            theme: ThemePreset::Default,
             redact_secrets: true,
             keybindings_hint: "default".to_string(),
         }

@@ -82,6 +82,28 @@
     }
 
     #[test]
+    fn resolve_effective_model_prefers_current_env_when_model_flag_is_absent() {
+        let _guard = env_lock();
+        let cwd = temp_dir();
+        std::fs::create_dir_all(&cwd).expect("cwd should exist");
+
+        let original_model = std::env::var("KCODE_MODEL").ok();
+        std::env::set_var("KCODE_MODEL", "gpt-5.4-mini");
+
+        let resolved = with_current_dir(&cwd, || {
+            super::resolve_effective_model(None).expect("model should resolve")
+        });
+
+        match original_model {
+            Some(value) => std::env::set_var("KCODE_MODEL", value),
+            None => std::env::remove_var("KCODE_MODEL"),
+        }
+        std::fs::remove_dir_all(&cwd).expect("temp cwd should clean up");
+
+        assert_eq!(resolved, "gpt-5.4-mini");
+    }
+
+    #[test]
     fn parses_prompt_subcommand() {
         let permission_mode = super::default_permission_mode();
         let args = vec![

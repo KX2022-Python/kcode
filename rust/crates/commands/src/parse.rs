@@ -46,7 +46,7 @@ pub fn validate_slash_command_input(
             validate_no_args(command, &args)?;
             SlashCommand::Compact
         }
-        "bughunter" => SlashCommand::Bughunter { scope: remainder },
+        "bug" | "bughunter" => SlashCommand::Bughunter { scope: remainder },
         "commit" => {
             validate_no_args(command, &args)?;
             SlashCommand::Commit
@@ -71,7 +71,7 @@ pub fn validate_slash_command_input(
             SlashCommand::Cost
         }
         "resume" => SlashCommand::Resume {
-            session_path: Some(require_remainder(command, remainder, "<session-path>")?),
+            session_path: remainder,
         },
         "config" => SlashCommand::Config {
             section: parse_config_section(&args)?,
@@ -98,6 +98,13 @@ pub fn validate_slash_command_input(
         "plugin" | "plugins" | "marketplace" => parse_plugin_command(&args)?,
         "agents" => SlashCommand::Agents {
             args: parse_list_or_help_args(command, remainder)?,
+        },
+        "powerup" => {
+            validate_no_args(command, &args)?;
+            SlashCommand::Powerup
+        }
+        "btw" => SlashCommand::Btw {
+            question: remainder,
         },
         "skills" => SlashCommand::Skills {
             args: parse_skills_args(remainder.as_deref())?,
@@ -154,6 +161,8 @@ pub fn validate_slash_command_input(
             validate_no_args(command, &args)?;
             SlashCommand::Desktop
         }
+        "schedule" => SlashCommand::Schedule { args: remainder },
+        "loop" => SlashCommand::Loop { args: remainder },
         "brief" => {
             validate_no_args(command, &args)?;
             SlashCommand::Brief
@@ -192,7 +201,7 @@ pub fn validate_slash_command_input(
         }
         "plan" => SlashCommand::Plan { mode: remainder },
         "review" => SlashCommand::Review { scope: remainder },
-        "tasks" => SlashCommand::Tasks { args: remainder },
+        "todos" | "tasks" => SlashCommand::Tasks { args: remainder },
         "theme" => SlashCommand::Theme { name: remainder },
         "voice" => SlashCommand::Voice { mode: remainder },
         "usage" => SlashCommand::Usage { scope: remainder },
@@ -234,14 +243,6 @@ fn optional_single_arg(
         [value] => Ok(Some((*value).to_string())),
         _ => Err(usage_error(command, argument_hint)),
     }
-}
-
-fn require_remainder(
-    command: &str,
-    remainder: Option<String>,
-    argument_hint: &str,
-) -> Result<String, SlashCommandParseError> {
-    remainder.ok_or_else(|| usage_error(command, argument_hint))
 }
 
 fn parse_permissions_mode(args: &[&str]) -> Result<Option<String>, SlashCommandParseError> {

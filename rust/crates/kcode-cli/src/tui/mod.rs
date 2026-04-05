@@ -1,7 +1,6 @@
 mod app;
 mod config_store;
 mod render;
-mod render_parts;
 pub(crate) mod repl;
 pub(crate) mod state;
 
@@ -90,6 +89,7 @@ pub fn run_repl<F>(
     session_id: String,
     permission_mode: String,
     profile_supports_tools: bool,
+    available_models: Vec<String>,
     welcome_messages: Vec<repl::RenderableMessage>,
     executor: F,
 ) -> Result<(), Box<dyn Error>>
@@ -102,7 +102,9 @@ where
         session_id,
         permission_mode,
         profile_supports_tools,
+        available_models,
         welcome_messages,
+        None,
         executor,
     )
 }

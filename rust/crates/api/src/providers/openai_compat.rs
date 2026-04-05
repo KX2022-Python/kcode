@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::time::Duration;
 
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use crate::error::ApiError;
 use crate::types::{
@@ -764,9 +764,66 @@ fn openai_tool_definition(tool: &ToolDefinition) -> Value {
         "function": {
             "name": tool.name,
             "description": tool.description,
-            "parameters": tool.input_schema,
+            "parameters": normalize_tool_parameters_schema(&tool.input_schema),
         }
     })
+}
+
+fn normalize_tool_parameters_schema(schema: &Value) -> Value {
+    match schema {
+        Value::Object(object) => {
+            let mut normalized = object
+                .iter()
+                .map(|(key, value)| (key.clone(), normalize_tool_parameters_schema(value)))
+                .collect::<Map<String, Value>>();
+
+            if declares_object_schema(object) {
+                ensure_object_schema_properties(&mut normalized);
+            }
+
+            Value::Object(normalized)
+        }
+        Value::Array(items) => {
+            Value::Array(items.iter().map(normalize_tool_parameters_schema).collect())
+        }
+        _ => schema.clone(),
+    }
+}
+
+fn ensure_object_schema_properties(normalized: &mut Map<String, Value>) {
+    match normalized.get_mut("properties") {
+        Some(Value::Object(properties)) if properties.is_empty() => {
+            properties.insert(
+                "__compat_placeholder".to_string(),
+                json!({
+                    "type": "string",
+                    "description": "Compatibility placeholder. Optional and ignored."
+                }),
+            );
+        }
+        None => {
+            normalized.insert(
+                "properties".to_string(),
+                json!({
+                    "__compat_placeholder": {
+                        "type": "string",
+                        "description": "Compatibility placeholder. Optional and ignored."
+                    }
+                }),
+            );
+        }
+        _ => {}
+    }
+}
+
+fn declares_object_schema(object: &Map<String, Value>) -> bool {
+    match object.get("type") {
+        Some(Value::String(kind)) => kind == "object",
+        Some(Value::Array(kinds)) => kinds
+            .iter()
+            .any(|kind| matches!(kind, Value::String(value) if value == "object")),
+        _ => false,
+    }
 }
 
 fn openai_tool_choice(tool_choice: &ToolChoice) -> Value {
@@ -1022,6 +1079,52 @@ mod tests {
         assert_eq!(payload["messages"][2]["role"], json!("tool"));
         assert_eq!(payload["tools"][0]["type"], json!("function"));
         assert_eq!(payload["tool_choice"], json!("auto"));
+        assert_eq!(
+            payload["tools"][0]["function"]["parameters"]["properties"],
+            json!({
+                "__compat_placeholder": {
+                    "type": "string",
+                    "description": "Compatibility placeholder. Optional and ignored."
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn object_tool_schemas_get_empty_properties_for_openai_compat() {
+        let payload = build_chat_completion_request(
+            &MessageRequest {
+                model: "gpt-5.4-mini".to_string(),
+                max_tokens: 64,
+                messages: vec![InputMessage::user_text("hello")],
+                system: None,
+                tools: Some(vec![ToolDefinition {
+                    name: "StructuredOutput".to_string(),
+                    description: Some("Return structured output.".to_string()),
+                    input_schema: json!({
+                        "type": "object",
+                        "additionalProperties": true
+                    }),
+                }]),
+                tool_choice: Some(ToolChoice::Auto),
+                stream: false,
+            },
+            OpenAiCompatConfig::kcode(),
+        );
+
+        assert_eq!(
+            payload["tools"][0]["function"]["parameters"],
+            json!({
+                "type": "object",
+                "properties": {
+                    "__compat_placeholder": {
+                        "type": "string",
+                        "description": "Compatibility placeholder. Optional and ignored."
+                    }
+                },
+                "additionalProperties": true
+            })
+        );
     }
 
     #[test]

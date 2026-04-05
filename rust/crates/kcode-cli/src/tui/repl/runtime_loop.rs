@@ -2,7 +2,9 @@ use std::error::Error;
 use std::io::{self, IsTerminal};
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -22,10 +24,9 @@ use super::prompt::{prompt_height, render_prompt_input};
 use super::state::{
     BackendResult, PermissionRequest, RenderableMessage, SessionState, SubmittedCommand, SysLevel,
 };
+use super::theme::ThemePreset;
 use super::tool_group::group_tool_calls;
 use super::ReplApp;
-
-const KCODE_BANNER: &str = "Kcode";
 
 pub(crate) fn default_welcome_messages(
     model: &str,
@@ -35,21 +36,42 @@ pub(crate) fn default_welcome_messages(
 ) -> Vec<RenderableMessage> {
     vec![
         RenderableMessage::AssistantText {
-            text: format!(
-                "{KCODE_BANNER}\n\
-  Model        {model}\n\
-  Profile      {profile}\n\
-  Permissions  {permission_mode}\n\
-  Session      {session_id}"
-            ),
+            text: render_welcome_banner(),
             streaming: false,
         },
         RenderableMessage::System {
-            message: "输入消息开始对话 · `/` 打开命令面板 · Shift+Enter 换行 · PgUp/PgDn 滚动"
-                .to_string(),
+            message: format!(
+                "{model} · {profile} · {permission_mode} · {}",
+                short_session_id(session_id)
+            ),
+            level: SysLevel::Info,
+        },
+        RenderableMessage::System {
+            message:
+                "Enter 发送消息 · Shift+Enter 换行 · `/` 打开命令面板 · /status 查看会话 · Ctrl+D 退出"
+                    .to_string(),
             level: SysLevel::Info,
         },
     ]
+}
+
+pub(crate) fn render_welcome_banner() -> String {
+    format!(
+        "Kcode v{}\n  Start a task, inspect the workspace, or press `/` to browse commands.\n  /help shows the full command surface and /resume latest jumps back into recent work.",
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
+pub(crate) fn short_session_id(session_id: &str) -> String {
+    const MAX_CHARS: usize = 24;
+    let count = session_id.chars().count();
+    if count <= MAX_CHARS {
+        return session_id.to_string();
+    }
+
+    let mut short = session_id.chars().take(MAX_CHARS - 1).collect::<String>();
+    short.push('…');
+    short
 }
 
 pub(crate) fn run_repl<F>(
@@ -58,7 +80,9 @@ pub(crate) fn run_repl<F>(
     session_id: String,
     permission_mode: String,
     profile_supports_tools: bool,
+    available_models: Vec<String>,
     welcome_messages: Vec<RenderableMessage>,
+    initial_theme: Option<ThemePreset>,
     mut executor: F,
 ) -> Result<(), Box<dyn Error>>
 where
@@ -74,12 +98,14 @@ where
         session_id,
         permission_mode,
         profile_supports_tools,
+        available_models,
         welcome_messages,
+        initial_theme,
     );
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     terminal.hide_cursor()?;
@@ -91,7 +117,11 @@ where
     let run_result = run_repl_loop(&mut terminal, &mut app, &mut executor);
 
     let _ = disable_raw_mode();
-    let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
+    let _ = execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    );
     let _ = terminal.show_cursor();
 
     run_result
@@ -113,6 +143,13 @@ where
             match event::read() {
                 Ok(Event::Key(key)) => {
                     app.handle_key(key);
+                    if app.pending_command.is_some() {
+                        terminal.draw(|frame| draw_frame(frame, app))?;
+                    }
+                    process_pending_command(app, executor);
+                }
+                Ok(Event::Mouse(mouse)) => {
+                    app.handle_mouse(mouse);
                     process_pending_command(app, executor);
                 }
                 Ok(Event::Resize(_, _)) => {
@@ -175,42 +212,45 @@ where
                 }
             }
         }
-        _ => {
-            app.add_message(RenderableMessage::User {
-                text: command.clone(),
-            });
-            app.set_state(SessionState::Requesting {
-                start: std::time::Instant::now(),
-            });
-            match executor(SubmittedCommand::Prompt(command)) {
-                Ok(result) => apply_backend_result(app, result),
-                Err(error) => {
-                    app.add_message(RenderableMessage::Error {
-                        message: error.clone(),
-                    });
-                    app.notify_warning(error);
-                    app.set_state(SessionState::Error {
-                        message: "prompt-error".to_string(),
-                    });
-                }
+        _ => match executor(SubmittedCommand::Prompt(command)) {
+            Ok(result) => apply_backend_result(app, result),
+            Err(error) => {
+                app.add_message(RenderableMessage::Error {
+                    message: error.clone(),
+                });
+                app.notify_warning(error);
+                app.set_state(SessionState::Error {
+                    message: "prompt-error".to_string(),
+                });
             }
-        }
+        },
     }
 }
 
 fn apply_backend_result(app: &mut ReplApp, result: BackendResult) {
-    for message in result.messages {
+    let BackendResult {
+        messages,
+        input_tokens,
+        output_tokens,
+        ui_state,
+    } = result;
+
+    for message in messages {
         app.add_message(message);
     }
 
-    if let Some(input_tokens) = result.input_tokens {
+    if let Some(ui_state) = ui_state {
+        app.sync_runtime_ui_state(ui_state);
+    }
+
+    if let Some(input_tokens) = input_tokens {
         app.usage_input_tokens += input_tokens;
     }
-    if let Some(output_tokens) = result.output_tokens {
+    if let Some(output_tokens) = output_tokens {
         app.usage_output_tokens += output_tokens;
     }
 
-    if result.input_tokens.is_some() || result.output_tokens.is_some() {
+    if input_tokens.is_some() || output_tokens.is_some() {
         app.footer_pills.token_usage = Some(super::footer_pills::TokenUsage {
             input_tokens: app.usage_input_tokens,
             output_tokens: app.usage_output_tokens,
@@ -249,48 +289,56 @@ fn draw_frame(frame: &mut ratatui::Frame<'_>, app: &mut ReplApp) {
                 &app.session_id,
                 &app.permission_mode_label,
                 app.state.label(),
+                app.palette,
             ),
             layout.header,
         );
     }
 
-    render_notifications(frame, &mut app.notifications, frame.area());
+    render_notifications(frame, &mut app.notifications, frame.area(), app.palette);
     render_messages(
         frame,
         &display_messages,
         layout.messages,
         &mut app.scroll_offset,
+        app.palette,
     );
 
     let input_active = !app.permission_pending
         && !app.dialog.is_active()
         && !app.history_search.active
         && !app.diff_viewer.visible;
-    render_prompt_input(frame, &app.input, layout.prompt, input_active);
-    render_slash_command_picker(frame, &app.picker, layout.prompt, frame.area());
-    render_dialog(frame, &app.dialog, frame.area());
-    render_diff_viewer(frame, &app.diff_viewer, frame.area());
+    render_prompt_input(frame, &app.input, layout.prompt, input_active, app.palette);
+    render_slash_command_picker(frame, &app.picker, layout.prompt, frame.area(), app.palette);
+    render_dialog(frame, &app.dialog, frame.area(), app.palette);
+    render_diff_viewer(frame, &app.diff_viewer, frame.area(), app.palette);
 
     if app.permission_pending {
         let request = PermissionRequest::new(
             "example_tool".to_string(),
             "这是一个演示权限请求".to_string(),
         );
-        render_permission_dialog(frame, &request, frame.area(), 0);
+        render_permission_dialog(frame, &request, frame.area(), 0, app.palette);
     }
 
     app.footer_pills.has_active_query = app.state.is_active();
     app.footer_pills.has_pending_permission = app.permission_pending;
     app.footer_pills.has_notifications = !app.notifications.is_empty();
     if layout.footer.height > 0 {
-        frame.render_widget(app.footer_pills.render(layout.footer.width), layout.footer);
+        frame.render_widget(
+            app.footer_pills.render(layout.footer.width, app.palette),
+            layout.footer,
+        );
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::ReplApp;
+    use super::{apply_backend_result, ReplApp};
+    use crate::tui::repl::messages::auto_scroll_to_bottom;
+    use crate::tui::repl::state::{BackendResult, RuntimeUiState};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::layout::Rect;
 
     #[test]
     fn slash_palette_follows_the_current_input() {
@@ -301,6 +349,8 @@ mod tests {
             "workspace-write".to_string(),
             true,
             Vec::new(),
+            Vec::new(),
+            None,
         );
 
         app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
@@ -319,6 +369,8 @@ mod tests {
             "workspace-write".to_string(),
             true,
             Vec::new(),
+            Vec::new(),
+            None,
         );
         app.message_area_height = 4;
         app.message_area_width = 24;
@@ -336,5 +388,129 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
         app.scroll_to_bottom();
         assert!(app.stick_to_bottom);
+    }
+
+    #[test]
+    fn backend_results_refresh_runtime_metadata_in_the_tui() {
+        let mut app = ReplApp::new(
+            "gpt-5.4-mini".to_string(),
+            "cliproxyapi".to_string(),
+            "session-1".to_string(),
+            "danger-full-access".to_string(),
+            true,
+            Vec::new(),
+            Vec::new(),
+            None,
+        );
+
+        apply_backend_result(
+            &mut app,
+            BackendResult {
+                ui_state: Some(RuntimeUiState {
+                    model: "gpt-5.4".to_string(),
+                    profile: "cliproxyapi".to_string(),
+                    session_id: "session-2".to_string(),
+                    permission_mode_label: "workspace-write".to_string(),
+                    profile_supports_tools: false,
+                }),
+                ..BackendResult::default()
+            },
+        );
+
+        assert_eq!(app.model, "gpt-5.4");
+        assert_eq!(app.session_id, "session-2");
+        assert_eq!(app.permission_mode_label, "workspace-write");
+        assert!(!app.profile_supports_tools);
+        assert_eq!(app.footer_pills.model, "gpt-5.4");
+        assert_eq!(app.footer_pills.session_id, "session-2");
+        assert_eq!(app.footer_pills.permission_mode, "workspace-write");
+    }
+
+    #[test]
+    fn resize_preserves_bottom_gap_for_manual_scroll_position() {
+        let mut app = ReplApp::new(
+            "gpt-4.1".to_string(),
+            "default".to_string(),
+            "session-1".to_string(),
+            "workspace-write".to_string(),
+            true,
+            Vec::new(),
+            Vec::new(),
+            None,
+        );
+
+        app.set_message_viewport(Rect {
+            x: 0,
+            y: 0,
+            width: 48,
+            height: 6,
+        });
+
+        for index in 0..12 {
+            app.add_message(crate::tui::repl::RenderableMessage::AssistantText {
+                text: format!("message-{index} abcdefghijklmnopqrstuvwxyz0123456789 你好世界"),
+                streaming: false,
+            });
+        }
+
+        app.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+        let initial_offset = app.scroll_offset;
+        let initial_gap = auto_scroll_to_bottom(
+            &app.messages,
+            app.message_area_height,
+            app.message_area_width,
+        )
+        .saturating_sub(app.scroll_offset);
+
+        app.set_message_viewport(Rect {
+            x: 0,
+            y: 0,
+            width: 20,
+            height: 6,
+        });
+        let narrow_gap = auto_scroll_to_bottom(
+            &app.messages,
+            app.message_area_height,
+            app.message_area_width,
+        )
+        .saturating_sub(app.scroll_offset);
+        assert_eq!(narrow_gap, initial_gap);
+
+        app.set_message_viewport(Rect {
+            x: 0,
+            y: 0,
+            width: 48,
+            height: 6,
+        });
+        assert_eq!(app.scroll_offset, initial_offset);
+    }
+
+    #[test]
+    fn enter_queues_user_prompt_before_executor_runs() {
+        let mut app = ReplApp::new(
+            "gpt-4.1".to_string(),
+            "default".to_string(),
+            "session-1".to_string(),
+            "workspace-write".to_string(),
+            true,
+            Vec::new(),
+            Vec::new(),
+            None,
+        );
+
+        for ch in "hello".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(
+            app.state,
+            crate::tui::repl::SessionState::Requesting { .. }
+        ));
+        assert_eq!(app.pending_command.as_deref(), Some("hello"));
+        assert!(matches!(
+            app.messages.last(),
+            Some(crate::tui::repl::RenderableMessage::User { text }) if text == "hello"
+        ));
     }
 }

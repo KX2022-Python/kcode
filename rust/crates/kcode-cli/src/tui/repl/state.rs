@@ -99,6 +99,16 @@ pub struct BackendResult {
     pub messages: Vec<RenderableMessage>,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
+    pub ui_state: Option<RuntimeUiState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeUiState {
+    pub model: String,
+    pub profile: String,
+    pub session_id: String,
+    pub permission_mode_label: String,
+    pub profile_supports_tools: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

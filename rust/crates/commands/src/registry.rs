@@ -19,8 +19,10 @@ pub(crate) fn find_slash_command_spec(name: &str) -> Option<&'static SlashComman
 
 fn session_command_kind(name: &str) -> CommandKind {
     match name {
-        "help" | "context" => CommandKind::Prompt,
-        "plan" | "tasks" | "vim" | "theme" | "voice" | "ide" | "desktop" => CommandKind::LocalUi,
+        "help" | "context" | "btw" => CommandKind::Prompt,
+        "plan" | "todos" | "vim" | "theme" | "voice" | "ide" | "desktop" | "powerup" => {
+            CommandKind::LocalUi
+        }
         _ => CommandKind::Local,
     }
 }
@@ -33,31 +35,7 @@ fn process_command_kind(name: &str) -> CommandKind {
 }
 
 fn session_command_enabled(name: &str) -> bool {
-    matches!(
-        name,
-        "help"
-            | "status"
-            | "sandbox"
-            | "compact"
-            | "model"
-            | "permissions"
-            | "clear"
-            | "cost"
-            | "resume"
-            | "config"
-            | "mcp"
-            | "memory"
-            | "init"
-            | "diff"
-            | "version"
-            | "export"
-            | "session"
-            | "plugin"
-            | "agents"
-            | "skills"
-            | "doctor"
-            | "add-dir"
-    )
+    !matches!(name, "logout")
 }
 
 fn process_command_enabled(name: &str) -> bool {

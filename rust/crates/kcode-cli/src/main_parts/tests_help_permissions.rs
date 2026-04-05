@@ -258,7 +258,7 @@ supports_streaming = false
             names,
             vec![
                 "help", "status", "sandbox", "compact", "clear", "cost", "config", "mcp", "memory",
-                "init", "diff", "version", "export", "agents", "skills", "doctor",
+                "init", "diff", "version", "export", "agents", "skills", "doctor", "todos",
             ]
         );
     }

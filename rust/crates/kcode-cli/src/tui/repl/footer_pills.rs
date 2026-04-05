@@ -2,6 +2,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
+use super::theme::ThemePalette;
+
 pub struct FooterPills {
     pub model: String,
     pub permission_mode: String,
@@ -31,47 +33,73 @@ impl FooterPills {
         }
     }
 
-    pub fn render(&self, width: u16) -> Paragraph<'static> {
-        let mut spans = vec![pill("Tab", "commands", Color::Cyan)];
-        spans.push(Span::raw(" "));
-        spans.push(pill("Shift+Enter", "newline", Color::Gray));
+    pub fn render(&self, width: u16, palette: ThemePalette) -> Paragraph<'static> {
+        let mut spans = vec![hint("Enter", "send", palette.text_muted)];
+        spans.push(separator(palette));
+        spans.push(hint("Shift+Enter", "newline", palette.text_muted));
 
-        if width >= 100 {
-            spans.push(Span::raw(" "));
-            spans.push(pill("PgUp/PgDn", "scroll", Color::Gray));
+        if width >= 84 {
+            spans.push(separator(palette));
+            spans.push(hint("/", "commands", palette.info));
+        }
+
+        if width >= 114 {
+            spans.push(separator(palette));
+            spans.push(hint("Ctrl+R", "history", palette.text_muted));
+        }
+
+        if width >= 142 {
+            spans.push(separator(palette));
+            spans.push(hint("PgUp/PgDn", "scroll", palette.text_muted));
+        }
+
+        if width >= 166 {
+            spans.push(separator(palette));
+            spans.push(hint("Ctrl+D", "exit", palette.text_muted));
+        }
+
+        if self.has_active_query {
+            spans.push(separator(palette));
+            spans.push(Span::styled(
+                "processing",
+                Style::default().fg(palette.accent),
+            ));
+        }
+
+        if self.has_pending_permission {
+            spans.push(separator(palette));
+            spans.push(Span::styled(
+                "waiting permission",
+                Style::default().fg(palette.warning),
+            ));
+        }
+        if self.has_notifications {
+            spans.push(separator(palette));
+            spans.push(Span::styled("notice", Style::default().fg(palette.error)));
         }
 
         if let Some(usage) = &self.token_usage {
-            if width >= 130 {
-                spans.push(Span::raw(" "));
-                spans.push(pill(
+            if width >= 170 {
+                spans.push(separator(palette));
+                spans.push(hint(
                     "tokens",
                     &format!("{} in / {} out", usage.input_tokens, usage.output_tokens),
-                    Color::Yellow,
+                    palette.text_muted,
                 ));
             }
         }
 
-        if self.has_active_query {
-            spans.push(Span::raw(" "));
-            spans.push(pill("state", "processing", Color::Magenta));
-        }
-        if self.has_pending_permission {
-            spans.push(Span::raw(" "));
-            spans.push(pill("state", "permission", Color::Yellow));
-        }
-        if self.has_notifications {
-            spans.push(Span::raw(" "));
-            spans.push(pill("state", "notice", Color::Red));
-        }
-
-        Paragraph::new(vec![Line::from(spans)]).style(Style::default().bg(Color::Rgb(18, 28, 20)))
+        Paragraph::new(vec![Line::from(spans)]).style(Style::default().bg(palette.panel_bg))
     }
 }
 
-fn pill(label: &str, value: &str, color: Color) -> Span<'static> {
+fn hint(label: &str, value: &str, color: Color) -> Span<'static> {
     Span::styled(
-        format!("{label}:{value}"),
+        format!("{label} {value}"),
         Style::default().fg(color).add_modifier(Modifier::DIM),
     )
+}
+
+fn separator(palette: ThemePalette) -> Span<'static> {
+    Span::styled("  ·  ", Style::default().fg(palette.text_muted))
 }

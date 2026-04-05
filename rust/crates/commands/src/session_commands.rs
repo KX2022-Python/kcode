@@ -63,6 +63,8 @@ pub fn handle_slash_command(
         | SlashCommand::Plugins { .. }
         | SlashCommand::Agents { .. }
         | SlashCommand::Skills { .. }
+        | SlashCommand::Powerup
+        | SlashCommand::Btw { .. }
         | SlashCommand::Doctor
         | SlashCommand::Login
         | SlashCommand::Logout
@@ -76,6 +78,8 @@ pub fn handle_slash_command(
         | SlashCommand::Exit
         | SlashCommand::Summary
         | SlashCommand::Desktop
+        | SlashCommand::Schedule { .. }
+        | SlashCommand::Loop { .. }
         | SlashCommand::Brief
         | SlashCommand::Advisor
         | SlashCommand::Stickers

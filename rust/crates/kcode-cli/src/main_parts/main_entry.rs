@@ -37,7 +37,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             model_explicit,
             profile,
             fix,
-        } => print_doctor(model_explicit.then_some(model.as_str()), profile.as_deref(), fix)?,
+        } => print_doctor(
+            model_explicit.then_some(model.as_str()),
+            profile.as_deref(),
+            fix,
+        )?,
         CliAction::ConfigShow {
             section,
             model,
@@ -73,12 +77,19 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             model_explicit,
             profile,
             permission_mode,
-        } => print_status_snapshot(
-            &model,
-            model_explicit.then_some(model.as_str()),
-            profile.as_deref(),
-            permission_mode,
-        )?,
+        } => {
+            let model = if model_explicit {
+                model
+            } else {
+                resolve_effective_model(profile.as_deref())?
+            };
+            print_status_snapshot(
+                &model,
+                model_explicit.then_some(model.as_str()),
+                profile.as_deref(),
+                permission_mode,
+            )?
+        }
         CliAction::Sandbox => print_sandbox_status_snapshot()?,
         CliAction::Prompt {
             prompt,
@@ -88,16 +99,23 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             output_format,
             allowed_tools,
             permission_mode,
-        } => LiveCli::new(
-            model,
-            model_explicit,
-            profile,
-            true,
-            allowed_tools,
-            permission_mode,
-            None,
-        )?
-        .run_turn_with_output(&prompt, output_format)?,
+        } => {
+            let model = if model_explicit {
+                model
+            } else {
+                resolve_effective_model(profile.as_deref())?
+            };
+            LiveCli::new(
+                model,
+                model_explicit,
+                profile,
+                true,
+                allowed_tools,
+                permission_mode,
+                None,
+            )?
+            .run_turn_with_output(&prompt, output_format)?
+        }
         CliAction::Login => run_login()?,
         CliAction::Logout => run_logout()?,
         CliAction::Init => run_init()?,
@@ -108,37 +126,53 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             profile,
             allowed_tools,
             permission_mode,
-        } => run_repl(
-            model,
-            model_explicit,
-            profile,
-            allowed_tools,
-            permission_mode,
-        )?,
+        } => {
+            let model = if model_explicit {
+                model
+            } else {
+                resolve_effective_model(profile.as_deref())?
+            };
+            run_repl(
+                model,
+                model_explicit,
+                profile,
+                allowed_tools,
+                permission_mode,
+            )?
+        }
         CliAction::ReplTui {
             model,
             model_explicit,
             profile,
             allowed_tools,
             permission_mode,
-        } => run_repl_tui(
-            model,
-            model_explicit,
-            profile,
-            allowed_tools,
-            permission_mode,
-        )?,
+        } => {
+            let model = if model_explicit {
+                model
+            } else {
+                resolve_effective_model(profile.as_deref())?
+            };
+            run_repl_tui(
+                model,
+                model_explicit,
+                profile,
+                allowed_tools,
+                permission_mode,
+            )?
+        }
         CliAction::Bridge {
             model,
             model_explicit,
             profile,
             permission_mode,
-        } => run_bridge(
-            model,
-            model_explicit,
-            profile,
-            permission_mode,
-        )?,
+        } => {
+            let model = if model_explicit {
+                model
+            } else {
+                resolve_effective_model(profile.as_deref())?
+            };
+            run_bridge(model, model_explicit, profile, permission_mode)?
+        }
         CliAction::Help { profile } => print_help(profile.as_deref()),
     }
     Ok(())
@@ -246,6 +280,11 @@ fn run_repl_tui(
     allowed_tools: Option<AllowedToolSet>,
     permission_mode: PermissionMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let cwd = env::current_dir()?;
+    let bootstrap_theme = match tui::repl::run_bootstrap_flow(&cwd)? {
+        tui::repl::BootstrapDecision::Continue { theme } => theme,
+        tui::repl::BootstrapDecision::Exit => return Ok(()),
+    };
     let mut cli = LiveCli::new(
         model,
         model_explicit,
@@ -261,6 +300,7 @@ fn run_repl_tui(
     let session_id = cli.session.id.clone();
     let permission_label = cli.permission_mode.as_str().to_string();
     let model = cli.model.clone();
+    let available_models = cli.tui_model_candidates();
 
     tui::repl::run_repl(
         model,
@@ -268,14 +308,26 @@ fn run_repl_tui(
         session_id,
         permission_label,
         profile_supports_tools,
+        available_models,
         welcome_messages,
-        move |command| match command {
-            tui::repl::SubmittedCommand::Prompt(prompt) => cli
-                .run_turn_tui(&prompt)
-                .map_err(|error| error.to_string()),
-            tui::repl::SubmittedCommand::Slash(command) => cli
-                .handle_tui_command(&command)
-                .map_err(|error| error.to_string()),
+        Some(bootstrap_theme),
+        move |command| {
+            let mut result = match command {
+                tui::repl::SubmittedCommand::Prompt(prompt) => cli
+                    .run_turn_tui(&prompt)
+                    .map_err(|error| error.to_string())?,
+                tui::repl::SubmittedCommand::Slash(command) => cli
+                    .handle_tui_command(&command)
+                    .map_err(|error| error.to_string())?,
+            };
+            result.ui_state = Some(tui::repl::RuntimeUiState {
+                model: cli.model.clone(),
+                profile: cli.active_profile.profile_name.clone(),
+                session_id: cli.session.id.clone(),
+                permission_mode_label: cli.permission_mode.as_str().to_string(),
+                profile_supports_tools: cli.active_profile.profile.supports_tools,
+            });
+            Ok(result)
         },
     )
 }

@@ -195,3 +195,147 @@ fn render_resume_usage() -> String {
   Tip              use /session list to inspect saved sessions"
     )
 }
+
+fn format_powerup_report() -> String {
+    "Powerup
+  Guided lessons   /model, /permissions, /mcp, /todos, /branch
+  Workflow         start with /status, then /model and /permissions
+  Tips             use `/` to open the command palette and Shift+Tab to cycle mode"
+        .to_string()
+}
+
+fn render_btw_usage() -> String {
+    "BTW
+  Usage            /btw <question>
+  Behavior         answer a side question without writing it into the active session history
+  Example          /btw what changed between async fn and spawn_blocking?"
+        .to_string()
+}
+
+fn format_bug_report(description: Option<&str>, session_id: &str, session_path: &std::path::Path) -> String {
+    format!(
+        "Bug report
+  Description      {}
+  Session          {session_id}
+  Transcript       {}
+  Scope            local-only diagnostic export
+  Next step        use /export if you want a shareable transcript copy",
+        description.unwrap_or("not provided"),
+        session_path.display(),
+    )
+}
+
+fn format_feedback_report(description: Option<&str>) -> String {
+    format!(
+        "Feedback
+  Summary          {}
+  Scope            local Kcode feedback note
+  Next step        include concrete steps, expected behavior, and actual behavior for triage",
+        description.unwrap_or("not provided"),
+    )
+}
+
+fn format_login_report(profile: &str, model: &str) -> String {
+    format!(
+        "Profiles
+  Active profile   {profile}
+  Active model     {model}
+  Auth model       Kcode uses local profile and environment configuration instead of Claude account login
+  Next step        run /config model or /doctor to inspect endpoint and credential wiring",
+    )
+}
+
+fn format_desktop_report() -> String {
+    "Desktop
+  Status           no dedicated desktop handoff is configured in this build
+  Alternative      keep using the fullscreen TUI, /diff, and /export for review workflows"
+        .to_string()
+}
+
+fn format_schedule_report(args: Option<&str>) -> String {
+    match args.map(str::trim).filter(|value| !value.is_empty()) {
+        None | Some("list") => "Schedule
+  Usage            /schedule list
+  Usage            /schedule create <cron> <prompt>
+  Usage            /schedule delete <id>
+  Status           scheduled task management is exposed through CronCreate/CronList/CronDelete tools"
+            .to_string(),
+        Some(other) => format!(
+            "Schedule
+  Requested        {other}
+  Usage            /schedule list
+  Usage            /schedule create <cron> <prompt>
+  Usage            /schedule delete <id>"
+        ),
+    }
+}
+
+fn format_loop_report(args: Option<&str>) -> String {
+    match args.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => format!(
+            "Loop
+  Requested        {value}
+  Status           loop execution is not yet automated in the TUI shell
+  Tip              use /schedule for recurring jobs or ask Kcode to create a watcher script"
+        ),
+        None => "Loop
+  Usage            /loop <interval> <prompt>
+  Example          /loop 5m run tests
+  Example          /loop 30m check build status"
+            .to_string(),
+    }
+}
+
+fn render_todos_report(cwd: &std::path::Path) -> Result<String, Box<dyn std::error::Error>> {
+    let store_path = cwd.join(".clawd-todos.json");
+    if !store_path.exists() {
+        return Ok(format!(
+            "Todos
+  Store            {}
+  Status           no todo list recorded yet
+  Source           TodoWrite tool populates this file during longer tasks",
+            store_path.display()
+        ));
+    }
+
+    let raw = std::fs::read_to_string(&store_path)?;
+    let todos = serde_json::from_str::<Vec<serde_json::Value>>(&raw)?;
+    let mut lines = vec![
+        "Todos".to_string(),
+        format!("  Store            {}", store_path.display()),
+    ];
+
+    for (index, todo) in todos.iter().enumerate() {
+        let status = todo
+            .get("status")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("unknown");
+        let marker = match status {
+            "completed" => "[x]",
+            "in_progress" => "[~]",
+            _ => "[ ]",
+        };
+        let content = todo
+            .get("content")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("(missing content)");
+        let active_form = todo
+            .get("activeForm")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("-");
+        lines.push(format!(
+            "  {index:>2}. {marker} {content}  status={status}  active={active_form}",
+            index = index + 1
+        ));
+    }
+
+    Ok(lines.join("\n"))
+}
+
+fn format_command_not_ready(command: &str, detail: &str) -> String {
+    format!(
+        "{command}
+  Status           command shape is available in Kcode, but this flow is not fully implemented yet
+  Detail           {detail}"
+    )
+}

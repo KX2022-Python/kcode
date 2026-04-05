@@ -5,9 +5,15 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 use super::notifications::{Notification, NotificationPriority, NotificationQueue};
+use super::theme::ThemePalette;
 
 /// 渲染通知栏 — 对齐 CC-Haha Notifications.tsx 单行绝对定位
-pub fn render_notifications(frame: &mut Frame<'_>, queue: &mut NotificationQueue, area: Rect) {
+pub fn render_notifications(
+    frame: &mut Frame<'_>,
+    queue: &mut NotificationQueue,
+    area: Rect,
+    palette: ThemePalette,
+) {
     // 清理过期通知
     queue.cleanup();
 
@@ -19,7 +25,7 @@ pub fn render_notifications(frame: &mut Frame<'_>, queue: &mut NotificationQueue
     // 只显示最高优先级的通知
     if let Some(notification) = active.first() {
         let n = *notification;
-        let notif_area = render_single_notification(frame, n, area);
+        let notif_area = render_single_notification(frame, n, area, palette);
         // 3s 后自动dismiss
         if n.is_expired() {
             queue.dismiss(n.id);
@@ -31,27 +37,30 @@ fn render_single_notification(
     frame: &mut Frame<'_>,
     notification: &Notification,
     area: Rect,
+    palette: ThemePalette,
 ) -> Rect {
     let (icon, text_color, border_color) = match notification.priority {
         NotificationPriority::Low => (
             "ℹ",
-            Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
-            Color::Gray,
+            Style::default()
+                .fg(palette.text_muted)
+                .add_modifier(Modifier::DIM),
+            palette.text_muted,
         ),
-        NotificationPriority::Medium => ("●", Style::default().fg(Color::Cyan), Color::Cyan),
+        NotificationPriority::Medium => ("●", Style::default().fg(palette.info), palette.info),
         NotificationPriority::High => (
             "★",
             Style::default()
-                .fg(Color::Green)
+                .fg(palette.success)
                 .add_modifier(Modifier::BOLD),
-            Color::Green,
+            palette.success,
         ),
         NotificationPriority::Immediate => (
             "⚠",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(palette.warning)
                 .add_modifier(Modifier::BOLD),
-            Color::Yellow,
+            palette.warning,
         ),
     };
 
@@ -64,7 +73,7 @@ fn render_single_notification(
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color))
-        .style(Style::default().bg(Color::Rgb(18, 18, 18)));
+        .style(Style::default().bg(palette.dialog_bg));
 
     let paragraph = Paragraph::new(lines).block(block);
 

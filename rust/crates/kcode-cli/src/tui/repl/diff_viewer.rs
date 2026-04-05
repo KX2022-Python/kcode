@@ -6,6 +6,8 @@ use ratatui::Frame;
 
 use crossterm::event::{KeyCode, KeyEvent};
 
+use super::theme::ThemePalette;
+
 /// 简单 Diff 查看器 — 对齐 CC-Haha DiffDialog
 pub struct DiffViewer {
     pub visible: bool,
@@ -75,7 +77,12 @@ impl DiffViewer {
     }
 }
 
-pub fn render_diff_viewer(frame: &mut Frame<'_>, viewer: &DiffViewer, area: Rect) {
+pub fn render_diff_viewer(
+    frame: &mut Frame<'_>,
+    viewer: &DiffViewer,
+    area: Rect,
+    palette: ThemePalette,
+) {
     if !viewer.visible {
         return;
     }
@@ -96,7 +103,7 @@ pub fn render_diff_viewer(frame: &mut Frame<'_>, viewer: &DiffViewer, area: Rect
         Line::from(vec![Span::styled(
             format!(" 📄 {} ", viewer.file_path),
             Style::default()
-                .fg(Color::Cyan)
+                .fg(palette.accent)
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(""),
@@ -109,21 +116,21 @@ pub fn render_diff_viewer(frame: &mut Frame<'_>, viewer: &DiffViewer, area: Rect
     for diff_line in &viewer.diff_lines[start..end] {
         let line = match diff_line {
             DiffLine::Added(text) => Line::from(vec![
-                Span::styled("+ ", Style::default().fg(Color::Green)),
-                Span::styled(text.clone(), Style::default().fg(Color::Green)),
+                Span::styled("+ ", Style::default().fg(palette.success)),
+                Span::styled(text.clone(), Style::default().fg(palette.success)),
             ]),
             DiffLine::Removed(text) => Line::from(vec![
-                Span::styled("- ", Style::default().fg(Color::Red)),
-                Span::styled(text.clone(), Style::default().fg(Color::Red)),
+                Span::styled("- ", Style::default().fg(palette.error)),
+                Span::styled(text.clone(), Style::default().fg(palette.error)),
             ]),
             DiffLine::Context(text) => Line::from(vec![
                 Span::styled("  ", Style::default()),
-                Span::styled(text.clone(), Style::default().fg(Color::Gray)),
+                Span::styled(text.clone(), Style::default().fg(palette.text_muted)),
             ]),
             DiffLine::Header(text) => Line::from(vec![Span::styled(
                 text.clone(),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(palette.warning)
                     .add_modifier(Modifier::BOLD),
             )]),
         };
@@ -133,13 +140,15 @@ pub fn render_diff_viewer(frame: &mut Frame<'_>, viewer: &DiffViewer, area: Rect
     lines.push(Line::from(""));
     lines.push(Line::from(vec![Span::styled(
         "  ↑↓滚动 · Esc关闭",
-        Style::default().fg(Color::Gray).add_modifier(Modifier::DIM),
+        Style::default()
+            .fg(palette.text_muted)
+            .add_modifier(Modifier::DIM),
     )]));
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
-        .style(Style::default().bg(Color::Rgb(12, 12, 18)));
+        .border_style(Style::default().fg(palette.accent))
+        .style(Style::default().bg(palette.dialog_bg));
 
     let paragraph = Paragraph::new(lines).block(block);
     frame.render_widget(Clear, viewer_rect);
