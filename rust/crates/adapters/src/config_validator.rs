@@ -30,6 +30,10 @@ pub fn validate_bridge_config() -> Vec<EnvError> {
         .ok()
         .map(|v| !v.is_empty())
         .unwrap_or(false);
+    let webhook_url = env::var("KCODE_WEBHOOK_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
 
     if !telegram_set && !whatsapp_set && !feishu_set {
         errors.push(EnvError {
@@ -46,6 +50,41 @@ pub fn validate_bridge_config() -> Vec<EnvError> {
             errors.push(EnvError {
                 var_name: "KCODE_TELEGRAM_BOT_TOKEN".to_string(),
                 message: "Invalid format. Expected '<bot_id>:<hash>'".to_string(),
+            });
+        }
+    }
+
+    if let Some(webhook) = webhook_url.as_deref() {
+        if !telegram_set {
+            errors.push(EnvError {
+                var_name: "KCODE_WEBHOOK_URL".to_string(),
+                message:
+                    "Webhook URL only applies to Telegram bridge mode. Set KCODE_TELEGRAM_BOT_TOKEN or remove KCODE_WEBHOOK_URL."
+                        .to_string(),
+            });
+        }
+        if !webhook.starts_with("https://") {
+            errors.push(EnvError {
+                var_name: "KCODE_WEBHOOK_URL".to_string(),
+                message:
+                    "Telegram webhook URL must use a public HTTPS endpoint. Unset KCODE_WEBHOOK_URL to use long polling."
+                        .to_string(),
+            });
+        }
+        if webhook.contains("localhost") || webhook.contains("127.0.0.1") {
+            errors.push(EnvError {
+                var_name: "KCODE_WEBHOOK_URL".to_string(),
+                message:
+                    "Telegram webhook URL must be publicly reachable and cannot point at localhost or 127.0.0.1."
+                        .to_string(),
+            });
+        }
+        if !webhook.ends_with("/webhook/telegram") {
+            errors.push(EnvError {
+                var_name: "KCODE_WEBHOOK_URL".to_string(),
+                message:
+                    "Telegram webhook URL should end with /webhook/telegram to match the built-in local receiver."
+                        .to_string(),
             });
         }
     }
@@ -125,8 +164,76 @@ pub fn print_config_summary() {
         println!("  Model: {}", model);
     }
     if let Ok(webhook) = env::var("KCODE_WEBHOOK_URL") {
-        println!("  Webhook: {}", webhook);
+        println!("  Telegram Delivery: Webhook via external HTTPS ingress");
+        println!("  Webhook URL: {}", webhook);
+        println!("  Local Receiver: http://0.0.0.0:3000/webhook/telegram");
     } else {
-        println!("  Webhook: Using Long Polling");
+        println!("  Telegram Delivery: Long Polling (no public webhook URL configured)");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_bridge_config;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn clear_bridge_env() {
+        for key in [
+            "KCODE_TELEGRAM_BOT_TOKEN",
+            "KCODE_WHATSAPP_PHONE_ID",
+            "KCODE_WHATSAPP_TOKEN",
+            "KCODE_FEISHU_APP_ID",
+            "KCODE_FEISHU_APP_SECRET",
+            "KCODE_WEBHOOK_URL",
+        ] {
+            std::env::remove_var(key);
+        }
+    }
+
+    #[test]
+    fn rejects_non_public_telegram_webhook_urls() {
+        let _guard = env_lock();
+        clear_bridge_env();
+        std::env::set_var("KCODE_TELEGRAM_BOT_TOKEN", "123456:test-token");
+        std::env::set_var(
+            "KCODE_WEBHOOK_URL",
+            "http://localhost:3000/webhook/telegram",
+        );
+
+        let errors = validate_bridge_config();
+
+        assert!(errors.iter().any(|error| {
+            error.var_name == "KCODE_WEBHOOK_URL" && error.message.contains("public HTTPS")
+        }));
+        assert!(errors.iter().any(|error| {
+            error.var_name == "KCODE_WEBHOOK_URL" && error.message.contains("localhost")
+        }));
+
+        clear_bridge_env();
+    }
+
+    #[test]
+    fn rejects_webhook_url_without_telegram_channel() {
+        let _guard = env_lock();
+        clear_bridge_env();
+        std::env::set_var("KCODE_WHATSAPP_PHONE_ID", "12345");
+        std::env::set_var("KCODE_WHATSAPP_TOKEN", "wa-token");
+        std::env::set_var("KCODE_WEBHOOK_URL", "https://example.com/webhook/telegram");
+
+        let errors = validate_bridge_config();
+
+        assert!(errors.iter().any(|error| {
+            error.var_name == "KCODE_WEBHOOK_URL"
+                && error.message.contains("only applies to Telegram")
+        }));
+
+        clear_bridge_env();
     }
 }

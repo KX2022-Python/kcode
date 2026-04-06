@@ -81,6 +81,9 @@ pub fn validate_slash_command_input(
             validate_no_args(command, &args)?;
             SlashCommand::Memory
         }
+        "dream" => SlashCommand::Dream {
+            mode: parse_dream_mode(&args)?,
+        },
         "init" => {
             validate_no_args(command, &args)?;
             SlashCommand::Init
@@ -199,7 +202,9 @@ pub fn validate_slash_command_input(
             validate_no_args(command, &args)?;
             SlashCommand::PrivacySettings
         }
-        "plan" => SlashCommand::Plan { mode: remainder },
+        "plan" => SlashCommand::Plan {
+            mode: parse_plan_mode(&args)?,
+        },
         "review" => SlashCommand::Review { scope: remainder },
         "todos" | "tasks" => SlashCommand::Tasks { args: remainder },
         "theme" => SlashCommand::Theme { name: remainder },
@@ -249,21 +254,55 @@ fn parse_permissions_mode(args: &[&str]) -> Result<Option<String>, SlashCommandP
     let mode = optional_single_arg(
         "permissions",
         args,
-        "[read-only|workspace-write|danger-full-access]",
+        "[read-only|plan|workspace-write|danger-full-access]",
     )?;
     if let Some(mode) = mode {
         if matches!(
             mode.as_str(),
-            "read-only" | "workspace-write" | "danger-full-access"
+            "read-only" | "plan" | "workspace-write" | "danger-full-access"
         ) {
             return Ok(Some(mode));
         }
         return Err(command_error(
             &format!(
-                "Unsupported /permissions mode '{mode}'. Use read-only, workspace-write, or danger-full-access."
+                "Unsupported /permissions mode '{mode}'. Use read-only, plan, workspace-write, or danger-full-access."
             ),
             "permissions",
-            "/permissions [read-only|workspace-write|danger-full-access]",
+            "/permissions [read-only|plan|workspace-write|danger-full-access]",
+        ));
+    }
+
+    Ok(None)
+}
+
+fn parse_dream_mode(args: &[&str]) -> Result<Option<String>, SlashCommandParseError> {
+    let mode = optional_single_arg("dream", args, "[on|off|status]")?;
+    if let Some(mode) = mode {
+        if matches!(mode.as_str(), "on" | "off" | "status") {
+            return Ok(Some(mode));
+        }
+
+        return Err(command_error(
+            &format!("Unsupported /dream mode '{mode}'. Use on, off, or status."),
+            "dream",
+            "/dream [on|off|status]",
+        ));
+    }
+
+    Ok(None)
+}
+
+fn parse_plan_mode(args: &[&str]) -> Result<Option<String>, SlashCommandParseError> {
+    let mode = optional_single_arg("plan", args, "[on|off|status]")?;
+    if let Some(mode) = mode {
+        if matches!(mode.as_str(), "on" | "off" | "status") {
+            return Ok(Some(mode));
+        }
+
+        return Err(command_error(
+            &format!("Unsupported /plan mode '{mode}'. Use on, off, or status."),
+            "plan",
+            "/plan [on|off|status]",
         ));
     }
 

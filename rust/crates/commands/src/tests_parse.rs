@@ -56,6 +56,12 @@ fn parses_supported_slash_commands() {
         }))
     );
     assert_eq!(
+        SlashCommand::parse("/permissions plan"),
+        Ok(Some(SlashCommand::Permissions {
+            mode: Some("plan".to_string()),
+        }))
+    );
+    assert_eq!(
         SlashCommand::parse("/clear"),
         Ok(Some(SlashCommand::Clear { confirm: false }))
     );
@@ -97,6 +103,26 @@ fn parses_supported_slash_commands() {
     assert_eq!(
         SlashCommand::parse("/memory"),
         Ok(Some(SlashCommand::Memory))
+    );
+    assert_eq!(
+        SlashCommand::parse("/dream"),
+        Ok(Some(SlashCommand::Dream { mode: None }))
+    );
+    assert_eq!(
+        SlashCommand::parse("/dream off"),
+        Ok(Some(SlashCommand::Dream {
+            mode: Some("off".to_string())
+        }))
+    );
+    assert_eq!(
+        SlashCommand::parse("/plan"),
+        Ok(Some(SlashCommand::Plan { mode: None }))
+    );
+    assert_eq!(
+        SlashCommand::parse("/plan off"),
+        Ok(Some(SlashCommand::Plan {
+            mode: Some("off".to_string())
+        }))
     );
     assert_eq!(SlashCommand::parse("/init"), Ok(Some(SlashCommand::Init)));
     assert_eq!(SlashCommand::parse("/diff"), Ok(Some(SlashCommand::Diff)));
@@ -172,11 +198,19 @@ fn rejects_unexpected_arguments_for_no_arg_commands() {
 fn rejects_invalid_argument_values() {
     let error = parse_error_message("/permissions admin");
     assert!(error.contains(
-        "Unsupported /permissions mode 'admin'. Use read-only, workspace-write, or danger-full-access."
+        "Unsupported /permissions mode 'admin'. Use read-only, plan, workspace-write, or danger-full-access."
     ));
     assert!(error.contains(
-        "  Usage            /permissions [read-only|workspace-write|danger-full-access]"
+        "  Usage            /permissions [read-only|plan|workspace-write|danger-full-access]"
     ));
+
+    let dream_error = parse_error_message("/dream maybe");
+    assert!(dream_error.contains("Unsupported /dream mode 'maybe'. Use on, off, or status."));
+    assert!(dream_error.contains("  Usage            /dream [on|off|status]"));
+
+    let plan_error = parse_error_message("/plan maybe");
+    assert!(plan_error.contains("Unsupported /plan mode 'maybe'. Use on, off, or status."));
+    assert!(plan_error.contains("  Usage            /plan [on|off|status]"));
 }
 
 #[test]

@@ -264,6 +264,62 @@ fn exit_plan_mode_clears_override_when_enter_created_it_from_empty_local_state()
 }
 
 #[test]
+fn exit_plan_mode_clears_unmanaged_local_plan_override() {
+    let _guard = env_lock()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let root = std::env::temp_dir().join(format!(
+        "clawd-plan-mode-unmanaged-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos()
+    ));
+    let home = root.join("home");
+    let cwd = root.join("cwd");
+    std::fs::create_dir_all(home.join(".kcode")).expect("home dir");
+    std::fs::create_dir_all(cwd.join(".kcode")).expect("cwd dir");
+    std::fs::write(
+        cwd.join(".kcode").join("settings.local.json"),
+        r#"{"permissions":{"defaultMode":"plan"}}"#,
+    )
+    .expect("write local settings");
+
+    let original_home = std::env::var("HOME").ok();
+    let original_config_home = std::env::var("CLAW_CONFIG_HOME").ok();
+    let original_dir = std::env::current_dir().expect("cwd");
+    std::env::set_var("HOME", &home);
+    std::env::remove_var("CLAW_CONFIG_HOME");
+    std::env::set_current_dir(&cwd).expect("set cwd");
+
+    let exit = execute_tool("ExitPlanMode", &json!({})).expect("exit plan mode");
+    let exit_output: serde_json::Value = serde_json::from_str(&exit).expect("json");
+    assert_eq!(exit_output["changed"], true);
+    assert_eq!(exit_output["managed"], false);
+    assert_eq!(exit_output["currentLocalMode"], serde_json::Value::Null);
+
+    let local_settings = std::fs::read_to_string(cwd.join(".kcode").join("settings.local.json"))
+        .expect("local settings after exit");
+    assert!(!local_settings.contains(r#""defaultMode": "plan""#));
+    assert!(!cwd
+        .join(".kcode")
+        .join("tool-state")
+        .join("plan-mode.json")
+        .exists());
+
+    std::env::set_current_dir(&original_dir).expect("restore cwd");
+    match original_home {
+        Some(value) => std::env::set_var("HOME", value),
+        None => std::env::remove_var("HOME"),
+    }
+    match original_config_home {
+        Some(value) => std::env::set_var("CLAW_CONFIG_HOME", value),
+        None => std::env::remove_var("CLAW_CONFIG_HOME"),
+    }
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn structured_output_echoes_input_payload() {
     let result = execute_tool("StructuredOutput", &json!({"ok": true, "items": [1, 2, 3]}))
         .expect("StructuredOutput should succeed");

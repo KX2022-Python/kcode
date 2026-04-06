@@ -320,6 +320,7 @@ UU conflicted.rs",
     #[test]
     fn normalizes_supported_permission_modes() {
         assert_eq!(normalize_permission_mode("read-only"), Some("read-only"));
+        assert_eq!(normalize_permission_mode("plan"), Some("plan"));
         assert_eq!(
             normalize_permission_mode("workspace-write"),
             Some("workspace-write")

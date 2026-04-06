@@ -184,6 +184,13 @@ fn context_entries(command: &str, available_models: &[String]) -> Vec<SlashComma
                 builtin,
             ),
             submenu_entry(
+                "plan",
+                "/permissions plan",
+                "/permissions plan",
+                "Read-only planning mode",
+                builtin,
+            ),
+            submenu_entry(
                 "workspace-write",
                 "/permissions workspace-write",
                 "/permissions workspace-write",

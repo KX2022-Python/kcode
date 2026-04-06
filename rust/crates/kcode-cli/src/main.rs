@@ -65,9 +65,7 @@ use tools::GlobalToolRegistry;
 
 // v1.1 Bridge Modules
 mod bridge_core;
-use bridge_core::{BridgeCore, BridgeMessage, SessionConfig};
-
-use adapters::{TelegramConfig, TelegramMode, TelegramTransport};
+use bridge_core::run_bridge_service;
 
 const DEFAULT_MODEL: &str = "gpt-4.1";
 const CLI_NAME: &str = "kcode";
@@ -122,6 +120,8 @@ type AllowedToolSet = BTreeSet<String>;
 include!("main_parts/cli_action.rs");
 include!("main_parts/cli_parse.rs");
 include!("main_parts/cli_parse_support.rs");
+include!("main_parts/plan_mode_support.rs");
+include!("main_parts/tui_permission_prompt.rs");
 
 include!("main_parts/main_entry.rs");
 include!("main_parts/status_basics.rs");
@@ -157,7 +157,9 @@ mod tests {
     include!("main_parts/tests_support.rs");
     include!("main_parts/tests_args_basic.rs");
     include!("main_parts/tests_args_commands.rs");
+    include!("main_parts/tests_bridge_runtime.rs");
     include!("main_parts/tests_help_permissions.rs");
+    include!("main_parts/tests_plan_mode.rs");
     include!("main_parts/tests_reports_status.rs");
     include!("main_parts/tests_render_runtime.rs");
     include!("main_parts/tests_plugin_runtime.rs");

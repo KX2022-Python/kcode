@@ -224,7 +224,7 @@ fn print_help_to_for_profile(out: &mut impl Write, profile_supports_tools: bool)
     )?;
     writeln!(
         out,
-        "  --permission-mode MODE     Set read-only, workspace-write, or danger-full-access"
+        "  --permission-mode MODE     Set read-only, plan, workspace-write, or danger-full-access"
     )?;
     writeln!(
         out,

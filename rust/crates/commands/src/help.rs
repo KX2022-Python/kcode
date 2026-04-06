@@ -19,17 +19,16 @@ fn slash_command_category(name: &str) -> &'static str {
         | "version" | "login" | "logout" | "usage" | "stats" | "rename" | "privacy-settings" => {
             "Session & visibility"
         }
-        "compact" | "clear" | "config" | "memory" | "init" | "diff" | "commit" | "pr" | "issue"
-        | "export" | "plugin" | "branch" | "add-dir" | "files" | "hooks" | "release-notes" => {
-            "Workspace & git"
-        }
+        "compact" | "clear" | "config" | "memory" | "dream" | "init" | "diff" | "commit" | "pr"
+        | "issue" | "export" | "plugin" | "branch" | "add-dir" | "files" | "hooks" | "plan"
+        | "release-notes" => "Workspace & git",
         "agents" | "skills" | "debug-tool-call" | "mcp" | "context" | "todos" | "doctor"
         | "ide" | "desktop" | "powerup" | "schedule" | "loop" => "Discovery & debugging",
         "review" | "security-review" | "advisor" | "insights" => "Analysis & automation",
         "theme" | "vim" | "voice" | "color" | "effort" | "fast" | "brief" | "output-style"
         | "keybindings" | "stickers" => "Appearance & input",
-        "copy" | "share" | "feedback" | "summary" | "tag" | "thinkback" | "plan" | "exit"
-        | "upgrade" | "rewind" | "btw" | "bug" => "Communication & control",
+        "copy" | "share" | "feedback" | "summary" | "tag" | "thinkback" | "exit" | "upgrade"
+        | "rewind" | "btw" | "bug" => "Communication & control",
         _ => "Other",
     }
 }

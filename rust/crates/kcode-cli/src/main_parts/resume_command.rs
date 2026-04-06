@@ -138,6 +138,14 @@ fn run_resume_command(
             session: session.clone(),
             message: Some(render_memory_report()?),
         }),
+        SlashCommand::Dream { mode } => {
+            let cwd = env::current_dir()?;
+            let outcome = run_auto_dream_command(&cwd, mode.as_deref())?;
+            Ok(ResumeCommandOutcome {
+                session: session.clone(),
+                message: Some(outcome.message),
+            })
+        }
         SlashCommand::Tasks { args } => {
             let summary = match args.as_deref() {
                 None | Some("list") => render_todos_report(

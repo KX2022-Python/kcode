@@ -179,6 +179,52 @@ fn resumed_config_command_loads_settings_files_end_to_end() {
 }
 
 #[test]
+fn resumed_dream_command_updates_local_settings_end_to_end() {
+    let temp_dir = unique_temp_dir("resume-dream");
+    let project_dir = temp_dir.join("project");
+    let config_home = temp_dir.join("home").join(".kcode");
+    fs::create_dir_all(project_dir.join(".kcode")).expect("project config dir should exist");
+    fs::create_dir_all(&config_home).expect("config home should exist");
+
+    let session_path = project_dir.join("session.jsonl");
+    Session::new()
+        .with_persistence_path(&session_path)
+        .save_to_path(&session_path)
+        .expect("session should persist");
+
+    let output = run_kcode_with_env(
+        &project_dir,
+        &[
+            "--resume",
+            session_path.to_str().expect("utf8 path"),
+            "/dream",
+            "off",
+            "/dream",
+        ],
+        &[(
+            "KCODE_CONFIG_HOME",
+            config_home.to_str().expect("utf8 path"),
+        )],
+    );
+
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\n\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be utf8");
+    assert!(stdout.contains("Auto dream updated"));
+    assert!(stdout.contains("Status           disabled"));
+    assert!(stdout.contains("Usage            /dream [on|off|status]"));
+
+    let local_settings = fs::read_to_string(project_dir.join(".kcode").join("settings.local.json"))
+        .expect("local settings should exist");
+    assert!(local_settings.contains("\"autoDreamEnabled\": false"));
+}
+
+#[test]
 fn resume_latest_restores_the_most_recent_managed_session() {
     // given
     let temp_dir = unique_temp_dir("resume-latest");

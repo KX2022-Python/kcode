@@ -20,7 +20,6 @@ use tracing::{error, info};
 use crate::feishu_transport::{
     parse_feishu_webhook, verify_feishu_signature, FeishuWebhookPayload,
 };
-use crate::session_router::SessionRouter;
 use crate::telegram_transport::{parse_telegram_webhook, TelegramConfig, TelegramTransport};
 use crate::transport::Transport;
 use crate::whatsapp_transport::{
@@ -31,7 +30,6 @@ use crate::whatsapp_transport::{
 /// Shared state for webhook handlers.
 #[derive(Clone)]
 pub struct WebhookState {
-    pub session_router: Arc<SessionRouter>,
     pub telegram_transport: Option<Arc<TelegramTransport>>,
     pub whatsapp_config: Option<WhatsAppConfig>,
     pub whatsapp_transport: Option<Arc<WhatsAppTransport>>,
@@ -43,7 +41,6 @@ pub struct WebhookState {
 /// Start the webhook server listening on the given address.
 pub async fn start_webhook_server(
     addr: SocketAddr,
-    session_router: Arc<SessionRouter>,
     telegram_config: Option<TelegramConfig>,
     whatsapp_config: Option<WhatsAppConfig>,
     feishu_config: Option<crate::feishu_transport::FeishuConfig>,
@@ -57,7 +54,6 @@ pub async fn start_webhook_server(
         feishu_config.map(|c| Arc::new(crate::feishu_transport::FeishuTransport::new(c)));
 
     let state = WebhookState {
-        session_router,
         telegram_transport,
         whatsapp_config: whatsapp_config_clone,
         whatsapp_transport,

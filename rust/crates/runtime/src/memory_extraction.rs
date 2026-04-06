@@ -26,6 +26,10 @@ pub struct MemoryExtractionState {
     cumulative_input_tokens_at_last_extraction: u32,
     /// Cumulative tool call count at the point of last extraction.
     cumulative_tool_calls_at_last_extraction: usize,
+    /// Latest observed cumulative input tokens at the end of a turn.
+    cumulative_input_tokens_at_last_turn: u32,
+    /// Latest observed cumulative tool call count at the end of a turn.
+    cumulative_tool_calls_at_last_turn: usize,
 }
 
 impl MemoryExtractionState {
@@ -33,11 +37,12 @@ impl MemoryExtractionState {
         Self::default()
     }
 
-    /// Record the current cumulative usage snapshot.
-    /// Called at the end of each turn.
+    /// Record the current cumulative usage snapshot for observability.
+    /// This must not move the extraction baseline, which is only reset after
+    /// a successful extraction trigger.
     pub fn record_turn(&mut self, cumulative_input_tokens: u32, cumulative_tool_calls: usize) {
-        self.cumulative_input_tokens_at_last_extraction = cumulative_input_tokens;
-        self.cumulative_tool_calls_at_last_extraction = cumulative_tool_calls;
+        self.cumulative_input_tokens_at_last_turn = cumulative_input_tokens;
+        self.cumulative_tool_calls_at_last_turn = cumulative_tool_calls;
     }
 
     /// Check if memory extraction should be triggered.
@@ -59,6 +64,8 @@ impl MemoryExtractionState {
     pub fn reset(&mut self, cumulative_input_tokens: u32, cumulative_tool_calls: usize) {
         self.cumulative_input_tokens_at_last_extraction = cumulative_input_tokens;
         self.cumulative_tool_calls_at_last_extraction = cumulative_tool_calls;
+        self.cumulative_input_tokens_at_last_turn = cumulative_input_tokens;
+        self.cumulative_tool_calls_at_last_turn = cumulative_tool_calls;
     }
 }
 
@@ -428,31 +435,23 @@ mod tests {
         let mut state = MemoryExtractionState::new();
         assert!(!state.should_extract(30_000, 5));
 
-        // Record first turn
+        // Recording a turn should not move the extraction baseline.
         state.record_turn(30_000, 5);
-        // Not yet at threshold (delta = 0 from snapshot)
         assert!(!state.should_extract(30_000, 5));
 
-        // After accumulating 25k more tokens (total 55k, delta = 25k from last extraction)
-        // Still below 50k token threshold
+        // The threshold is measured from the last extraction (still 0), not the last turn.
+        assert!(state.should_extract(55_000, 5));
+
+        state.reset(55_000, 5);
         assert!(!state.should_extract(55_000, 5));
-
-        // Now delta = 75k - 30k = 45k, still below 50k
-        assert!(!state.should_extract(75_000, 5));
-
-        // Delta = 80k - 30k = 50k, hits threshold
-        assert!(state.should_extract(80_000, 5));
-
-        // After reset at current cumulative
-        state.reset(80_000, 5);
         assert!(!state.should_extract(80_000, 5));
+        assert!(state.should_extract(105_000, 5));
     }
 
     #[test]
     fn extraction_state_triggers_on_tool_calls() {
         let mut state = MemoryExtractionState::new();
         state.record_turn(100, 0);
-        // Delta = 12 - 0 = 12, above tool call threshold of 10
         assert!(state.should_extract(100, 12));
     }
 

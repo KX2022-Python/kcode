@@ -14,7 +14,7 @@
         render_config_report, render_diff_report, render_doctor_report_from_setup,
         render_memory_report, render_repl_help, render_repl_help_for_profile,
         render_resume_usage, resolve_model_alias, resolve_session_reference, response_to_events,
-        resume_supported_slash_commands, run_resume_command,
+        resume_supported_slash_commands, run_plan_mode_command, run_resume_command,
         slash_command_completion_candidates_with_sessions, status_context, validate_no_args,
         CliAction, CliOutputFormat, CommandReportSurfaceSelection, GitWorkspaceSummary,
         InternalPromptProgressEvent, InternalPromptProgressState, LiveCli, ProviderRuntimeClient,

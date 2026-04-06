@@ -40,7 +40,7 @@ pub(crate) const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
         name: "permissions",
         aliases: &[],
         summary: "Show or switch the active permission mode",
-        argument_hint: Some("[read-only|workspace-write|danger-full-access]"),
+        argument_hint: Some("[read-only|plan|workspace-write|danger-full-access]"),
         resume_supported: false,
     },
     SlashCommandSpec {
@@ -83,6 +83,13 @@ pub(crate) const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
         aliases: &[],
         summary: "Inspect loaded Kcode instruction memory files",
         argument_hint: None,
+        resume_supported: true,
+    },
+    SlashCommandSpec {
+        name: "dream",
+        aliases: &[],
+        summary: "Inspect or switch auto-dream memory extraction",
+        argument_hint: Some("[on|off|status]"),
         resume_supported: true,
     },
     SlashCommandSpec {
@@ -216,8 +223,8 @@ pub(crate) const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         name: "plan",
         aliases: &[],
-        summary: "Toggle or inspect planning mode",
-        argument_hint: Some("[on|off]"),
+        summary: "Inspect or switch worktree-local planning mode",
+        argument_hint: Some("[on|off|status]"),
         resume_supported: false,
     },
     SlashCommandSpec {

@@ -55,6 +55,7 @@ pub fn handle_slash_command(
         | SlashCommand::Config { .. }
         | SlashCommand::Mcp { .. }
         | SlashCommand::Memory
+        | SlashCommand::Dream { .. }
         | SlashCommand::Init
         | SlashCommand::Diff
         | SlashCommand::Version

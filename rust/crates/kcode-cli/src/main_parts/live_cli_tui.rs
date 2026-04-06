@@ -284,7 +284,7 @@ impl LiveCli {
 
                 let normalized = normalize_permission_mode(&mode).ok_or_else(|| {
                     format!(
-                        "unsupported permission mode '{mode}'. Use read-only, workspace-write, or danger-full-access."
+                        "unsupported permission mode '{mode}'. Use read-only, plan, workspace-write, or danger-full-access."
                     )
                 })?;
                 if normalized == self.permission_mode.as_str() {
@@ -350,6 +350,24 @@ impl LiveCli {
                 Ok(tui_text_result(handle_mcp_slash_command(args.as_deref(), &cwd)?))
             }
             SlashCommand::Memory => Ok(tui_text_result(render_memory_report()?)),
+            SlashCommand::Dream { mode } => {
+                Ok(tui_text_result(self.handle_dream(mode.as_deref())?))
+            }
+            SlashCommand::Plan { mode } => {
+                let cwd = env::current_dir()?;
+                let outcome = run_plan_mode_command(&cwd, mode.as_deref(), self.permission_mode)?;
+                if let Some(next_mode) = outcome.next_permission_mode {
+                    if next_mode != self.permission_mode {
+                        self.replace_tui_runtime(
+                            self.runtime.session().clone(),
+                            self.model.clone(),
+                            self.model_explicit,
+                            next_mode,
+                        )?;
+                    }
+                }
+                Ok(tui_text_result(outcome.message))
+            }
             SlashCommand::Tasks { args } => Ok(tui_text_result(match args.as_deref() {
                 None | Some("list") => render_todos_report(&env::current_dir()?)?,
                 Some("help") => {
@@ -439,7 +457,6 @@ impl LiveCli {
             | SlashCommand::Thinkback
             | SlashCommand::ReleaseNotes
             | SlashCommand::SecurityReview
-            | SlashCommand::Plan { .. }
             | SlashCommand::Review { .. }
             | SlashCommand::Usage { .. }
             | SlashCommand::Rename { .. }

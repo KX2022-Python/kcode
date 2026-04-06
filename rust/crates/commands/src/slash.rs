@@ -40,6 +40,9 @@ pub enum SlashCommand {
         target: Option<String>,
     },
     Memory,
+    Dream {
+        mode: Option<String>,
+    },
     Init,
     Diff,
     Version,

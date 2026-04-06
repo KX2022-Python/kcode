@@ -135,6 +135,7 @@ pub struct ConversationRuntime<C, T> {
     session_tracer: Option<SessionTracer>,
     compaction_failure_tracker: CompactionFailureTracker,
     memory_extraction_state: MemoryExtractionState,
+    auto_dream_enabled: bool,
     auto_dream_state: std::sync::Arc<crate::memory_extraction::AutoDreamState>,
 }
 
@@ -187,6 +188,7 @@ where
             session_tracer: None,
             compaction_failure_tracker: CompactionFailureTracker::new(),
             memory_extraction_state: MemoryExtractionState::new(),
+            auto_dream_enabled: feature_config.auto_dream_enabled(),
             auto_dream_state: std::sync::Arc::new(crate::memory_extraction::AutoDreamState::new()),
         }
     }
@@ -535,9 +537,10 @@ where
             .count();
 
         // Auto-dream: trigger background extraction without blocking REPL
-        if self
-            .memory_extraction_state
-            .should_extract(cumulative_input_tokens, cumulative_tool_calls)
+        if self.auto_dream_enabled
+            && self
+                .memory_extraction_state
+                .should_extract(cumulative_input_tokens, cumulative_tool_calls)
         {
             crate::memory_extraction::trigger_auto_dream(
                 self.auto_dream_state.clone(),
@@ -1699,6 +1702,44 @@ mod tests {
             .expect("turn should succeed");
         assert_eq!(summary.auto_compaction, None);
         assert_eq!(runtime.session().messages.len(), 2);
+    }
+
+    #[test]
+    fn skips_auto_dream_when_feature_is_disabled() {
+        struct SimpleApi;
+        impl ApiClient for SimpleApi {
+            fn stream(
+                &mut self,
+                _request: ApiRequest,
+            ) -> Result<Vec<AssistantEvent>, RuntimeError> {
+                Ok(vec![
+                    AssistantEvent::TextDelta("done".to_string()),
+                    AssistantEvent::Usage(TokenUsage {
+                        input_tokens: 60_000,
+                        output_tokens: 4,
+                        cache_creation_input_tokens: 0,
+                        cache_read_input_tokens: 0,
+                    }),
+                    AssistantEvent::MessageStop,
+                ])
+            }
+        }
+
+        let feature_config = RuntimeFeatureConfig::default().with_auto_dream_enabled(false);
+        let mut runtime = ConversationRuntime::new_with_features(
+            Session::new(),
+            SimpleApi,
+            StaticToolExecutor::new(),
+            PermissionPolicy::new(PermissionMode::DangerFullAccess),
+            vec!["system".to_string()],
+            &feature_config,
+        );
+
+        let summary = runtime
+            .run_turn("trigger", None)
+            .expect("turn should succeed");
+
+        assert_eq!(summary.memory_extracted, None);
     }
 
     #[test]

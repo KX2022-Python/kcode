@@ -111,6 +111,7 @@ fn format_model_switch_report(
 fn format_permissions_report(mode: &str) -> String {
     let modes = [
         ("read-only", "Read/search tools only", mode == "read-only"),
+        ("plan", "Read-only planning mode", mode == "plan"),
         (
             "workspace-write",
             "Edit files inside the workspace",
@@ -211,7 +212,146 @@ fn render_btw_usage() -> String {
   Example          /btw what changed between async fn and spawn_blocking?"
         .to_string()
 }
+struct AutoDreamCommandOutcome {
+    message: String,
+    changed: bool,
+}
 
+fn run_auto_dream_command(
+    cwd: &Path,
+    mode: Option<&str>,
+) -> Result<AutoDreamCommandOutcome, Box<dyn std::error::Error>> {
+    match mode.map(str::trim).filter(|value| !value.is_empty()) {
+        None | Some("status") => Ok(AutoDreamCommandOutcome {
+            message: render_auto_dream_report(cwd)?,
+            changed: false,
+        }),
+        Some("on") => {
+            let settings_path = write_auto_dream_setting(cwd, true)?;
+            Ok(AutoDreamCommandOutcome {
+                message: format_auto_dream_update_report(true, &settings_path),
+                changed: true,
+            })
+        }
+        Some("off") => {
+            let settings_path = write_auto_dream_setting(cwd, false)?;
+            Ok(AutoDreamCommandOutcome {
+                message: format_auto_dream_update_report(false, &settings_path),
+                changed: true,
+            })
+        }
+        Some(other) => Err(std::io::Error::other(format!(
+            "unsupported /dream mode '{other}'"
+        ))
+        .into()),
+    }
+}
+
+fn render_auto_dream_report(cwd: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let settings_path = cwd.join(PRIMARY_CONFIG_DIR_NAME).join("settings.local.json");
+    let runtime_config = ConfigLoader::default_for(cwd).load()?;
+    let local_override = read_explicit_auto_dream_setting(&settings_path)?;
+    let source = if local_override.is_some() {
+        settings_path.display().to_string()
+    } else if runtime_config
+        .get("autoDreamEnabled")
+        .and_then(|value| value.as_bool())
+        .is_some()
+    {
+        "merged config".to_string()
+    } else {
+        "default (enabled)".to_string()
+    };
+
+    Ok(format!(
+        "Auto dream
+  Status           {}
+  Source           {}
+  Trigger          {} input tokens or {} tool calls since last extraction
+  Usage            /dream [on|off|status]",
+        if runtime_config.auto_dream_enabled() {
+            "enabled"
+        } else {
+            "disabled"
+        },
+        source,
+        runtime::MEMORY_EXTRACTION_TOKEN_THRESHOLD,
+        runtime::MEMORY_EXTRACTION_TOOL_CALL_THRESHOLD,
+    ))
+}
+
+fn format_auto_dream_update_report(enabled: bool, settings_path: &Path) -> String {
+    format!(
+        "Auto dream updated
+  Status           {}
+  Config file      {}
+  Applies to       subsequent turns
+  Usage            /dream to inspect current state",
+        if enabled { "enabled" } else { "disabled" },
+        settings_path.display(),
+    )
+}
+
+fn write_auto_dream_setting(
+    cwd: &Path,
+    enabled: bool,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let settings_path = cwd.join(PRIMARY_CONFIG_DIR_NAME).join("settings.local.json");
+    if let Some(parent) = settings_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mut object = read_settings_object(&settings_path)?;
+    object.insert(
+        "autoDreamEnabled".to_string(),
+        serde_json::Value::Bool(enabled),
+    );
+    fs::write(
+        &settings_path,
+        format!(
+            "{}\n",
+            serde_json::to_string_pretty(&serde_json::Value::Object(object))?
+        ),
+    )?;
+    Ok(settings_path)
+}
+
+fn read_explicit_auto_dream_setting(
+    settings_path: &Path,
+) -> Result<Option<bool>, Box<dyn std::error::Error>> {
+    Ok(read_settings_object(settings_path)?
+        .get("autoDreamEnabled")
+        .map(|value| {
+            value.as_bool().ok_or_else(|| {
+                std::io::Error::other("autoDreamEnabled in settings.local.json must be a boolean")
+            })
+        })
+        .transpose()?)
+}
+
+fn read_settings_object(
+    settings_path: &Path,
+) -> Result<serde_json::Map<String, serde_json::Value>, Box<dyn std::error::Error>> {
+    let raw = match fs::read_to_string(settings_path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(serde_json::Map::new())
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if raw.trim().is_empty() {
+        return Ok(serde_json::Map::new());
+    }
+
+    let value: serde_json::Value = serde_json::from_str(&raw)?;
+    let object = value.as_object().ok_or_else(|| {
+        std::io::Error::other(format!(
+            "{} must contain a JSON object",
+            settings_path.display()
+        ))
+    })?;
+    Ok(object.clone())
+}
 fn format_bug_report(description: Option<&str>, session_id: &str, session_path: &std::path::Path) -> String {
     format!(
         "Bug report

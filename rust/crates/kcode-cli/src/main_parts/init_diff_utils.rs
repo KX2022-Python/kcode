@@ -13,6 +13,7 @@ fn run_init() -> Result<(), Box<dyn std::error::Error>> {
 fn normalize_permission_mode(mode: &str) -> Option<&'static str> {
     match mode.trim() {
         "read-only" => Some("read-only"),
+        "plan" => Some("plan"),
         "workspace-write" => Some("workspace-write"),
         "danger-full-access" => Some("danger-full-access"),
         _ => None,

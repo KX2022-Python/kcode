@@ -111,7 +111,7 @@ impl LiveCli {
 
         let normalized = normalize_permission_mode(&mode).ok_or_else(|| {
             format!(
-                "unsupported permission mode '{mode}'. Use read-only, workspace-write, or danger-full-access."
+                "unsupported permission mode '{mode}'. Use read-only, plan, workspace-write, or danger-full-access."
             )
         })?;
 
@@ -142,6 +142,32 @@ impl LiveCli {
             format_permissions_switch_report(&previous, normalized)
         );
         Ok(true)
+    }
+
+    fn handle_plan(&mut self, mode: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
+        let cwd = env::current_dir()?;
+        let outcome = run_plan_mode_command(&cwd, mode, self.permission_mode)?;
+        if let Some(next_mode) = outcome.next_permission_mode {
+            if next_mode != self.permission_mode {
+                let session = self.runtime.session().clone();
+                self.permission_mode = next_mode;
+                let runtime = build_runtime(
+                    session,
+                    &self.session.id,
+                    self.model.clone(),
+                    self.model_explicit.then_some(self.model.as_str()),
+                    self.profile_override.as_deref(),
+                    self.system_prompt.clone(),
+                    true,
+                    true,
+                    self.allowed_tools.clone(),
+                    self.permission_mode,
+                    None,
+                )?;
+                self.replace_runtime(runtime)?;
+            }
+        }
+        Ok(outcome.message)
     }
 
     fn clear_session(&mut self, confirm: bool) -> Result<bool, Box<dyn std::error::Error>> {
@@ -243,6 +269,15 @@ impl LiveCli {
     fn print_memory() -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", render_memory_report()?);
         Ok(())
+    }
+
+    fn handle_dream(&mut self, mode: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
+        let cwd = env::current_dir()?;
+        let outcome = run_auto_dream_command(&cwd, mode)?;
+        if outcome.changed {
+            self.reload_runtime_features()?;
+        }
+        Ok(outcome.message)
     }
 
     fn print_tasks(&self, args: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {

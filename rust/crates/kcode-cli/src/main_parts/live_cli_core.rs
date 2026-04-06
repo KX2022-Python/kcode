@@ -9,11 +9,21 @@ impl LiveCli {
         session_path_override: Option<PathBuf>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let system_prompt = build_system_prompt()?;
-        let session_state = Session::new();
+        let session_state = if let Some(path) = session_path_override.as_ref() {
+            if path.exists() {
+                Session::load_from_path(path)?.with_persistence_path(path.clone())
+            } else {
+                Session::new().with_persistence_path(path.clone())
+            }
+        } else {
+            Session::new()
+        };
         
         let session = if let Some(path) = session_path_override {
-            // Load existing session or create new at specific path
-            let id = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| session_state.session_id.clone());
+            let id = path
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().to_string())
+                .unwrap_or_else(|| session_state.session_id.clone());
             SessionHandle { id, path }
         } else {
             create_managed_session_handle(&session_state.session_id)?

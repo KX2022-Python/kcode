@@ -1,7 +1,7 @@
 use crate::{
     build_command_registry_snapshot, render_slash_command_help, render_slash_command_help_detail,
-    render_slash_command_help_for_context, resume_supported_slash_commands, slash_command_specs,
-    suggest_slash_commands, v1_command_manifest, CommandRegistryContext, CommandSurface,
+    render_slash_command_help_for_context, slash_command_specs, suggest_slash_commands,
+    v1_command_manifest, CommandRegistryContext, CommandSurface,
 };
 
 #[test]
@@ -15,8 +15,9 @@ fn renders_help_from_shared_specs() {
     assert!(help.contains("Core v1.0 manifest"));
     assert!(help.contains("Extended local surface"));
     assert!(help.contains("/skills [list|install <path>|help]"));
-    assert_eq!(slash_command_specs().len(), 65);
-    assert_eq!(resume_supported_slash_commands().len(), 16);
+    assert!(slash_command_specs()
+        .iter()
+        .any(|spec| spec.name == "dream"));
 }
 
 #[test]

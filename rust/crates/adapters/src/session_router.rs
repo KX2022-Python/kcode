@@ -30,27 +30,36 @@ impl SessionRouter {
         }
     }
 
-    /// Get or create a session for the given chat_id.
-    pub fn get_or_create_session(&self, chat_id: &str, channel: &str) -> ChannelSession {
+    fn session_map_key(channel: &str, chat_id: &str) -> String {
+        format!("{channel}:{chat_id}")
+    }
+
+    pub fn session_id_for(channel: &str, chat_id: &str) -> String {
+        format!("bridge-{channel}-{chat_id}")
+    }
+
+    /// Get or create a session for the given channel/chat pair.
+    pub fn get_or_create_session(&self, channel: &str, chat_id: &str) -> ChannelSession {
         let mut sessions = self.sessions.lock().unwrap();
-        if let Some(sess) = sessions.get(chat_id) {
+        let map_key = Self::session_map_key(channel, chat_id);
+        if let Some(sess) = sessions.get(&map_key) {
             return sess.clone();
         }
 
-        let session_id = format!("bridge-{}-{}", channel, chat_id);
+        let session_id = Self::session_id_for(channel, chat_id);
         let session = ChannelSession {
             session_id: session_id.clone(),
             channel: channel.to_string(),
             chat_id: chat_id.to_string(),
         };
-        sessions.insert(chat_id.to_string(), session.clone());
+        sessions.insert(map_key, session.clone());
         session
     }
 
-    /// Get the session path for a given chat_id.
-    pub fn session_path(&self, chat_id: &str) -> PathBuf {
-        let sess = self.get_or_create_session(chat_id, "unknown");
-        self.session_dir.join(format!("{}.jsonl", sess.session_id))
+    /// Get the session path for a given channel/chat pair.
+    pub fn session_path(&self, channel: &str, chat_id: &str) -> PathBuf {
+        self.session_dir
+            .join(format!("{}.jsonl", Self::session_id_for(channel, chat_id)))
     }
 
     /// List all active sessions.
@@ -59,9 +68,12 @@ impl SessionRouter {
         sessions.values().cloned().collect()
     }
 
-    /// Remove a session by chat_id.
-    pub fn remove_session(&self, chat_id: &str) {
-        self.sessions.lock().unwrap().remove(chat_id);
+    /// Remove a session by channel/chat pair.
+    pub fn remove_session(&self, channel: &str, chat_id: &str) {
+        self.sessions
+            .lock()
+            .unwrap()
+            .remove(&Self::session_map_key(channel, chat_id));
     }
 }
 
@@ -72,5 +84,33 @@ impl Clone for ChannelSession {
             channel: self.channel.clone(),
             chat_id: self.chat_id.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SessionRouter;
+    use std::path::PathBuf;
+
+    #[test]
+    fn session_router_scopes_same_chat_id_by_channel() {
+        let router = SessionRouter::new(PathBuf::from("/tmp/bridge-sessions"));
+
+        let telegram = router.get_or_create_session("telegram", "42");
+        let feishu = router.get_or_create_session("feishu", "42");
+
+        assert_ne!(telegram.session_id, feishu.session_id);
+        assert_eq!(router.list_sessions().len(), 2);
+    }
+
+    #[test]
+    fn session_path_matches_channel_scoped_session_id() {
+        let router = SessionRouter::new(PathBuf::from("/tmp/bridge-sessions"));
+        let path = router.session_path("telegram", "42");
+
+        assert_eq!(
+            path,
+            PathBuf::from("/tmp/bridge-sessions/bridge-telegram-42.jsonl")
+        );
     }
 }

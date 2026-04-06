@@ -219,7 +219,7 @@ fn parse_permission_mode_arg(value: &str) -> Result<PermissionMode, String> {
     normalize_permission_mode(value)
         .ok_or_else(|| {
             format!(
-                "unsupported permission mode '{value}'. Use read-only, workspace-write, or danger-full-access."
+                "unsupported permission mode '{value}'. Use read-only, plan, workspace-write, or danger-full-access."
             )
         })
         .map(permission_mode_from_label)
@@ -228,6 +228,7 @@ fn parse_permission_mode_arg(value: &str) -> Result<PermissionMode, String> {
 fn permission_mode_from_label(mode: &str) -> PermissionMode {
     match mode {
         "read-only" => PermissionMode::ReadOnly,
+        "plan" => PermissionMode::Plan,
         "workspace-write" => PermissionMode::WorkspaceWrite,
         "danger-full-access" => PermissionMode::DangerFullAccess,
         other => panic!("unsupported permission mode label: {other}"),
@@ -237,24 +238,31 @@ fn permission_mode_from_label(mode: &str) -> PermissionMode {
 fn permission_mode_from_resolved(mode: ResolvedPermissionMode) -> PermissionMode {
     match mode {
         ResolvedPermissionMode::ReadOnly => PermissionMode::ReadOnly,
+        ResolvedPermissionMode::Plan => PermissionMode::Plan,
         ResolvedPermissionMode::WorkspaceWrite => PermissionMode::WorkspaceWrite,
         ResolvedPermissionMode::DangerFullAccess => PermissionMode::DangerFullAccess,
     }
 }
 
 fn default_permission_mode() -> PermissionMode {
+    env::current_dir()
+        .ok()
+        .map(|cwd| default_permission_mode_for(&cwd))
+        .unwrap_or(PermissionMode::DangerFullAccess)
+}
+
+fn default_permission_mode_for(cwd: &Path) -> PermissionMode {
     env::var(PRIMARY_PERMISSION_MODE_ENV)
         .ok()
         .or_else(|| env::var(LEGACY_PERMISSION_MODE_ENV).ok())
         .as_deref()
         .and_then(normalize_permission_mode)
         .map(permission_mode_from_label)
-        .or_else(config_permission_mode_for_current_dir)
+        .or_else(|| config_permission_mode_for(cwd))
         .unwrap_or(PermissionMode::DangerFullAccess)
 }
 
-fn config_permission_mode_for_current_dir() -> Option<PermissionMode> {
-    let cwd = env::current_dir().ok()?;
+fn config_permission_mode_for(cwd: &Path) -> Option<PermissionMode> {
     let loader = ConfigLoader::default_for(&cwd);
     loader
         .load()

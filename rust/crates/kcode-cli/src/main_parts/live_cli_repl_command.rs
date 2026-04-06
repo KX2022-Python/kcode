@@ -91,6 +91,14 @@ impl LiveCli {
                 Self::print_memory()?;
                 false
             }
+            SlashCommand::Dream { mode } => {
+                println!("{}", self.handle_dream(mode.as_deref())?);
+                false
+            }
+            SlashCommand::Plan { mode } => {
+                println!("{}", self.handle_plan(mode.as_deref())?);
+                false
+            }
             SlashCommand::Doctor => {
                 self.print_doctor()?;
                 false
@@ -183,7 +191,6 @@ impl LiveCli {
             | SlashCommand::Thinkback
             | SlashCommand::ReleaseNotes
             | SlashCommand::SecurityReview
-            | SlashCommand::Plan { .. }
             | SlashCommand::Review { .. }
             | SlashCommand::Usage { .. }
             | SlashCommand::Rename { .. }

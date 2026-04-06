@@ -1,22 +1,65 @@
 struct TuiPermissionPrompter {
     current_mode: PermissionMode,
+    allow_for_turn: BTreeSet<String>,
+    deny_for_turn: BTreeSet<String>,
 }
 
 impl TuiPermissionPrompter {
     fn new(current_mode: PermissionMode) -> Self {
-        Self { current_mode }
+        Self {
+            current_mode,
+            allow_for_turn: BTreeSet::new(),
+            deny_for_turn: BTreeSet::new(),
+        }
+    }
+
+    fn cached_decision(
+        &self,
+        request: &runtime::PermissionRequest,
+    ) -> Option<runtime::PermissionPromptDecision> {
+        let key = permission_memory_key(request);
+        if self.allow_for_turn.contains(&key) {
+            return Some(runtime::PermissionPromptDecision::Allow);
+        }
+        if self.deny_for_turn.contains(&key) {
+            return Some(runtime::PermissionPromptDecision::Deny {
+                reason: format!(
+                    "tool '{}' denied for the rest of the current turn",
+                    request.tool_name
+                ),
+            });
+        }
+        None
     }
 }
 
 impl runtime::PermissionPrompter for TuiPermissionPrompter {
     fn decide(&mut self, request: &runtime::PermissionRequest) -> runtime::PermissionPromptDecision {
-        runtime::PermissionPromptDecision::Deny {
-            reason: format!(
-                "TUI 当前未实现交互式权限审批。工具 `{}` 需要 `{}`，当前模式是 `{}`。请先用 `/permissions workspace-write` 或 `/permissions danger-full-access` 后重试。",
-                request.tool_name,
-                request.required_mode.as_str(),
-                self.current_mode.as_str(),
-            ),
+        if let Some(decision) = self.cached_decision(request) {
+            return decision;
+        }
+
+        match prompt_tui_permission(request, self.current_mode) {
+            Ok(TuiPermissionChoice::AllowOnce) => runtime::PermissionPromptDecision::Allow,
+            Ok(TuiPermissionChoice::AllowForTurn) => {
+                self.allow_for_turn.insert(permission_memory_key(request));
+                runtime::PermissionPromptDecision::Allow
+            }
+            Ok(TuiPermissionChoice::DenyOnce) => runtime::PermissionPromptDecision::Deny {
+                reason: format!("tool '{}' denied from the TUI permission dialog", request.tool_name),
+            },
+            Ok(TuiPermissionChoice::DenyForTurn) => {
+                self.deny_for_turn.insert(permission_memory_key(request));
+                runtime::PermissionPromptDecision::Deny {
+                    reason: format!(
+                        "tool '{}' denied for the rest of the current turn",
+                        request.tool_name
+                    ),
+                }
+            }
+            Err(error) => runtime::PermissionPromptDecision::Deny {
+                reason: format!("TUI permission prompt failed: {error}"),
+            },
         }
     }
 }
