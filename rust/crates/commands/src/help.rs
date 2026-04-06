@@ -1,6 +1,5 @@
 use crate::model::{
-    slash_command_specs, CommandDescriptor, CommandKind, CommandRegistryContext, CommandScope,
-    SlashCommandSpec,
+    CommandDescriptor, CommandKind, CommandRegistryContext, CommandScope, SlashCommandSpec,
 };
 use crate::registry::{
     build_command_registry_snapshot, find_slash_command_spec, session_command_descriptor,
@@ -172,11 +171,13 @@ pub fn suggest_slash_commands(input: &str, limit: usize) -> Vec<String> {
         return Vec::new();
     }
 
-    let mut suggestions = slash_command_specs()
+    let snapshot = build_command_registry_snapshot(&CommandRegistryContext::cli_local(), &[]);
+    let mut suggestions = snapshot
+        .session_commands
         .iter()
-        .filter_map(|spec| {
-            let best = std::iter::once(spec.name)
-                .chain(spec.aliases.iter().copied())
+        .filter_map(|descriptor| {
+            let best = std::iter::once(descriptor.name.as_str())
+                .chain(descriptor.aliases.iter().map(String::as_str))
                 .map(str::to_ascii_lowercase)
                 .map(|candidate| {
                     let prefix_rank =
@@ -194,7 +195,12 @@ pub fn suggest_slash_commands(input: &str, limit: usize) -> Vec<String> {
 
             best.and_then(|(prefix_rank, distance)| {
                 if prefix_rank <= 1 || distance <= 2 {
-                    Some((prefix_rank, distance, spec.name.len(), spec.name))
+                    Some((
+                        prefix_rank,
+                        distance,
+                        descriptor.name.len(),
+                        descriptor.name.as_str(),
+                    ))
                 } else {
                     None
                 }

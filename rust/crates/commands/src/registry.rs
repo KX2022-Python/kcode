@@ -34,8 +34,37 @@ fn process_command_kind(name: &str) -> CommandKind {
     }
 }
 
-fn session_command_enabled(name: &str) -> bool {
-    !matches!(name, "logout")
+const HIDDEN_SESSION_COMMANDS: &[&str] = &[
+    "logout",
+    "vim",
+    "upgrade",
+    "stats",
+    "share",
+    "files",
+    "fast",
+    "exit",
+    "summary",
+    "brief",
+    "advisor",
+    "stickers",
+    "insights",
+    "thinkback",
+    "release-notes",
+    "security-review",
+    "review",
+    "usage",
+    "rename",
+    "copy",
+    "context",
+    "effort",
+    "rewind",
+    "ide",
+    "tag",
+    "add-dir",
+];
+
+pub(crate) fn builtin_session_command_enabled(name: &str) -> bool {
+    !HIDDEN_SESSION_COMMANDS.contains(&name)
 }
 
 fn process_command_enabled(name: &str) -> bool {
@@ -67,7 +96,6 @@ pub(crate) fn is_v1_core_session_command(name: &str) -> bool {
             | "init"
             | "model"
             | "memory"
-            | "add-dir"
             | "resume"
             | "mcp"
             | "permissions"
@@ -100,7 +128,7 @@ pub(crate) fn session_command_descriptor(spec: &SlashCommandSpec) -> CommandDesc
     if spec.resume_supported {
         visibility_tags.push("resume".to_string());
     }
-    if !session_command_enabled(spec.name) {
+    if !builtin_session_command_enabled(spec.name) {
         visibility_tags.push("compat-hidden".to_string());
     }
     CommandDescriptor {
@@ -113,7 +141,7 @@ pub(crate) fn session_command_descriptor(spec: &SlashCommandSpec) -> CommandDesc
             cli_visible: true,
             bridge_visible: remote_safe && channel_safe,
         },
-        enabled: session_command_enabled(spec.name),
+        enabled: builtin_session_command_enabled(spec.name),
         remote_safe,
         channel_safe,
         aliases: spec

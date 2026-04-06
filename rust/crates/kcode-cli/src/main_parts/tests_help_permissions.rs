@@ -65,7 +65,7 @@
     }
 
     #[test]
-    fn repl_help_includes_shared_commands_and_exit() {
+    fn repl_help_includes_shared_supported_commands() {
         let help = render_repl_help();
         assert!(help.contains("REPL"));
         assert!(help.contains("/help"));
@@ -93,7 +93,6 @@
         assert!(help.contains("aliases: /plugins, /marketplace"));
         assert!(help.contains("/agents"));
         assert!(help.contains("/skills"));
-        assert!(help.contains("/exit"));
         assert!(help.contains("Auto-save            .kcode/sessions/<session-id>.jsonl"));
         assert!(help.contains("Resume latest        /resume latest"));
     }

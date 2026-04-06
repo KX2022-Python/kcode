@@ -28,26 +28,6 @@ use super::theme::ThemePreset;
 use super::tool_group::group_tool_calls;
 use super::ReplApp;
 
-const KCODE_BANNER: &str = "Kcode";
-
-pub(crate) fn render_welcome_banner() -> String {
-    format!(
-        "{KCODE_BANNER} v{}\n  Start a task, inspect the workspace, or press `/` to browse commands.\n  /help shows the full command surface and /resume latest jumps back into recent work.",
-        env!("CARGO_PKG_VERSION")
-    )
-}
-
-pub(crate) fn short_session_id(session_id: &str) -> String {
-    const MAX_CHARS: usize = 24;
-    let count = session_id.chars().count();
-    if count <= MAX_CHARS {
-        return session_id.to_string();
-    }
-
-    let mut short = session_id.chars().take(MAX_CHARS - 1).collect::<String>();
-    short.push('…');
-    short
-}
 pub(crate) fn default_welcome_messages(
     model: &str,
     profile: &str,
@@ -73,6 +53,25 @@ pub(crate) fn default_welcome_messages(
             level: SysLevel::Info,
         },
     ]
+}
+
+pub(crate) fn render_welcome_banner() -> String {
+    format!(
+        "Kcode v{}\n  Start a task, inspect the workspace, or press `/` to browse commands.\n  /help shows the full command surface and /resume latest jumps back into recent work.",
+        env!("CARGO_PKG_VERSION")
+    )
+}
+
+pub(crate) fn short_session_id(session_id: &str) -> String {
+    const MAX_CHARS: usize = 24;
+    let count = session_id.chars().count();
+    if count <= MAX_CHARS {
+        return session_id.to_string();
+    }
+
+    let mut short = session_id.chars().take(MAX_CHARS - 1).collect::<String>();
+    short.push('…');
+    short
 }
 
 pub(crate) fn run_repl<F>(

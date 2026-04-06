@@ -2,6 +2,7 @@ use crate::model::{SlashCommand, SlashCommandParseError};
 use crate::parse_support::{
     command_error, parse_list_or_help_args, parse_skills_args, remainder_after_command, usage_error,
 };
+use crate::registry::{builtin_session_command_enabled, find_slash_command_spec};
 
 impl SlashCommand {
     pub fn parse(input: &str) -> Result<Option<Self>, SlashCommandParseError> {
@@ -28,6 +29,12 @@ pub fn validate_slash_command_input(
 
     let args = parts.collect::<Vec<_>>();
     let remainder = remainder_after_command(trimmed, command);
+
+    if let Some(spec) = find_slash_command_spec(command) {
+        if !builtin_session_command_enabled(spec.name) {
+            return Ok(Some(SlashCommand::Unknown(command.to_string())));
+        }
+    }
 
     Ok(Some(match command {
         "help" => {

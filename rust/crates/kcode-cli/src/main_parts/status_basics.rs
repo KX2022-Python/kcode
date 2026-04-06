@@ -212,6 +212,7 @@ fn render_btw_usage() -> String {
   Example          /btw what changed between async fn and spawn_blocking?"
         .to_string()
 }
+
 struct AutoDreamCommandOutcome {
     message: String,
     changed: bool,
@@ -352,6 +353,7 @@ fn read_settings_object(
     })?;
     Ok(object.clone())
 }
+
 fn format_bug_report(description: Option<&str>, session_id: &str, session_path: &std::path::Path) -> String {
     format!(
         "Bug report

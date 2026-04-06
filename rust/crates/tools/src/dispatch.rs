@@ -3,12 +3,10 @@ use serde_json::{json, Value};
 
 use crate::types::{
     AgentInput, AskUserQuestionInput, BriefInput, ConfigInput, CronCreateInput, CronDeleteInput,
-    EditFileInput, EnterPlanModeInput, ExitPlanModeInput, GlobSearchInputValue, LspInput,
-    McpAuthInput, McpResourceInput, McpToolInput, NotebookEditInput, PowerShellInput,
-    ReadFileInput, RemoteTriggerInput, ReplInput, SleepInput, StructuredOutputInput,
-    TaskCreateInput, TaskIdInput, TaskUpdateInput, TeamCreateInput, TeamDeleteInput,
-    TestingPermissionInput, TodoWriteInput, ToolSearchInput, WebBrowserInput, WebFetchInput,
-    WebSearchInput, WriteFileInput,
+    EditFileInput, EnterPlanModeInput, ExitPlanModeInput, GlobSearchInputValue, NotebookEditInput,
+    PowerShellInput, ReadFileInput, ReplInput, SleepInput, StructuredOutputInput,
+    TeamCreateInput, TeamDeleteInput, TestingPermissionInput, TodoWriteInput, ToolSearchInput,
+    WebBrowserInput, WebFetchInput, WebSearchInput, WriteFileInput,
 };
 
 pub fn execute_tool(name: &str, input: &Value) -> Result<String, String> {
@@ -39,25 +37,11 @@ pub fn execute_tool(name: &str, input: &Value) -> Result<String, String> {
         "AskUserQuestion" => {
             from_value::<AskUserQuestionInput>(input).and_then(run_ask_user_question)
         }
-        "TaskCreate" => from_value::<TaskCreateInput>(input).and_then(run_task_create),
-        "TaskGet" => from_value::<TaskIdInput>(input).and_then(run_task_get),
-        "TaskList" => run_task_list(input.clone()),
-        "TaskStop" => from_value::<TaskIdInput>(input).and_then(run_task_stop),
-        "TaskUpdate" => from_value::<TaskUpdateInput>(input).and_then(run_task_update),
-        "TaskOutput" => from_value::<TaskIdInput>(input).and_then(run_task_output),
         "TeamCreate" => from_value::<TeamCreateInput>(input).and_then(run_team_create),
         "TeamDelete" => from_value::<TeamDeleteInput>(input).and_then(run_team_delete),
         "CronCreate" => from_value::<CronCreateInput>(input).and_then(run_cron_create),
         "CronDelete" => from_value::<CronDeleteInput>(input).and_then(run_cron_delete),
         "CronList" => run_cron_list(input.clone()),
-        "LSP" => from_value::<LspInput>(input).and_then(run_lsp),
-        "ListMcpResources" => {
-            from_value::<McpResourceInput>(input).and_then(run_list_mcp_resources)
-        }
-        "ReadMcpResource" => from_value::<McpResourceInput>(input).and_then(run_read_mcp_resource),
-        "McpAuth" => from_value::<McpAuthInput>(input).and_then(run_mcp_auth),
-        "RemoteTrigger" => from_value::<RemoteTriggerInput>(input).and_then(run_remote_trigger),
-        "MCP" => from_value::<McpToolInput>(input).and_then(run_mcp_tool),
         "TestingPermission" => {
             from_value::<TestingPermissionInput>(input).and_then(run_testing_permission)
         }
@@ -76,55 +60,6 @@ fn run_ask_user_question(input: AskUserQuestionInput) -> Result<String, String> 
         result["options"] = json!(options);
     }
     to_pretty_json(result)
-}
-
-fn run_task_create(input: TaskCreateInput) -> Result<String, String> {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    to_pretty_json(json!({
-        "task_id": format!("task_{secs:08x}"),
-        "status": "created",
-        "prompt": input.prompt,
-        "description": input.description
-    }))
-}
-
-fn run_task_get(input: TaskIdInput) -> Result<String, String> {
-    to_pretty_json(json!({
-        "task_id": input.task_id,
-        "status": "unknown",
-        "message": "Task runtime not yet implemented"
-    }))
-}
-
-fn run_task_list(_input: Value) -> Result<String, String> {
-    to_pretty_json(json!({ "tasks": [], "message": "No tasks found" }))
-}
-
-fn run_task_stop(input: TaskIdInput) -> Result<String, String> {
-    to_pretty_json(json!({
-        "task_id": input.task_id,
-        "status": "stopped",
-        "message": "Task stop requested"
-    }))
-}
-
-fn run_task_update(input: TaskUpdateInput) -> Result<String, String> {
-    to_pretty_json(json!({
-        "task_id": input.task_id,
-        "status": "updated",
-        "message": input.message
-    }))
-}
-
-fn run_task_output(input: TaskIdInput) -> Result<String, String> {
-    to_pretty_json(json!({
-        "task_id": input.task_id,
-        "output": "",
-        "message": "No output available"
-    }))
 }
 
 fn run_team_create(input: TeamCreateInput) -> Result<String, String> {
@@ -170,64 +105,6 @@ fn run_cron_delete(input: CronDeleteInput) -> Result<String, String> {
 
 fn run_cron_list(_input: Value) -> Result<String, String> {
     to_pretty_json(json!({ "crons": [], "message": "No scheduled tasks found" }))
-}
-
-fn run_lsp(input: LspInput) -> Result<String, String> {
-    to_pretty_json(json!({
-        "action": input.action,
-        "path": input.path,
-        "line": input.line,
-        "character": input.character,
-        "query": input.query,
-        "results": [],
-        "message": "LSP server not connected"
-    }))
-}
-
-fn run_list_mcp_resources(input: McpResourceInput) -> Result<String, String> {
-    to_pretty_json(json!({
-        "server": input.server,
-        "resources": [],
-        "message": "No MCP resources available"
-    }))
-}
-
-fn run_read_mcp_resource(input: McpResourceInput) -> Result<String, String> {
-    to_pretty_json(json!({
-        "server": input.server,
-        "uri": input.uri,
-        "content": "",
-        "message": "Resource not available"
-    }))
-}
-
-fn run_mcp_auth(input: McpAuthInput) -> Result<String, String> {
-    to_pretty_json(json!({
-        "server": input.server,
-        "status": "auth_required",
-        "message": "MCP authentication not yet implemented"
-    }))
-}
-
-fn run_remote_trigger(input: RemoteTriggerInput) -> Result<String, String> {
-    to_pretty_json(json!({
-        "url": input.url,
-        "method": input.method.unwrap_or_else(|| "GET".to_string()),
-        "headers": input.headers,
-        "body": input.body,
-        "status": "triggered",
-        "message": "Remote trigger stub response"
-    }))
-}
-
-fn run_mcp_tool(input: McpToolInput) -> Result<String, String> {
-    to_pretty_json(json!({
-        "server": input.server,
-        "tool": input.tool,
-        "arguments": input.arguments,
-        "result": null,
-        "message": "MCP tool proxy not yet connected"
-    }))
 }
 
 fn run_testing_permission(input: TestingPermissionInput) -> Result<String, String> {

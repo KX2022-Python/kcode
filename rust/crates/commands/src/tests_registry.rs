@@ -63,7 +63,6 @@ fn v1_command_manifest_matches_expected_session_surface() {
             "memory",
             "init",
             "doctor",
-            "add-dir",
         ]
     );
 }
@@ -88,10 +87,7 @@ fn renders_per_command_help_detail_for_mcp() {
 
 #[test]
 fn suggests_closest_slash_commands_for_typos_and_aliases() {
-    assert_eq!(
-        suggest_slash_commands("stats", 3),
-        vec!["/stats", "/status"]
-    );
+    assert_eq!(suggest_slash_commands("stats", 3), vec!["/status"]);
     assert_eq!(suggest_slash_commands("/plugns", 3), vec!["/plugin"]);
     assert_eq!(suggest_slash_commands("zzz", 3), Vec::<String>::new());
 }

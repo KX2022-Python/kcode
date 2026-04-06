@@ -1,11 +1,13 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::Position;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
 use super::text_cursor::{clamp_cursor_to_boundary, next_char_boundary, previous_char_boundary};
-use super::text_layout::display_line_count;
+use super::text_layout::{display_line_count, wrap_display_text};
 use super::theme::ThemePalette;
 
 /// Prompt 输入框状态
@@ -172,7 +174,7 @@ pub fn prompt_height(input: &PromptInput, available_width: u16) -> u16 {
     } else {
         &input.text
     };
-    let line_count = display_line_count(visible_text, content_width);
+    let line_count = display_line_count(&format!("{}{visible_text}", prompt_prefix(&input.mode)), content_width);
     (line_count as u16 + 2).clamp(3, 8)
 }
 
@@ -185,8 +187,8 @@ pub fn render_prompt_input(
     palette: ThemePalette,
 ) {
     let (prompt_prefix, active_color) = match input.mode {
-        InputMode::Normal => ("> ", palette.accent),
-        InputMode::Bash => ("! ", palette.warning),
+        InputMode::Normal => (prompt_prefix(&input.mode), palette.accent),
+        InputMode::Bash => (prompt_prefix(&input.mode), palette.warning),
     };
     let border_color = match (is_active, input.mode.clone()) {
         (true, InputMode::Normal) => palette.accent,
@@ -194,13 +196,6 @@ pub fn render_prompt_input(
         (false, _) => palette.border,
     };
 
-    let cursor = clamp_cursor_to_boundary(&input.text, input.cursor);
-    let (before_cursor, after_cursor) = input.text.split_at(cursor);
-    let cursor_char = after_cursor.chars().next().unwrap_or(' ');
-    let after_visible = after_cursor
-        .chars()
-        .skip(if after_cursor.is_empty() { 0 } else { 1 })
-        .collect::<String>();
     let placeholder = input.text.is_empty();
 
     let mut spans = vec![Span::styled(
@@ -218,19 +213,7 @@ pub fn render_prompt_input(
             Style::default().fg(palette.text_muted),
         ));
     } else {
-        spans.push(Span::raw(before_cursor.to_string()));
-        if is_active {
-            spans.push(Span::styled(
-                cursor_char.to_string(),
-                Style::default()
-                    .fg(palette.inverse_text)
-                    .bg(active_color)
-                    .add_modifier(Modifier::BOLD),
-            ));
-        }
-        if !after_visible.is_empty() {
-            spans.push(Span::raw(after_visible));
-        }
+        spans.push(Span::raw(input.text.clone()));
     }
 
     let block = Block::default()
@@ -247,15 +230,44 @@ pub fn render_prompt_input(
         }));
 
     frame.render_widget(paragraph, area);
+    if is_active {
+        let (cursor_x, cursor_y) = prompt_cursor_offset(input, prompt_prefix, prompt_content_width(area.width));
+        let max_x = area.width.saturating_sub(2);
+        let max_y = area.height.saturating_sub(3);
+        frame.set_cursor_position(Position::new(
+            area.x + 1 + cursor_x.min(max_x),
+            area.y + 1 + cursor_y.min(max_y),
+        ));
+    }
 }
 
 fn prompt_content_width(available_width: u16) -> usize {
     available_width.saturating_sub(2).max(1) as usize
 }
 
+fn prompt_prefix(mode: &InputMode) -> &'static str {
+    match mode {
+        InputMode::Normal => "> ",
+        InputMode::Bash => "! ",
+    }
+}
+
+fn prompt_cursor_offset(input: &PromptInput, prompt_prefix: &str, content_width: usize) -> (u16, u16) {
+    let cursor = clamp_cursor_to_boundary(&input.text, input.cursor);
+    let before_cursor = format!("{prompt_prefix}{}", &input.text[..cursor]);
+    let wrapped = wrap_display_text(&before_cursor, content_width);
+    let mut y = wrapped.len().saturating_sub(1) as u16;
+    let mut x = wrapped.last().map(|line| UnicodeWidthStr::width(line.as_str()) as u16).unwrap_or(0);
+    if x >= content_width as u16 {
+        x = 0;
+        y += 1;
+    }
+    (x, y)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{prompt_height, PromptAction, PromptInput};
+    use super::{prompt_cursor_offset, prompt_height, PromptAction, PromptInput};
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     #[test]
@@ -277,6 +289,15 @@ mod tests {
     }
 
     #[test]
+    fn prompt_height_counts_the_prefix_when_wrapping() {
+        let mut input = PromptInput::new();
+        input.text = "1234".to_string();
+        input.cursor = input.text.len();
+
+        assert_eq!(prompt_height(&input, 7), 4);
+    }
+
+    #[test]
     fn shift_enter_inserts_a_newline_instead_of_submitting() {
         let mut input = PromptInput::new();
         let action = input.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
@@ -294,6 +315,15 @@ mod tests {
         let action = input.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
 
         assert!(matches!(action, PromptAction::Submit));
+    }
+
+    #[test]
+    fn prompt_cursor_wraps_to_the_next_visual_line_at_the_boundary() {
+        let mut input = PromptInput::new();
+        input.text = "123".to_string();
+        input.cursor = input.text.len();
+
+        assert_eq!(prompt_cursor_offset(&input, "> ", 5), (0, 1));
     }
 
     #[test]

@@ -26,12 +26,26 @@ fn exposes_mvp_tools() {
     assert!(names.contains(&"StructuredOutput"));
     assert!(names.contains(&"REPL"));
     assert!(names.contains(&"PowerShell"));
+    assert!(!names.contains(&"TaskCreate"));
+    assert!(!names.contains(&"LSP"));
+    assert!(!names.contains(&"MCP"));
 }
 
 #[test]
 fn rejects_unknown_tool_names() {
     let error = execute_tool("nope", &json!({})).expect_err("tool should be rejected");
     assert!(error.contains("unsupported tool"));
+}
+
+#[test]
+fn rejects_hidden_stub_tool_names() {
+    let task = execute_tool("TaskCreate", &json!({ "prompt": "hello" }))
+        .expect_err("hidden task tool should be rejected");
+    assert!(task.contains("unsupported tool"));
+
+    let lsp = execute_tool("LSP", &json!({ "action": "symbols" }))
+        .expect_err("hidden LSP tool should be rejected");
+    assert!(lsp.contains("unsupported tool"));
 }
 
 #[test]

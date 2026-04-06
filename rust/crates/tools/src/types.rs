@@ -179,24 +179,6 @@ pub(crate) struct AskUserQuestionInput {
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct TaskCreateInput {
-    pub(crate) prompt: String,
-    #[serde(default)]
-    pub(crate) description: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct TaskIdInput {
-    pub(crate) task_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct TaskUpdateInput {
-    pub(crate) task_id: String,
-    pub(crate) message: String,
-}
-
-#[derive(Debug, Deserialize)]
 pub(crate) struct TeamCreateInput {
     pub(crate) name: String,
     pub(crate) tasks: Vec<Value>,
@@ -218,51 +200,6 @@ pub(crate) struct CronCreateInput {
 #[derive(Debug, Deserialize)]
 pub(crate) struct CronDeleteInput {
     pub(crate) cron_id: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct LspInput {
-    pub(crate) action: String,
-    #[serde(default)]
-    pub(crate) path: Option<String>,
-    #[serde(default)]
-    pub(crate) line: Option<u32>,
-    #[serde(default)]
-    pub(crate) character: Option<u32>,
-    #[serde(default)]
-    pub(crate) query: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct McpResourceInput {
-    #[serde(default)]
-    pub(crate) server: Option<String>,
-    #[serde(default)]
-    pub(crate) uri: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct McpAuthInput {
-    pub(crate) server: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct RemoteTriggerInput {
-    pub(crate) url: String,
-    #[serde(default)]
-    pub(crate) method: Option<String>,
-    #[serde(default)]
-    pub(crate) headers: Option<Value>,
-    #[serde(default)]
-    pub(crate) body: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct McpToolInput {
-    pub(crate) server: String,
-    pub(crate) tool: String,
-    #[serde(default)]
-    pub(crate) arguments: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
