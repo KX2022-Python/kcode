@@ -3,7 +3,7 @@ use runtime::FilesystemIsolationMode;
 
 use super::core::{FieldId, TuiApp};
 
-const PERMISSION_MODES: &[&str] = &["read-only", "workspace-write", "danger-full-access"];
+const PERMISSION_MODES: &[&str] = &["read-only", "plan", "workspace-write", "danger-full-access"];
 const KEYBINDING_PRESETS: &[&str] = &["default", "vim", "compact"];
 
 impl TuiApp {
@@ -347,5 +347,16 @@ fn next_filesystem_mode(mode: FilesystemIsolationMode) -> FilesystemIsolationMod
         FilesystemIsolationMode::Off => FilesystemIsolationMode::WorkspaceOnly,
         FilesystemIsolationMode::WorkspaceOnly => FilesystemIsolationMode::AllowList,
         FilesystemIsolationMode::AllowList => FilesystemIsolationMode::Off,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{next_choice, PERMISSION_MODES};
+
+    #[test]
+    fn permission_mode_cycle_includes_plan() {
+        assert_eq!(next_choice("read-only", PERMISSION_MODES), "plan");
+        assert_eq!(next_choice("plan", PERMISSION_MODES), "workspace-write");
     }
 }

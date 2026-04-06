@@ -14,6 +14,7 @@ fn prompt_tui_permission(
     request: &runtime::PermissionRequest,
     current_mode: PermissionMode,
 ) -> Result<TuiPermissionChoice, String> {
+    ensure_permission_terminal_size()?;
     let mut terminal = ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(
         io::stdout(),
     ))
@@ -35,6 +36,19 @@ fn prompt_tui_permission(
             _ => {}
         }
     }
+}
+
+fn ensure_permission_terminal_size() -> Result<(), String> {
+    let (width, height) = crossterm::terminal::size().map_err(|error| error.to_string())?;
+    if permission_prompt_area_usable(ratatui::layout::Rect::new(0, 0, width, height)) {
+        Ok(())
+    } else {
+        Err("TUI permission prompt requires a terminal with non-zero size".to_string())
+    }
+}
+
+fn permission_prompt_area_usable(area: ratatui::layout::Rect) -> bool {
+    area.width > 1 && area.height > 1
 }
 
 fn handle_tui_permission_prompt_key(
@@ -70,6 +84,9 @@ fn render_tui_permission_prompt(
     current_mode: PermissionMode,
     focused_button: usize,
 ) {
+    if !permission_prompt_area_usable(frame.area()) {
+        return;
+    }
     let preview_lines = request
         .input
         .lines()
@@ -232,6 +249,19 @@ mod tui_permission_prompt_tests {
         assert!(matches!(
             prompter.cached_decision(&request),
             Some(PermissionPromptDecision::Deny { .. })
+        ));
+    }
+
+    #[test]
+    fn permission_prompt_area_usable_rejects_zero_sized_frames() {
+        assert!(!super::permission_prompt_area_usable(
+            ratatui::layout::Rect::new(0, 0, 0, 24)
+        ));
+        assert!(!super::permission_prompt_area_usable(
+            ratatui::layout::Rect::new(0, 0, 80, 0)
+        ));
+        assert!(super::permission_prompt_area_usable(
+            ratatui::layout::Rect::new(0, 0, 80, 24)
         ));
     }
 }

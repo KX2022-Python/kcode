@@ -36,7 +36,7 @@ impl FooterPills {
     pub fn render(&self, width: u16, palette: ThemePalette) -> Paragraph<'static> {
         let mut spans = vec![hint("Enter", "send", palette.text_muted)];
         spans.push(separator(palette));
-        spans.push(hint("Shift+Enter", "newline", palette.text_muted));
+        spans.push(hint("Shift+Enter/Ctrl+J", "newline", palette.text_muted));
 
         if width >= 84 {
             spans.push(separator(palette));
@@ -50,7 +50,7 @@ impl FooterPills {
 
         if width >= 142 {
             spans.push(separator(palette));
-            spans.push(hint("PgUp/PgDn", "scroll", palette.text_muted));
+            spans.push(hint("PgUp/PgDn/Ctrl+↑↓", "scroll", palette.text_muted));
         }
 
         if width >= 166 {

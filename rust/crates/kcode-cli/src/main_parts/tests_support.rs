@@ -30,6 +30,7 @@
         ResolutionSource, ResolvedProviderProfile, Session,
     };
     use serde_json::json;
+    use std::cell::{Cell, RefCell};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command;
@@ -39,6 +40,11 @@
     };
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use tools::GlobalToolRegistry;
+
+    thread_local! {
+        static ENV_LOCK_DEPTH: Cell<usize> = const { Cell::new(0) };
+        static ENV_LOCK_GUARD: RefCell<Option<MutexGuard<'static, ()>>> = const { RefCell::new(None) };
+    }
 
     fn registry_with_plugin_tool() -> GlobalToolRegistry {
         GlobalToolRegistry::with_plugin_tools(vec![PluginTool::new(
@@ -87,19 +93,70 @@
         );
     }
 
-    fn env_lock() -> MutexGuard<'static, ()> {
+    struct EnvLockGuard;
+
+    fn env_lock() -> EnvLockGuard {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        ENV_LOCK_DEPTH.with(|depth| {
+            if depth.get() == 0 {
+                let guard = LOCK
+                    .get_or_init(|| Mutex::new(()))
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                ENV_LOCK_GUARD.with(|slot| {
+                    *slot.borrow_mut() = Some(guard);
+                });
+            }
+            depth.set(depth.get() + 1);
+        });
+
+        EnvLockGuard
+    }
+
+    impl Drop for EnvLockGuard {
+        fn drop(&mut self) {
+            ENV_LOCK_DEPTH.with(|depth| {
+                let next = depth.get().saturating_sub(1);
+                depth.set(next);
+                if next == 0 {
+                    ENV_LOCK_GUARD.with(|slot| {
+                        slot.borrow_mut().take();
+                    });
+                }
+            });
+        }
     }
 
     fn with_current_dir<T>(cwd: &Path, f: impl FnOnce() -> T) -> T {
-        let previous = std::env::current_dir().expect("cwd should load");
+        let _guard = env_lock();
+        let previous = std::env::current_dir().unwrap_or_else(|_| fallback_cwd());
         std::env::set_current_dir(cwd).expect("cwd should change");
+        let restore = CurrentDirRestore { previous };
         let result = f();
-        std::env::set_current_dir(previous).expect("cwd should restore");
+        drop(restore);
         result
+    }
+
+    fn fallback_cwd() -> PathBuf {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .filter(|path| path.is_dir())
+            .unwrap_or_else(|| PathBuf::from("/"))
+    }
+
+    struct CurrentDirRestore {
+        previous: PathBuf,
+    }
+
+    impl Drop for CurrentDirRestore {
+        fn drop(&mut self) {
+            let target = if self.previous.is_dir() {
+                self.previous.as_path()
+            } else {
+                Path::new("/")
+            };
+            std::env::set_current_dir(target).expect("cwd should restore");
+        }
     }
 
     fn test_setup_context(workspace: &Path) -> runtime::SetupContext {

@@ -278,6 +278,9 @@ api_key_env = "KCODE_API_KEY"
 
     let output = command_in(&temp_dir)
         .env("KCODE_CONFIG_HOME", &config_home)
+        .env_remove("KCODE_API_KEY")
+        .env_remove("KCODE_BASE_URL")
+        .env_remove("KCODE_MODEL")
         .arg("doctor")
         .output()
         .expect("kcode should launch");
@@ -340,6 +343,9 @@ fn profile_commands_report_effective_router_settings_after_init() {
 
     let init_output = command_in(&temp_dir)
         .env("KCODE_CONFIG_HOME", &config_home)
+        .env_remove("KCODE_API_KEY")
+        .env_remove("KCODE_BASE_URL")
+        .env_remove("KCODE_MODEL")
         .arg("init")
         .output()
         .expect("kcode should launch");
@@ -347,6 +353,9 @@ fn profile_commands_report_effective_router_settings_after_init() {
 
     let list_output = command_in(&temp_dir)
         .env("KCODE_CONFIG_HOME", &config_home)
+        .env_remove("KCODE_API_KEY")
+        .env_remove("KCODE_BASE_URL")
+        .env_remove("KCODE_MODEL")
         .args(["profile", "list"])
         .output()
         .expect("kcode should launch");
@@ -358,6 +367,9 @@ fn profile_commands_report_effective_router_settings_after_init() {
 
     let show_output = command_in(&temp_dir)
         .env("KCODE_CONFIG_HOME", &config_home)
+        .env_remove("KCODE_API_KEY")
+        .env_remove("KCODE_BASE_URL")
+        .env_remove("KCODE_MODEL")
         .args(["profile", "show"])
         .output()
         .expect("kcode should launch");

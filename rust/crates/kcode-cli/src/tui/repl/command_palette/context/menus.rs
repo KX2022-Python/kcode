@@ -1,10 +1,9 @@
 use commands::{CommandDescriptor, CommandSource};
 
-use super::{
-    default_insert_text, enhanced_command_copy, format_usage, model_detail,
-    model_short_description,
-};
 use super::super::{SlashCommandEntry, SlashCommandEntryAction};
+use super::{
+    default_insert_text, enhanced_command_copy, format_usage, model_detail, model_short_description,
+};
 
 pub(super) fn command_entry(descriptor: &CommandDescriptor) -> SlashCommandEntry {
     let (description, detail) = enhanced_command_copy(&descriptor.name, &descriptor.description);

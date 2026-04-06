@@ -174,7 +174,10 @@ pub fn prompt_height(input: &PromptInput, available_width: u16) -> u16 {
     } else {
         &input.text
     };
-    let line_count = display_line_count(&format!("{}{visible_text}", prompt_prefix(&input.mode)), content_width);
+    let line_count = display_line_count(
+        &format!("{}{visible_text}", prompt_prefix(&input.mode)),
+        content_width,
+    );
     (line_count as u16 + 2).clamp(3, 8)
 }
 
@@ -196,31 +199,15 @@ pub fn render_prompt_input(
         (false, _) => palette.border,
     };
 
-    let placeholder = input.text.is_empty();
-
-    let mut spans = vec![Span::styled(
-        prompt_prefix,
-        Style::default().fg(if is_active {
-            active_color
-        } else {
-            palette.text_muted
-        }),
-    )];
-
-    if placeholder {
-        spans.push(Span::styled(
-            "给 Kcode 下达任务，或输入 / 查看命令…",
-            Style::default().fg(palette.text_muted),
-        ));
-    } else {
-        spans.push(Span::raw(input.text.clone()));
-    }
+    let visible_rows = area.height.saturating_sub(2).max(1) as usize;
+    let content_width = prompt_content_width(area.width);
+    let (lines, cursor_y) = prompt_visible_lines(input, prompt_prefix, content_width, visible_rows);
 
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color))
         .style(Style::default().bg(palette.input_bg));
-    let paragraph = Paragraph::new(vec![Line::from(spans)])
+    let paragraph = Paragraph::new(lines)
         .block(block)
         .wrap(Wrap { trim: false })
         .style(Style::default().fg(if is_active {
@@ -231,7 +218,7 @@ pub fn render_prompt_input(
 
     frame.render_widget(paragraph, area);
     if is_active {
-        let (cursor_x, cursor_y) = prompt_cursor_offset(input, prompt_prefix, prompt_content_width(area.width));
+        let (cursor_x, _) = prompt_cursor_offset(input, prompt_prefix, content_width);
         let max_x = area.width.saturating_sub(2);
         let max_y = area.height.saturating_sub(3);
         frame.set_cursor_position(Position::new(
@@ -252,12 +239,53 @@ fn prompt_prefix(mode: &InputMode) -> &'static str {
     }
 }
 
-fn prompt_cursor_offset(input: &PromptInput, prompt_prefix: &str, content_width: usize) -> (u16, u16) {
+fn prompt_wrapped_lines(
+    input: &PromptInput,
+    prompt_prefix: &str,
+    content_width: usize,
+) -> Vec<String> {
+    let visible_text = if input.text.is_empty() {
+        "给 Kcode 下达任务，或输入 / 查看命令…"
+    } else {
+        &input.text
+    };
+    wrap_display_text(&format!("{prompt_prefix}{visible_text}"), content_width)
+}
+
+fn prompt_visible_lines(
+    input: &PromptInput,
+    prompt_prefix: &str,
+    content_width: usize,
+    visible_rows: usize,
+) -> (Vec<Line<'static>>, u16) {
+    let wrapped = prompt_wrapped_lines(input, prompt_prefix, content_width);
+    let (_, cursor_y) = prompt_cursor_offset(input, prompt_prefix, content_width);
+    let start = usize::from(cursor_y)
+        .saturating_add(1)
+        .saturating_sub(visible_rows.max(1));
+    let lines = wrapped
+        .into_iter()
+        .skip(start)
+        .take(visible_rows.max(1))
+        .map(|line| Line::from(vec![Span::raw(line)]))
+        .collect::<Vec<_>>();
+    let visible_cursor_y = cursor_y.saturating_sub(start as u16);
+    (lines, visible_cursor_y)
+}
+
+fn prompt_cursor_offset(
+    input: &PromptInput,
+    prompt_prefix: &str,
+    content_width: usize,
+) -> (u16, u16) {
     let cursor = clamp_cursor_to_boundary(&input.text, input.cursor);
     let before_cursor = format!("{prompt_prefix}{}", &input.text[..cursor]);
     let wrapped = wrap_display_text(&before_cursor, content_width);
     let mut y = wrapped.len().saturating_sub(1) as u16;
-    let mut x = wrapped.last().map(|line| UnicodeWidthStr::width(line.as_str()) as u16).unwrap_or(0);
+    let mut x = wrapped
+        .last()
+        .map(|line| UnicodeWidthStr::width(line.as_str()) as u16)
+        .unwrap_or(0);
     if x >= content_width as u16 {
         x = 0;
         y += 1;
@@ -267,7 +295,10 @@ fn prompt_cursor_offset(input: &PromptInput, prompt_prefix: &str, content_width:
 
 #[cfg(test)]
 mod tests {
-    use super::{prompt_cursor_offset, prompt_height, PromptAction, PromptInput};
+    use super::{
+        prompt_cursor_offset, prompt_height, prompt_visible_lines, prompt_wrapped_lines,
+        PromptAction, PromptInput,
+    };
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     #[test]
@@ -307,6 +338,15 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_j_inserts_a_newline_instead_of_submitting() {
+        let mut input = PromptInput::new();
+        let action = input.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL));
+
+        assert!(matches!(action, PromptAction::Edited));
+        assert_eq!(input.text, "\n");
+    }
+
+    #[test]
     fn plain_enter_submits() {
         let mut input = PromptInput::new();
         input.text = "hello".to_string();
@@ -324,6 +364,23 @@ mod tests {
         input.cursor = input.text.len();
 
         assert_eq!(prompt_cursor_offset(&input, "> ", 5), (0, 1));
+    }
+
+    #[test]
+    fn prompt_visible_lines_follow_the_latest_input_when_prompt_overflows() {
+        let mut input = PromptInput::new();
+        input.text = "abcdefghijklmnopqrstuvwxyz".to_string();
+        input.cursor = input.text.len();
+
+        let wrapped = prompt_wrapped_lines(&input, "> ", 6);
+        let (visible, cursor_y) = prompt_visible_lines(&input, "> ", 6, 3);
+        let visible_text = visible
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(visible_text, wrapped[wrapped.len() - 3..].to_vec());
+        assert_eq!(cursor_y, 2);
     }
 
     #[test]

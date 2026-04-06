@@ -8,7 +8,7 @@ pub(crate) fn starter_config_toml(config_home: &Path) -> String {
             "# First launch opens the provider TUI. Fill your provider endpoint, model, and API key env there.\n",
             "\n",
             "profile = \"custom\"\n",
-            "permission_mode = \"workspace-write\"\n",
+            "permission_mode = \"danger-full-access\"\n",
             "session_dir = \"{}\"\n",
             "\n",
             "[profiles.custom]\n",
@@ -27,4 +27,16 @@ pub(crate) fn starter_config_toml(config_home: &Path) -> String {
         ),
         session_dir.display()
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::starter_config_toml;
+    use std::path::Path;
+
+    #[test]
+    fn starter_config_defaults_to_danger_full_access() {
+        let config = starter_config_toml(Path::new("/tmp/kcode-home"));
+        assert!(config.contains("permission_mode = \"danger-full-access\""));
+    }
 }

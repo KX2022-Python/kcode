@@ -24,3 +24,5 @@ bridge.env
 # Claude Code local artifacts
 .claude/
 .claw/
+.clawd-agents/
+**/.clawd-agents/

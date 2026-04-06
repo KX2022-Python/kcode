@@ -325,6 +325,21 @@ impl ReplApp {
         }
 
         match key.code {
+            KeyCode::Up if key.modifiers == KeyModifiers::CONTROL => {
+                self.scroll_offset = self.scroll_offset.saturating_sub(3);
+                self.stick_to_bottom = false;
+                return;
+            }
+            KeyCode::Down if key.modifiers == KeyModifiers::CONTROL => {
+                let max_offset = auto_scroll_to_bottom(
+                    &self.messages,
+                    self.message_area_height,
+                    self.message_area_width,
+                );
+                self.scroll_offset = (self.scroll_offset + 3).min(max_offset);
+                self.stick_to_bottom = self.scroll_offset >= max_offset;
+                return;
+            }
             KeyCode::PageUp => {
                 self.scroll_offset = self
                     .scroll_offset

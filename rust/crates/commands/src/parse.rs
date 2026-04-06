@@ -78,7 +78,7 @@ pub fn validate_slash_command_input(
             SlashCommand::Cost
         }
         "resume" => SlashCommand::Resume {
-            session_path: remainder,
+            session_path: Some(required_remainder(command, remainder, "<session-path>")?),
         },
         "config" => SlashCommand::Config {
             section: parse_config_section(&args)?,
@@ -255,6 +255,17 @@ fn optional_single_arg(
         [value] => Ok(Some((*value).to_string())),
         _ => Err(usage_error(command, argument_hint)),
     }
+}
+
+fn required_remainder(
+    command: &str,
+    remainder: Option<String>,
+    argument_hint: &str,
+) -> Result<String, SlashCommandParseError> {
+    remainder
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| usage_error(command, argument_hint))
 }
 
 fn parse_permissions_mode(args: &[&str]) -> Result<Option<String>, SlashCommandParseError> {

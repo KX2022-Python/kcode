@@ -83,6 +83,7 @@ pub(crate) fn run_bootstrap_flow(cwd: &Path) -> Result<BootstrapDecision, Box<dy
             theme: app.state.theme,
         });
     }
+    ensure_bootstrap_terminal_size()?;
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -98,6 +99,19 @@ pub(crate) fn run_bootstrap_flow(cwd: &Path) -> Result<BootstrapDecision, Box<dy
     let _ = terminal.show_cursor();
 
     result
+}
+
+fn ensure_bootstrap_terminal_size() -> Result<(), Box<dyn Error>> {
+    let (width, height) = crossterm::terminal::size()?;
+    if bootstrap_area_usable(Rect::new(0, 0, width, height)) {
+        Ok(())
+    } else {
+        Err("kcode bootstrap requires a terminal with non-zero size".into())
+    }
+}
+
+fn bootstrap_area_usable(area: Rect) -> bool {
+    area.width > 1 && area.height > 1
 }
 
 fn run_bootstrap_loop(
@@ -180,6 +194,9 @@ fn handle_bootstrap_key(app: &mut BootstrapApp, key: KeyEvent) -> BootstrapActio
 }
 
 fn draw_bootstrap(frame: &mut ratatui::Frame<'_>, app: &BootstrapApp) {
+    if !bootstrap_area_usable(frame.area()) {
+        return;
+    }
     match app.step {
         BootstrapStep::Theme => render_theme_bootstrap(frame, app),
         BootstrapStep::Trust => render_trust_bootstrap(frame, app),

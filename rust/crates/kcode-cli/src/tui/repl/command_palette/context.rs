@@ -88,9 +88,11 @@ pub(super) fn palette_entries(
     available_models: &[String],
 ) -> Vec<SlashCommandEntry> {
     match context_command {
-        Some(context) if context.starts_with("group:") => {
-            group_entries(context.trim_start_matches("group:"), root_commands, available_models)
-        }
+        Some(context) if context.starts_with("group:") => group_entries(
+            context.trim_start_matches("group:"),
+            root_commands,
+            available_models,
+        ),
         Some(command) => command_context_entries(command, available_models),
         None => root_group_entries(),
     }
@@ -236,12 +238,17 @@ fn group_entries(
         "session" => {
             entries.extend(select_commands(
                 root_commands,
-                &["help", "status", "resume", "clear", "session", "export", "version"],
+                &[
+                    "help", "status", "resume", "clear", "session", "export", "version",
+                ],
             ));
             entries.extend(command_context_entries("session", available_models));
         }
         "runtime" => {
-            entries.extend(select_commands(root_commands, &["status", "cost", "memory"]));
+            entries.extend(select_commands(
+                root_commands,
+                &["status", "cost", "memory"],
+            ));
             entries.extend(command_context_entries("model", available_models));
             entries.extend(command_context_entries("permissions", available_models));
             entries.extend(command_context_entries("dream", available_models));
@@ -277,7 +284,12 @@ fn group_entries(
 fn select_commands(root_commands: &[SlashCommandEntry], names: &[&str]) -> Vec<SlashCommandEntry> {
     names
         .iter()
-        .filter_map(|name| root_commands.iter().find(|entry| entry.name == *name).cloned())
+        .filter_map(|name| {
+            root_commands
+                .iter()
+                .find(|entry| entry.name == *name)
+                .cloned()
+        })
         .collect()
 }
 

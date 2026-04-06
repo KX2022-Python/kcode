@@ -77,8 +77,9 @@ impl SlashCommandPicker {
         let mut reset_selection = false;
         match next_filter {
             Some((context_command, filter)) => {
-                reset_selection =
-                    !self.visible || self.filter != filter || self.context_command != context_command;
+                reset_selection = !self.visible
+                    || self.filter != filter
+                    || self.context_command != context_command;
                 self.visible = true;
                 self.filter = filter;
                 self.context_command = context_command;
@@ -195,17 +196,24 @@ impl SlashCommandPicker {
 }
 
 fn command_ready_for_submit(command: &str) -> bool {
-    matches!(validate_slash_command_input(command.trim_end()), Ok(Some(_)))
+    matches!(
+        validate_slash_command_input(command.trim_end()),
+        Ok(Some(_))
+    )
 }
 fn default_selected_index(entries: &[SlashCommandEntry]) -> usize {
-    usize::from(matches!(entries.first(), Some(entry) if entry.usage == "Back") && entries.len() > 1)
+    usize::from(
+        matches!(entries.first(), Some(entry) if entry.usage == "Back") && entries.len() > 1,
+    )
 }
 fn truncate_display(text: &str, width: usize) -> String {
     let mut out = String::new();
     let mut used = 0;
     for ch in text.chars() {
         let w = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if used + w > width { break; }
+        if used + w > width {
+            break;
+        }
         out.push(ch);
         used += w;
     }
@@ -264,7 +272,9 @@ pub fn render_slash_command_picker(
     let selected_detail = filtered
         .get(picker.selected)
         .map(|entry| format!("已选中: {}  · Enter 执行 · Tab 补全", entry.usage))
-        .unwrap_or_else(|| "输入命令名搜索，Enter 执行当前选中项，Tab 只补全，Esc 关闭。".to_string());
+        .unwrap_or_else(|| {
+            "输入命令名搜索，Enter 执行当前选中项，Tab 只补全，Esc 关闭。".to_string()
+        });
 
     let title = context_title(picker.context_command.as_deref());
     let inner_width = picker_rect.width.saturating_sub(2) as usize;
@@ -273,12 +283,22 @@ pub fn render_slash_command_picker(
         inner_width.saturating_sub(UnicodeWidthStr::width(title.as_str())),
     );
     let mut lines = vec![Line::from(vec![
-        Span::styled(title, Style::default().fg(palette.brand).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            title,
+            Style::default()
+                .fg(palette.brand)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(status, Style::default().fg(palette.text_muted)),
     ])];
     lines.push(Line::from(vec![Span::styled(
-        truncate_display(&format!("  {selected_detail}"), picker_rect.width.saturating_sub(2) as usize),
-        Style::default().fg(palette.accent).add_modifier(Modifier::BOLD),
+        truncate_display(
+            &format!("  {selected_detail}"),
+            picker_rect.width.saturating_sub(2) as usize,
+        ),
+        Style::default()
+            .fg(palette.accent)
+            .add_modifier(Modifier::BOLD),
     )]));
 
     for (offset, entry) in filtered[start..end].iter().enumerate() {
@@ -286,7 +306,10 @@ pub fn render_slash_command_picker(
         let is_selected = index == picker.selected;
         let prefix = if is_selected { "▸ " } else { "  " };
         let style = if is_selected {
-            Style::default().fg(palette.inverse_text).bg(palette.accent).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(palette.inverse_text)
+                .bg(palette.accent)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(palette.text)
         };
@@ -298,7 +321,10 @@ pub fn render_slash_command_picker(
     }
 
     if filtered.is_empty() {
-        lines.push(Line::from(vec![Span::styled("  No matching commands", Style::default().fg(palette.text_muted))]));
+        lines.push(Line::from(vec![Span::styled(
+            "  No matching commands",
+            Style::default().fg(palette.text_muted),
+        )]));
     }
 
     let block = Block::default()
@@ -312,7 +338,12 @@ pub fn render_slash_command_picker(
     frame.render_widget(paragraph, picker_rect);
     frame.set_cursor_position(Position::new(
         picker_rect.x + 2,
-        picker_rect.y + if filtered.is_empty() { 2 } else { 3 + (picker.selected - start) as u16 },
+        picker_rect.y
+            + if filtered.is_empty() {
+                2
+            } else {
+                3 + (picker.selected - start) as u16
+            },
     ));
 }
 
@@ -320,7 +351,9 @@ fn visible_window_bounds(total: usize, selected: usize, rows: usize) -> (usize, 
     if total == 0 || rows == 0 {
         return (0, 0);
     }
-    let start = selected.saturating_sub(rows.min(4).saturating_sub(1)).min(total.saturating_sub(rows));
+    let start = selected
+        .saturating_sub(rows.min(4).saturating_sub(1))
+        .min(total.saturating_sub(rows));
     let end = (start + rows).min(total);
     (start, end)
 }
@@ -340,7 +373,10 @@ fn entry_match_rank(entry: &SlashCommandEntry, needle: &str) -> u8 {
     let usage = entry.usage.to_ascii_lowercase();
     let name = entry.name.to_ascii_lowercase();
     let slash_needle = format!("/{needle}");
-    let alias_exact = entry.aliases.iter().any(|alias| alias.eq_ignore_ascii_case(needle));
+    let alias_exact = entry
+        .aliases
+        .iter()
+        .any(|alias| alias.eq_ignore_ascii_case(needle));
     let alias_prefix = entry
         .aliases
         .iter()
@@ -450,7 +486,9 @@ mod tests {
         picker.refresh_commands(true, &cwd, &[]);
         picker.sync_with_input("/danger");
         let entries = picker.filtered();
-        assert!(entries.iter().any(|entry| entry.usage == "/permissions danger-full-access"));
+        assert!(entries
+            .iter()
+            .any(|entry| entry.usage == "/permissions danger-full-access"));
     }
     #[test]
     fn enter_submits_when_the_exact_palette_command_is_already_present() {

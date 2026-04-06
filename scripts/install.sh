@@ -8,9 +8,9 @@ echo "🛠️ Installing Kcode Systemd Service..."
 # 1. Install Binary
 echo "📦 Installing binary..."
 cd "$REPO_ROOT/rust"
-cargo build --release
-sudo cp target/release/kcode /usr/local/bin/
-sudo chmod +x /usr/local/bin/kcode
+cargo build --release -p kcode-cli
+sudo mkdir -p /usr/local/bin
+sudo install -m 755 "$REPO_ROOT/rust/target/release/kcode" /usr/local/bin/kcode
 
 # 2. Install Service
 echo "🔧 Registering kcode-bridge.service..."

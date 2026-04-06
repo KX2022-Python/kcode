@@ -273,7 +273,7 @@ supports_streaming = false
             Some(value) => std::env::set_var("KCODE_PROFILE", value),
             None => std::env::remove_var("KCODE_PROFILE"),
         }
-        std::fs::remove_dir_all(root).expect("temp config root should clean up");
+        let _ = std::fs::remove_dir_all(root);
 
         assert!(error.contains("`--allowedTools` is unavailable"));
         assert!(error.contains("active profile `bridge`"));
@@ -342,6 +342,7 @@ supports_streaming = false
 
     #[test]
     fn rejects_unknown_allowed_tools() {
+        let _guard = env_lock();
         let error = parse_args(&[
             "--profile".to_string(),
             "cliproxyapi".to_string(),

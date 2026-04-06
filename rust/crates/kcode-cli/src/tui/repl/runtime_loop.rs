@@ -2,14 +2,13 @@ use std::error::Error;
 use std::io::{self, IsTerminal};
 use std::time::Duration;
 
-use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
-};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
 use ratatui::Terminal;
 
 use super::command_palette::render_slash_command_picker;
@@ -48,7 +47,7 @@ pub(crate) fn default_welcome_messages(
         },
         RenderableMessage::System {
             message:
-                "Enter 发送消息 · Shift+Enter 换行 · `/` 打开命令面板 · /status 查看会话 · Ctrl+D 退出"
+                "Enter 发送消息 · Shift+Enter/Ctrl+J 换行 · PgUp/PgDn 或 Ctrl+↑/↓ 滚动 · Ctrl+D 退出"
                     .to_string(),
             level: SysLevel::Info,
         },
@@ -91,6 +90,7 @@ where
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err("kcode repl requires an interactive terminal".into());
     }
+    ensure_terminal_size("kcode repl")?;
 
     let mut app = ReplApp::new(
         model,
@@ -105,7 +105,7 @@ where
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     terminal.hide_cursor()?;
@@ -117,11 +117,7 @@ where
     let run_result = run_repl_loop(&mut terminal, &mut app, &mut executor);
 
     let _ = disable_raw_mode();
-    let _ = execute!(
-        terminal.backend_mut(),
-        DisableMouseCapture,
-        LeaveAlternateScreen
-    );
+    let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
     let _ = terminal.show_cursor();
 
     run_result
@@ -162,6 +158,19 @@ where
     }
 
     Ok(())
+}
+
+fn ensure_terminal_size(context: &str) -> Result<(), Box<dyn Error>> {
+    let (width, height) = crossterm::terminal::size()?;
+    if terminal_area_usable(Rect::new(0, 0, width, height)) {
+        Ok(())
+    } else {
+        Err(format!("{context} requires a terminal with non-zero size").into())
+    }
+}
+
+fn terminal_area_usable(area: Rect) -> bool {
+    area.width > 1 && area.height > 1
 }
 
 fn process_pending_command<F>(app: &mut ReplApp, executor: &mut F)
@@ -271,6 +280,9 @@ fn apply_backend_result(app: &mut ReplApp, result: BackendResult) {
 }
 
 fn draw_frame(frame: &mut ratatui::Frame<'_>, app: &mut ReplApp) {
+    if !terminal_area_usable(frame.area()) {
+        return;
+    }
     let prompt_h = prompt_height(&app.input, frame.area().width);
     let layout = build_layout(frame.area(), prompt_h);
     app.set_message_viewport(layout.messages);
@@ -341,6 +353,13 @@ mod tests {
     use ratatui::layout::Rect;
 
     #[test]
+    fn terminal_area_usable_rejects_zero_sized_frames() {
+        assert!(!super::terminal_area_usable(Rect::new(0, 0, 0, 24)));
+        assert!(!super::terminal_area_usable(Rect::new(0, 0, 80, 0)));
+        assert!(super::terminal_area_usable(Rect::new(0, 0, 80, 24)));
+    }
+
+    #[test]
     fn slash_palette_follows_the_current_input() {
         let mut app = ReplApp::new(
             "gpt-4.1".to_string(),
@@ -388,6 +407,36 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
         app.scroll_to_bottom();
         assert!(app.stick_to_bottom);
+    }
+
+    #[test]
+    fn ctrl_arrow_keys_scroll_messages() {
+        let mut app = ReplApp::new(
+            "gpt-4.1".to_string(),
+            "default".to_string(),
+            "session-1".to_string(),
+            "workspace-write".to_string(),
+            true,
+            Vec::new(),
+            Vec::new(),
+            None,
+        );
+        app.message_area_height = 4;
+        app.message_area_width = 24;
+
+        for index in 0..12 {
+            app.add_message(crate::tui::repl::RenderableMessage::AssistantText {
+                text: format!("message-{index}"),
+                streaming: false,
+            });
+        }
+
+        app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::CONTROL));
+        assert!(!app.stick_to_bottom);
+
+        let before = app.scroll_offset;
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::CONTROL));
+        assert!(app.scroll_offset >= before);
     }
 
     #[test]
