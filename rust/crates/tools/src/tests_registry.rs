@@ -50,6 +50,11 @@ fn rejects_hidden_stub_tool_names() {
 
 #[test]
 fn permission_mode_from_plugin_rejects_invalid_inputs() {
+    assert_eq!(
+        permission_mode_from_plugin("plan").expect("plan permission should map"),
+        runtime::PermissionMode::Plan
+    );
+
     let unknown_permission =
         permission_mode_from_plugin("admin").expect_err("unknown plugin permission should fail");
     assert!(unknown_permission.contains("unsupported plugin permission: admin"));

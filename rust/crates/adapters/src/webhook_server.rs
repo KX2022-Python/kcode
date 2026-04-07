@@ -38,6 +38,15 @@ pub struct WebhookState {
     pub handler: Arc<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + Send + Sync>,
 }
 
+async fn invoke_bridge_handler(
+    handler: Arc<dyn Fn(BridgeInboundEvent) -> BridgeOutboundEvent + Send + Sync>,
+    event: BridgeInboundEvent,
+) -> Result<BridgeOutboundEvent, StatusCode> {
+    tokio::task::spawn_blocking(move || handler(event))
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
 /// Start the webhook server listening on the given address.
 pub async fn start_webhook_server(
     addr: SocketAddr,
@@ -109,7 +118,7 @@ async fn handle_telegram_webhook(
     };
 
     for event in events {
-        let outbound = (state.handler)(event);
+        let outbound = invoke_bridge_handler(Arc::clone(&state.handler), event).await?;
         if let Some(transport) = &state.telegram_transport {
             if let Err(e) = transport.send_outbound(&outbound).await {
                 error!("Telegram send failed: {}", e);
@@ -133,13 +142,14 @@ struct WhatsAppVerifyQuery {
 
 async fn handle_whatsapp_verify(
     Query(params): Query<WhatsAppVerifyQuery>,
-    State(_state): State<WebhookState>,
+    State(state): State<WebhookState>,
 ) -> Result<String, StatusCode> {
     if params.mode.as_deref() == Some("subscribe") {
-        // In production, compare verify_token with config
-        if params.verify_token.is_some() {
-            info!("WhatsApp webhook verified");
-            return Ok(params.challenge.unwrap_or_default());
+        if let Some(config) = &state.whatsapp_config {
+            if params.verify_token.as_deref() == Some(config.webhook_verify_token.as_str()) {
+                info!("WhatsApp webhook verified");
+                return Ok(params.challenge.unwrap_or_default());
+            }
         }
     }
     Err(StatusCode::FORBIDDEN)
@@ -172,7 +182,7 @@ async fn handle_whatsapp_webhook(
     };
 
     for event in parse_whatsapp_webhook(&payload) {
-        let outbound = (state.handler)(event);
+        let outbound = invoke_bridge_handler(Arc::clone(&state.handler), event).await?;
         if let Some(transport) = &state.whatsapp_transport {
             if let Err(e) = transport.send_outbound(&outbound).await {
                 error!("WhatsApp send failed: {}", e);
@@ -228,7 +238,7 @@ async fn handle_feishu_webhook(
     }
 
     if let Some(event) = parse_feishu_webhook(&payload) {
-        let outbound = (state.handler)(event);
+        let outbound = invoke_bridge_handler(Arc::clone(&state.handler), event).await?;
         if let Some(transport) = &state.feishu_transport {
             if let Err(e) = transport.send_outbound(&outbound).await {
                 error!("Feishu send failed: {}", e);
@@ -237,4 +247,63 @@ async fn handle_feishu_webhook(
     }
 
     Ok(Json(serde_json::json!({ "status": "ok" })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bridge::DeliveryMode;
+
+    fn test_state(verify_token: &str) -> WebhookState {
+        WebhookState {
+            telegram_transport: None,
+            whatsapp_config: Some(WhatsAppConfig {
+                access_token: "token".to_string(),
+                phone_number_id: "phone".to_string(),
+                app_secret: String::new(),
+                webhook_verify_token: verify_token.to_string(),
+            }),
+            whatsapp_transport: None,
+            feishu_config: None,
+            feishu_transport: None,
+            handler: Arc::new(|event| BridgeOutboundEvent {
+                bridge_event_id: event.bridge_event_id,
+                session_id: "session".to_string(),
+                render_items: vec![("text".to_string(), "ok".to_string())],
+                delivery_mode: DeliveryMode::Single,
+                channel_capability_hint: "whatsapp".to_string(),
+                reply_target: None,
+            }),
+        }
+    }
+
+    #[tokio::test]
+    async fn whatsapp_verify_rejects_wrong_token() {
+        let result = handle_whatsapp_verify(
+            Query(WhatsAppVerifyQuery {
+                mode: Some("subscribe".to_string()),
+                verify_token: Some("wrong".to_string()),
+                challenge: Some("challenge".to_string()),
+            }),
+            State(test_state("expected")),
+        )
+        .await;
+
+        assert_eq!(result, Err(StatusCode::FORBIDDEN));
+    }
+
+    #[tokio::test]
+    async fn whatsapp_verify_accepts_matching_token() {
+        let result = handle_whatsapp_verify(
+            Query(WhatsAppVerifyQuery {
+                mode: Some("subscribe".to_string()),
+                verify_token: Some("expected".to_string()),
+                challenge: Some("challenge".to_string()),
+            }),
+            State(test_state("expected")),
+        )
+        .await;
+
+        assert_eq!(result.expect("verify should pass"), "challenge");
+    }
 }

@@ -230,7 +230,7 @@ pub(crate) const SLASH_COMMAND_SPECS: &[SlashCommandSpec] = &[
     SlashCommandSpec {
         name: "review",
         aliases: &[],
-        summary: "Run a code review on current changes",
+        summary: "Inspect the current local diff as a review baseline",
         argument_hint: Some("[scope]"),
         resume_supported: false,
     },

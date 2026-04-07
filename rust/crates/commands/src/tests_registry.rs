@@ -86,6 +86,14 @@ fn renders_per_command_help_detail_for_mcp() {
 }
 
 #[test]
+fn review_help_detail_describes_local_diff_baseline() {
+    let help = render_slash_command_help_detail("review").expect("detail help should exist");
+    assert!(help.contains("/review [scope]"));
+    assert!(help.contains("Summary          Inspect the current local diff as a review baseline"));
+    assert!(help.contains("Category         Analysis & automation"));
+}
+
+#[test]
 fn suggests_closest_slash_commands_for_typos_and_aliases() {
     assert_eq!(suggest_slash_commands("stats", 3), vec!["/status"]);
     assert_eq!(suggest_slash_commands("/plugns", 3), vec!["/plugin"]);

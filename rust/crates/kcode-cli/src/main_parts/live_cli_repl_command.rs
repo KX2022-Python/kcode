@@ -31,6 +31,10 @@ impl LiveCli {
                 self.run_issue(context.as_deref())?;
                 false
             }
+            SlashCommand::Review { scope } => {
+                self.run_review(scope.as_deref())?;
+                false
+            }
             SlashCommand::DebugToolCall => {
                 self.run_debug_tool_call(None)?;
                 false
@@ -191,7 +195,6 @@ impl LiveCli {
             | SlashCommand::Thinkback
             | SlashCommand::ReleaseNotes
             | SlashCommand::SecurityReview
-            | SlashCommand::Review { .. }
             | SlashCommand::Usage { .. }
             | SlashCommand::Rename { .. }
             | SlashCommand::Copy { .. }

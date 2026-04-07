@@ -258,6 +258,7 @@ pub fn render_slash_command_help_for_context(context: &CommandRegistryContext) -
         "Session & visibility",
         "Workspace & git",
         "Discovery & debugging",
+        "Analysis & automation",
     ];
     for category in categories {
         lines.push(category.to_string());

@@ -331,6 +331,10 @@ impl LiveCli {
             SlashCommand::Issue { context } => {
                 Ok(tui_text_result(format_issue_report(context.as_deref())))
             }
+            SlashCommand::Review { scope } => Ok(tui_text_result(format_review_report(
+                &env::current_dir()?,
+                scope.as_deref(),
+            )?)),
             SlashCommand::DebugToolCall => {
                 Ok(tui_text_result(render_last_tool_debug_report(self.runtime.session())?))
             }
@@ -457,7 +461,6 @@ impl LiveCli {
             | SlashCommand::Thinkback
             | SlashCommand::ReleaseNotes
             | SlashCommand::SecurityReview
-            | SlashCommand::Review { .. }
             | SlashCommand::Usage { .. }
             | SlashCommand::Rename { .. }
             | SlashCommand::Copy { .. }
@@ -475,90 +478,4 @@ impl LiveCli {
         }
     }
 
-    fn tui_session_command_result(
-        &mut self,
-        action: Option<&str>,
-        target: Option<&str>,
-    ) -> Result<tui::repl::BackendResult, Box<dyn std::error::Error>> {
-        match action {
-            None | Some("list") => Ok(tui_text_result(render_session_list(&self.session.id)?)),
-            Some("switch") => {
-                let Some(target) = target else {
-                    return Ok(tui_text_result("Usage: /session switch <session-id>".to_string()));
-                };
-                let handle = resolve_session_reference(target)?;
-                let session = Session::load_from_path(&handle.path)?;
-                let message_count = session.messages.len();
-                self.session = SessionHandle {
-                    id: session.session_id.clone(),
-                    path: handle.path,
-                };
-                self.replace_tui_runtime(
-                    session,
-                    self.model.clone(),
-                    self.model_explicit,
-                    self.permission_mode,
-                )?;
-                Ok(tui_text_result(format!(
-                    "Session switched\n  Active session   {}\n  File             {}\n  Messages         {}",
-                    self.session.id,
-                    self.session.path.display(),
-                    message_count,
-                )))
-            }
-            Some("fork") => {
-                let forked = self.runtime.fork_session(target.map(ToOwned::to_owned));
-                let parent_session_id = self.session.id.clone();
-                let handle = create_managed_session_handle(&forked.session_id)?;
-                let branch_name = forked.fork.as_ref().and_then(|fork| fork.branch_name.clone());
-                let forked = forked.with_persistence_path(handle.path.clone());
-                let message_count = forked.messages.len();
-                forked.save_to_path(&handle.path)?;
-                self.session = handle;
-                self.replace_tui_runtime(
-                    forked,
-                    self.model.clone(),
-                    self.model_explicit,
-                    self.permission_mode,
-                )?;
-                Ok(tui_text_result(format!(
-                    "Session forked\n  Parent session   {}\n  Active session   {}\n  Branch           {}\n  File             {}\n  Messages         {}",
-                    parent_session_id,
-                    self.session.id,
-                    branch_name.as_deref().unwrap_or("(unnamed)"),
-                    self.session.path.display(),
-                    message_count,
-                )))
-            }
-            Some(other) => Ok(tui_text_result(format!(
-                "Unknown /session action '{other}'. Use /session list, /session switch <session-id>, or /session fork [branch-name]."
-            ))),
-        }
-    }
-
-    fn tui_plugins_command_result(
-        &mut self,
-        action: Option<&str>,
-        target: Option<&str>,
-    ) -> Result<tui::repl::BackendResult, Box<dyn std::error::Error>> {
-        let cwd = env::current_dir()?;
-        let loader = ConfigLoader::default_for(&cwd);
-        let runtime_config = loader.load()?;
-        let mut manager = build_plugin_manager(&cwd, &loader, &runtime_config);
-        let result = handle_plugins_slash_command(action, target, &mut manager)?;
-        if result.reload_runtime {
-            self.reload_runtime_features()?;
-        }
-        Ok(tui_text_result(result.message))
-    }
-
-    fn tui_btw_result(
-        &self,
-        question: Option<&str>,
-    ) -> Result<tui::repl::BackendResult, Box<dyn std::error::Error>> {
-        let Some(question) = question.map(str::trim).filter(|value| !value.is_empty()) else {
-            return Ok(tui_text_result(render_btw_usage()));
-        };
-        Ok(tui_text_result(self.run_internal_prompt_text(question, false)?))
-    }
 }

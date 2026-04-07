@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
+use std::time::{Duration, Instant};
 
 use adapters::{
     BridgeInboundEvent, BridgeOutboundEvent, ChannelSession, DeliveryMode, SessionRouter,
@@ -14,11 +15,20 @@ use runtime::{ConfigLoader, PermissionMode};
 use crate::LiveCli;
 
 const BRIDGE_SESSION_DIR_NAME: &str = "bridge-sessions";
+const BRIDGE_SESSION_IDLE_TTL: Duration = Duration::from_secs(30 * 60);
+const BRIDGE_SESSION_CACHE_LIMIT: usize = 128;
+const BRIDGE_HANDLER_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// A message sent from the Webhook Server to the BridgeCore.
 pub struct BridgeMessage {
     pub event: BridgeInboundEvent,
     pub reply_tx: Sender<BridgeOutboundEvent>,
+}
+
+struct ManagedSession {
+    cli: LiveCli,
+    route: ChannelSession,
+    last_used_at: Instant,
 }
 
 /// Configuration for creating new sessions.
@@ -31,7 +41,7 @@ pub struct SessionConfig {
 
 /// Manages the lifecycle of individual LiveCli sessions.
 pub struct SessionManager {
-    sessions: HashMap<String, LiveCli>,
+    sessions: HashMap<String, ManagedSession>,
     session_router: SessionRouter,
 }
 
@@ -51,6 +61,7 @@ impl SessionManager {
         channel: &str,
         default_config: &SessionConfig,
     ) -> Result<(&mut LiveCli, ChannelSession), String> {
+        self.evict_expired_sessions();
         let session_route = self.session_router.get_or_create_session(channel, chat_id);
         let session_key = session_route.session_id.clone();
         let session_path = self.session_router.session_path(channel, chat_id);
@@ -101,10 +112,97 @@ impl SessionManager {
                 Err(error) => return Err(error.to_string()),
             };
 
-            self.sessions.insert(session_key.clone(), cli);
+            self.sessions.insert(
+                session_key.clone(),
+                ManagedSession {
+                    cli,
+                    route: session_route.clone(),
+                    last_used_at: Instant::now(),
+                },
+            );
+            self.enforce_cache_limit();
         }
 
-        Ok((self.sessions.get_mut(&session_key).unwrap(), session_route))
+        let managed = self.sessions.get_mut(&session_key).unwrap();
+        managed.last_used_at = Instant::now();
+        Ok((&mut managed.cli, managed.route.clone()))
+    }
+
+    fn evict_expired_sessions(&mut self) {
+        let now = Instant::now();
+        let expired = self
+            .sessions
+            .iter()
+            .filter_map(|(session_id, managed)| {
+                (now.duration_since(managed.last_used_at) >= BRIDGE_SESSION_IDLE_TTL)
+                    .then(|| session_id.clone())
+            })
+            .collect::<Vec<_>>();
+
+        for session_id in expired {
+            self.evict_session(&session_id);
+        }
+    }
+
+    fn enforce_cache_limit(&mut self) {
+        while self.sessions.len() > BRIDGE_SESSION_CACHE_LIMIT {
+            let Some(oldest_session_id) = self
+                .sessions
+                .iter()
+                .min_by_key(|(_, managed)| managed.last_used_at)
+                .map(|(session_id, _)| session_id.clone())
+            else {
+                break;
+            };
+            self.evict_session(&oldest_session_id);
+        }
+    }
+
+    fn evict_session(&mut self, session_id: &str) {
+        if let Some(managed) = self.sessions.remove(session_id) {
+            let session = managed
+                .cli
+                .runtime
+                .session()
+                .clone()
+                .with_persistence_path(managed.cli.session.path.clone());
+            if let Err(error) = session.save_to_path(&managed.cli.session.path) {
+                eprintln!(
+                    "⚠ Failed to persist bridge session {} during eviction: {}",
+                    session_id, error
+                );
+            }
+            self.session_router
+                .remove_session(&managed.route.channel, &managed.route.chat_id);
+        }
+    }
+}
+
+#[cfg(test)]
+impl SessionManager {
+    pub(crate) fn active_session_count(&self) -> usize {
+        self.sessions.len()
+    }
+
+    pub(crate) fn mark_session_idle_for_test(&mut self, session_id: &str, idle_for: Duration) {
+        if let Some(managed) = self.sessions.get_mut(session_id) {
+            managed.last_used_at = Instant::now() - idle_for;
+        }
+    }
+
+    pub(crate) fn evict_expired_sessions_for_test(&mut self) {
+        self.evict_expired_sessions();
+    }
+
+    pub(crate) fn has_active_route(&self, channel: &str, chat_id: &str) -> bool {
+        self.session_router
+            .list_sessions()
+            .into_iter()
+            .any(|session| session.channel == channel && session.chat_id == chat_id)
+    }
+
+    pub(crate) fn route_for_test(&self, channel: &str, chat_id: &str) -> ChannelSession {
+        self.session_router.get_or_create_session(channel, chat_id)
     }
 }
 
@@ -323,7 +421,7 @@ pub fn run_bridge_service(
             };
         }
 
-        match rx.recv() {
+        match rx.recv_timeout(BRIDGE_HANDLER_TIMEOUT) {
             Ok(response) => response,
             Err(_) => BridgeOutboundEvent {
                 bridge_event_id: "error".to_string(),
@@ -352,18 +450,4 @@ pub fn run_bridge_service(
     })?;
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::bridge_session_dir_from_config_home;
-    use std::path::{Path, PathBuf};
-
-    #[test]
-    fn bridge_session_dir_lives_under_config_home() {
-        assert_eq!(
-            bridge_session_dir_from_config_home(Path::new("/tmp/kcode-home")),
-            PathBuf::from("/tmp/kcode-home/bridge-sessions")
-        );
-    }
 }

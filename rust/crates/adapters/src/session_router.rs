@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 /// A session entry holding the channel-specific state.
 pub struct ChannelSession {
@@ -38,9 +38,15 @@ impl SessionRouter {
         format!("bridge-{channel}-{chat_id}")
     }
 
+    fn sessions_guard(&self) -> MutexGuard<'_, HashMap<String, ChannelSession>> {
+        self.sessions
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// Get or create a session for the given channel/chat pair.
     pub fn get_or_create_session(&self, channel: &str, chat_id: &str) -> ChannelSession {
-        let mut sessions = self.sessions.lock().unwrap();
+        let mut sessions = self.sessions_guard();
         let map_key = Self::session_map_key(channel, chat_id);
         if let Some(sess) = sessions.get(&map_key) {
             return sess.clone();
@@ -64,15 +70,13 @@ impl SessionRouter {
 
     /// List all active sessions.
     pub fn list_sessions(&self) -> Vec<ChannelSession> {
-        let sessions = self.sessions.lock().unwrap();
+        let sessions = self.sessions_guard();
         sessions.values().cloned().collect()
     }
 
     /// Remove a session by channel/chat pair.
     pub fn remove_session(&self, channel: &str, chat_id: &str) {
-        self.sessions
-            .lock()
-            .unwrap()
+        self.sessions_guard()
             .remove(&Self::session_map_key(channel, chat_id));
     }
 }
@@ -112,5 +116,19 @@ mod tests {
             path,
             PathBuf::from("/tmp/bridge-sessions/bridge-telegram-42.jsonl")
         );
+    }
+
+    #[test]
+    fn session_router_recovers_after_mutex_poison() {
+        let router = SessionRouter::new(PathBuf::from("/tmp/bridge-sessions"));
+
+        let _ = std::panic::catch_unwind(|| {
+            let _guard = router.sessions.lock().expect("lock should be acquired");
+            panic!("poison router mutex");
+        });
+
+        let session = router.get_or_create_session("telegram", "42");
+        assert_eq!(session.session_id, "bridge-telegram-42");
+        assert_eq!(router.list_sessions().len(), 1);
     }
 }

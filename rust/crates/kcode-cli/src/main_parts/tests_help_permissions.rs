@@ -82,6 +82,7 @@
         assert!(help.contains("/memory"));
         assert!(help.contains("/dream [on|off|status]"));
         assert!(help.contains("/plan [on|off|status]"));
+        assert!(help.contains("/review [scope]"));
         assert!(help.contains("/init"));
         assert!(help.contains("/diff"));
         assert!(help.contains("/version"));
@@ -119,6 +120,7 @@
         assert!(completions.contains(&"/model gpt-4.1".to_string()));
         assert!(completions.contains(&"/permissions plan".to_string()));
         assert!(completions.contains(&"/permissions workspace-write".to_string()));
+        assert!(completions.contains(&"/review".to_string()));
         assert!(completions.contains(&"/session list".to_string()));
         assert!(completions.contains(&"/session switch session-current".to_string()));
         assert!(completions.contains(&"/resume session-old".to_string()));
@@ -264,6 +266,32 @@ supports_streaming = false
                 "todos",
             ]
         );
+    }
+
+    #[test]
+    fn review_report_summarizes_local_diff_state() {
+        let _guard = env_lock();
+        let root = temp_dir();
+        fs::create_dir_all(&root).expect("root dir");
+        git(&["init", "--quiet"], &root);
+        git(&["config", "user.email", "tests@example.com"], &root);
+        git(&["config", "user.name", "Kcode Tests"], &root);
+        fs::write(root.join("tracked.txt"), "hello\n").expect("write tracked");
+        git(&["add", "tracked.txt"], &root);
+        git(&["commit", "-m", "init", "--quiet"], &root);
+        fs::write(root.join("tracked.txt"), "hello\nreview me\n").expect("modify tracked");
+
+        let report = with_current_dir(&root, || {
+            format_review_report(&root, Some("focused check")).expect("review report should render")
+        });
+
+        assert!(report.contains("Review"));
+        assert!(report.contains("Scope            focused check"));
+        assert!(report.contains("Git state"));
+        assert!(report.contains("Unstaged changes:"));
+        assert!(report.contains("tracked.txt"));
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
     }
 
     #[test]

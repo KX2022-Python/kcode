@@ -214,6 +214,7 @@ pub(crate) fn normalize_tool_name(value: &str) -> String {
 pub(crate) fn permission_mode_from_plugin(value: &str) -> Result<PermissionMode, String> {
     match value {
         "read-only" => Ok(PermissionMode::ReadOnly),
+        "plan" => Ok(PermissionMode::Plan),
         "workspace-write" => Ok(PermissionMode::WorkspaceWrite),
         "danger-full-access" => Ok(PermissionMode::DangerFullAccess),
         other => Err(format!("unsupported plugin permission: {other}")),

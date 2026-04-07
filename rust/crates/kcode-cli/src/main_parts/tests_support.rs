@@ -6,7 +6,7 @@
         format_cost_report, format_internal_prompt_progress_line, format_issue_report,
         format_model_report, format_model_switch_report, format_permissions_report,
         format_permissions_switch_report, format_pr_report, format_resume_report,
-        format_status_report, format_tool_call_start, format_tool_result, format_ultraplan_report,
+        format_review_report, format_status_report, format_tool_call_start, format_tool_result, format_ultraplan_report,
         format_unknown_slash_command, format_unknown_slash_command_message,
         normalize_permission_mode, parse_args, parse_git_status_branch,
         parse_git_status_metadata_for, parse_git_workspace_summary, permission_policy,
@@ -20,6 +20,7 @@
         InternalPromptProgressEvent, InternalPromptProgressState, LiveCli, ProviderRuntimeClient,
         SlashCommand, StatusUsage, DEFAULT_MODEL,
     };
+    use crate::bridge_core::{SessionConfig, SessionManager};
     use api::{MessageResponse, OutputContentBlock, Usage};
     use plugins::{
         PluginManager, PluginManagerConfig, PluginTool, PluginToolDefinition, PluginToolPermission,

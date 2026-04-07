@@ -51,7 +51,6 @@ const HIDDEN_SESSION_COMMANDS: &[&str] = &[
     "thinkback",
     "release-notes",
     "security-review",
-    "review",
     "usage",
     "rename",
     "copy",
