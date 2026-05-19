@@ -9,12 +9,12 @@ export type CommandResult = {
   exit?: boolean;
 };
 
-export async function handlePrompt(text: string): Promise<CommandResult> {
-  const result = await runEngine(['prompt', text]);
+export async function handlePrompt(text: string, signal?: AbortSignal): Promise<CommandResult> {
+  const result = await runEngine(['prompt', text], { signal });
   return {
     messages: [
       {
-        role: result.ok ? 'assistant' : 'error',
+        role: result.cancelled ? 'system' : result.ok ? 'assistant' : 'error',
         text: result.output || statusText(result.ok, result.code),
       },
     ],
@@ -24,6 +24,7 @@ export async function handlePrompt(text: string): Promise<CommandResult> {
 export async function handleSlashCommand(
   raw: string,
   goal: GoalState,
+  signal?: AbortSignal,
 ): Promise<CommandResult> {
   const [name, ...rest] = raw.trim().slice(1).split(/\s+/).filter(Boolean);
   const args = rest.join(' ');
@@ -34,17 +35,17 @@ export async function handleSlashCommand(
     case 'goal':
       return handleGoal(args, goal);
     case 'status':
-      return fromEngine(['status']);
+      return fromEngine(['status'], signal);
     case 'doctor':
-      return fromEngine(['doctor']);
+      return fromEngine(['doctor'], signal);
     case 'help':
-      return fromEngine(['help']);
+      return fromEngine(['help'], signal);
     case 'mcp':
-      return fromEngine(['mcp', ...rest]);
+      return fromEngine(['mcp', ...rest], signal);
     case 'memory':
-      return fromEngine(['--resume', 'latest', '/memory']);
+      return fromEngine(['--resume', 'latest', '/memory'], signal);
     case 'agents':
-      return handleAgents(rest);
+      return handleAgents(rest, signal);
     case 'permission-demo':
       return {
         requestPermissionDemo: true,
@@ -56,7 +57,7 @@ export async function handleSlashCommand(
         ],
       };
     default:
-      return fromEngine(['--resume', 'latest', raw]);
+      return fromEngine(['--resume', 'latest', raw], signal);
   }
 }
 
@@ -96,31 +97,31 @@ function handleGoal(args: string, current: GoalState): CommandResult {
   };
 }
 
-async function handleAgents(rest: string[]): Promise<CommandResult> {
-  const result = await runEngine(['agents', ...rest]);
+async function handleAgents(rest: string[], signal?: AbortSignal): Promise<CommandResult> {
+  const result = await runEngine(['agents', ...rest], { signal });
   return {
     agents: [
       {
         label: 'agents',
-        status: result.ok ? 'complete' : 'error',
+        status: result.ok ? 'complete' : result.cancelled ? 'cancelled' : 'error',
         detail: result.output || statusText(result.ok, result.code),
       },
     ],
     messages: [
       {
-        role: result.ok ? 'system' : 'error',
+        role: result.cancelled ? 'system' : result.ok ? 'system' : 'error',
         text: result.output || statusText(result.ok, result.code),
       },
     ],
   };
 }
 
-async function fromEngine(args: string[]): Promise<CommandResult> {
-  const result = await runEngine(args);
+async function fromEngine(args: string[], signal?: AbortSignal): Promise<CommandResult> {
+  const result = await runEngine(args, { signal });
   return {
     messages: [
       {
-        role: result.ok ? 'system' : 'error',
+        role: result.cancelled ? 'system' : result.ok ? 'system' : 'error',
         text: result.output || statusText(result.ok, result.code),
       },
     ],

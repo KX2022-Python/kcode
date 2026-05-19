@@ -10,6 +10,6 @@ export type GoalState = {
 
 export type AgentProgress = {
   label: string;
-  status: 'queued' | 'running' | 'complete' | 'error';
+  status: 'queued' | 'running' | 'complete' | 'error' | 'cancelled';
   detail?: string;
 };

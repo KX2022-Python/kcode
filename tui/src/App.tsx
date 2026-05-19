@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { Box, Text, useApp, useInput } from 'ink';
+import React, { useEffect, useRef, useState } from 'react';
+import { Box, Text, useApp, useCursor, useStdin } from 'ink';
+import stringWidth from 'string-width';
 import { handlePrompt, handleSlashCommand } from './commands.js';
 import type { AgentProgress, GoalState, UiMessage } from './types.js';
 
@@ -18,30 +19,35 @@ export function App(): React.ReactNode {
   const [goal, setGoal] = useState<GoalState>({ status: 'none' });
   const [agents, setAgents] = useState<AgentProgress[]>([]);
   const [permissionOpen, setPermissionOpen] = useState(false);
-
-  useInput((chunk, key) => {
-    if (busy) {
-      return;
-    }
-    if (permissionOpen) {
-      handlePermissionInput(chunk, setMessages, setPermissionOpen);
-      return;
-    }
-    if (key.ctrl && chunk === 'c') {
-      app.exit();
-      return;
-    }
-    if (key.return) {
-      void submit(input, goal, app.exit, setBusy, setInput, setGoal, setAgents, setMessages, setPermissionOpen);
-      return;
-    }
-    if (key.backspace || key.delete) {
-      setInput(value => value.slice(0, -1));
-      return;
-    }
-    if (chunk && !key.ctrl && !key.meta) {
-      setInput(value => value + chunk);
-    }
+  const activeRun = useRef<AbortController | null>(null);
+  const { setCursorPosition } = useCursor();
+  const visibleMessageCount = Math.min(messages.length, 12);
+  const agentLineCount = agents.length > 0 ? agents.length + 2 : 0;
+  const permissionLineCount = permissionOpen ? 7 : 0;
+  const prompt = `${busy ? 'running' : 'ready'} > `;
+  setCursorPosition({
+    x: stringWidth(prompt + input),
+    y: 4 + visibleMessageCount + agentLineCount + permissionLineCount,
+  });
+  useLineInput({
+    busy,
+    permissionOpen,
+    input,
+    setInput,
+    onSubmit: value =>
+      submit(value, goal, app.exit, setBusy, setInput, setGoal, setAgents, setMessages, setPermissionOpen, activeRun),
+    onPermissionInput: value => handlePermissionInput(value, setMessages, setPermissionOpen),
+    onExit: app.exit,
+  });
+  useBusyCancelInput({
+    busy,
+    onCancel: () => {
+      if (!activeRun.current || activeRun.current.signal.aborted) {
+        return;
+      }
+      activeRun.current.abort();
+      setMessages(items => [...items, { role: 'system', text: 'Cancellation requested.' }]);
+    },
   });
 
   return (
@@ -56,11 +62,108 @@ export function App(): React.ReactNode {
       {permissionOpen && <PermissionBox />}
       <Box marginTop={1}>
         <Text color={busy ? 'yellow' : 'green'}>{busy ? 'running' : 'ready'} </Text>
-        <Text color="cyan">{'> '}</Text>
+        <Text color="cyan">{'>'} </Text>
         <Text>{input}</Text>
       </Box>
     </Box>
   );
+}
+
+type LineInputOptions = {
+  busy: boolean;
+  permissionOpen: boolean;
+  input: string;
+  setInput: React.Dispatch<React.SetStateAction<string>>;
+  onSubmit: (value: string) => void;
+  onPermissionInput: (value: string) => void;
+  onExit: () => void;
+};
+
+function useLineInput({
+  busy,
+  permissionOpen,
+  input,
+  setInput,
+  onSubmit,
+  onPermissionInput,
+  onExit,
+}: LineInputOptions): void {
+  const { stdin, setRawMode, isRawModeSupported } = useStdin();
+
+  useEffect(() => {
+    if (isRawModeSupported) {
+      setRawMode(false);
+    }
+  }, [isRawModeSupported, setRawMode]);
+
+  useEffect(() => {
+    if (busy) {
+      return;
+    }
+    // Keep idle input in canonical terminal mode so IMEs and scrollback keep working.
+    stdin.setEncoding('utf8');
+    const handleData = (chunk: string) => {
+      if (isTerminalControlSequence(chunk)) {
+        return;
+      }
+      if (chunk === '\u0003') {
+        onExit();
+        return;
+      }
+      if (permissionOpen) {
+        onPermissionInput(chunk.trim());
+        return;
+      }
+      if (chunk === '\u007f' || chunk === '\b') {
+        setInput(value => Array.from(value).slice(0, -1).join(''));
+        return;
+      }
+      if (chunk.includes('\r') || chunk.includes('\n')) {
+        const submitted = input + chunk.replace(/[\r\n]+$/g, '');
+        setInput('');
+        onSubmit(submitted);
+        return;
+      }
+      setInput(value => value + chunk);
+    };
+
+    stdin.on('data', handleData);
+    stdin.resume();
+    return () => {
+      stdin.off('data', handleData);
+    };
+  }, [busy, input, onExit, onPermissionInput, onSubmit, permissionOpen, setInput, stdin]);
+}
+
+function isTerminalControlSequence(value: string): boolean {
+  return value.startsWith('\u001B[') || value.startsWith('\u001B]');
+}
+
+function useBusyCancelInput({ busy, onCancel }: { busy: boolean; onCancel: () => void }): void {
+  const { stdin, setRawMode, isRawModeSupported } = useStdin();
+
+  useEffect(() => {
+    if (!busy) {
+      return;
+    }
+    stdin.setEncoding('utf8');
+    if (isRawModeSupported) {
+      setRawMode(true);
+    }
+    const handleData = (chunk: string) => {
+      if (chunk === '\u001B' || chunk === '\u0003') {
+        onCancel();
+      }
+    };
+    stdin.on('data', handleData);
+    stdin.resume();
+    return () => {
+      stdin.off('data', handleData);
+      if (isRawModeSupported) {
+        setRawMode(false);
+      }
+    };
+  }, [busy, isRawModeSupported, onCancel, setRawMode, stdin]);
 }
 
 function Header({ goal, busy }: { goal: GoalState; busy: boolean }): React.ReactNode {
@@ -119,6 +222,7 @@ async function submit(
   setAgents: React.Dispatch<React.SetStateAction<AgentProgress[]>>,
   setMessages: React.Dispatch<React.SetStateAction<UiMessage[]>>,
   setPermissionOpen: React.Dispatch<React.SetStateAction<boolean>>,
+  activeRun: React.MutableRefObject<AbortController | null>,
 ): Promise<void> {
   const text = value.trim();
   if (!text) {
@@ -126,8 +230,13 @@ async function submit(
   }
   setInput('');
   setMessages(items => [...items, { role: 'user', text }]);
+  const controller = new AbortController();
+  activeRun.current = controller;
   setBusy(true);
-  const result = text.startsWith('/') ? await handleSlashCommand(text, goal) : await handlePrompt(text);
+  const result = text.startsWith('/')
+    ? await handleSlashCommand(text, goal, controller.signal)
+    : await handlePrompt(text, controller.signal);
+  activeRun.current = null;
   setBusy(false);
   if (result.exit) {
     exit();

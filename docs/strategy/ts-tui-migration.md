@@ -50,6 +50,7 @@ Kcode should absorb:
 - `kcode` with no arguments defaults to the TS TUI when its bundle is installed.
 - `kcode --headless ...` and `/usr/local/bin/kcode-engine ...` run the Rust engine directly.
 - `KCODE_TUI=rust` keeps the ratatui fallback available while migration continues.
+- The TS TUI input path keeps idle typing in terminal canonical mode for IME compatibility and scrollback, while running engine calls expose ESC/Ctrl+C cancellation.
 
 ## JSONL / stdio Protocol Draft
 

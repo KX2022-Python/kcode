@@ -63,6 +63,9 @@ cd rust && cargo build --release
 - [ ] TS TUI 的 permission dialog 路径可打开并可 approve / deny
 - [ ] Agent progress 以可读分组行展示，不泄漏原始后端 JSON
 - [ ] `/goal` 在 TS TUI header 中可见并能切换 active / complete / none
+- [ ] TS TUI 输入框支持输入法组合输入、英文、日文、符号和混合 UTF-8 文本
+- [ ] 鼠标滚轮默认滚动终端上下文，不进入输入框选择或菜单状态
+- [ ] 任务运行中按 ESC 可以取消当前 engine 子进程，并回到可输入状态
 - [ ] `kcode tui` 能在交互终端进入、导航、保存并退出
 - [ ] 非交互终端调用 `kcode tui` 时返回清晰错误并指向 `kcode config show`
 

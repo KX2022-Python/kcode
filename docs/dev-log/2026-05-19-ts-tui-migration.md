@@ -33,3 +33,9 @@
 - `npm --prefix tui run build` produced `tui/dist/index.js`.
 - `cargo check -p kcode-cli` passed.
 - Installed-binary validation is tracked separately in the final delivery notes for this round.
+
+## Input Fix Follow-up
+
+- Idle TS TUI input now keeps terminal canonical mode so IME composition, non-Chinese text, and scrollback behavior stay under the terminal.
+- Running engine calls can be cancelled from the frontend; ESC/Ctrl+C requests cancellation and the child process receives interrupt/terminate/kill fallback signals.
+- Regression coverage now tracks IME text, mouse-wheel scrollback, and ESC cancellation as required TUI behavior.
