@@ -193,6 +193,15 @@
     }
 
     #[test]
+    fn headless_flag_is_consumed_by_launcher_before_engine_parse() {
+        assert_eq!(
+            parse_args(&["--headless".to_string(), "--help".to_string()])
+                .expect("headless help should parse"),
+            CliAction::Help { profile: None }
+        );
+    }
+
+    #[test]
     fn parses_permission_mode_flag() {
         let args = vec!["--permission-mode=read-only".to_string()];
         assert_eq!(

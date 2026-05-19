@@ -21,6 +21,11 @@ Thumbs.db
 bridge.env
 *.log
 
+# TypeScript TUI local dependencies and build output
+/tui/node_modules/
+/tui/dist/
+/tui/package-lock.json
+
 # Claude Code local artifacts
 .claude/
 .claw/

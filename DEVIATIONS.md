@@ -95,6 +95,8 @@ TestingPermission, **WebBrowser** (Phase 14 新增)
 | Workspace crate 结构 | INTENTIONAL | 官方单 crate，Kcode 拆为 9 个 crate | claw-code rust/ |
 | 去 OAuth 认证 | INTENTIONAL | 改为 KCODE_* 环境变量驱动 | CC source Map §auth |
 | session persistence | ENHANCEMENT | 官方用 JSONL，Kcode 同时支持 JSON | CC source Map §session |
+| TS/React/Ink 默认 TUI | INTENTIONAL | Kcode 将交互前端迁移到 `tui/`，Rust 保留 engine/runtime 与 ratatui fallback | cc-haha Ink UI |
+| `kcode-engine` 入口 | ENHANCEMENT | 安装版提供 engine-only 入口，供 TS TUI 和自动化验收调用 | Kcode migration |
 
 ## 6. 偏差维护规则
 

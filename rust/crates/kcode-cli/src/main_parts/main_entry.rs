@@ -18,7 +18,21 @@ Run `{CLI_NAME} --help` for usage.
 }
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = env::args().skip(1).collect();
+    let mut force_engine = invoked_as_engine();
+    let args: Vec<String> = env::args()
+        .skip(1)
+        .filter(|arg| {
+            if arg == "--headless" {
+                force_engine = true;
+                false
+            } else {
+                true
+            }
+        })
+        .collect();
+    if args.is_empty() && !force_engine && launch_ts_tui_default()? {
+        return Ok(());
+    }
     match parse_args(&args)? {
         CliAction::Agents { args } => LiveCli::print_agents(args.as_deref())?,
         CliAction::Mcp { args, profile } => {

@@ -8,9 +8,9 @@
 
 ## 🌟 Key Features
 
-- 🦀 **Rust Core**: Built entirely in Rust for maximum safety, speed, and zero dependencies.
+- 🦀 **Rust Engine**: Rust owns runtime, tools, providers, sessions, MCP, memory, bridge behavior, and permission policy.
 - 🧠 **Persistent Memory**: Automatically extracts insights from your sessions and saves them as local Markdown files.
-- 🖥️ **Terminal Settings TUI**: Configure provider, sandbox, MCP, bridge, and UI preferences with `kcode tui`.
+- 🖥️ **TypeScript/React TUI**: `kcode` opens the default Ink-style frontend, while `kcode-engine` / `kcode --headless` keep the Rust engine path available.
 - 🌐 **Multi-Channel Bridge**: Connect to Telegram, WhatsApp, and Feishu with a single unified engine.
 - 🔄 **Native 24/7 Uptime**: Run as a robust Systemd service or via Docker with auto-restart policies.
 - 📷 **Rich Media Support**: Recognize and process images, documents, and voice messages from all supported channels.
@@ -69,6 +69,16 @@ export KCODE_BASE_URL="https://your-openai-compatible-endpoint/v1"
 export KCODE_MODEL="gpt-4.1"
 kcode
 ```
+
+`kcode` now launches the TypeScript/React/Ink TUI when the installed bundle is present. The Rust runtime remains the engine boundary:
+
+```bash
+kcode --headless --help
+kcode-engine --help
+KCODE_TUI=rust kcode
+```
+
+The TS TUI is responsible for interaction, layout, input, message rendering, `/goal`, agent progress readability, and permission dialogs. The Rust engine owns provider/runtime/tools/session/MCP/memory/bridge behavior.
 
 ### Check Health
 
@@ -160,6 +170,8 @@ Kcode treats memory as a first-class citizen:
 Kcode is organized into a modular Rust workspace:
 
 ```text
+.
+├── tui/             # TypeScript/React/Ink interactive frontend
 rust/crates/
 ├── api/              # Provider abstraction
 ├── bridge/           # Unified channel event system

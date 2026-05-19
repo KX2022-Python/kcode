@@ -108,6 +108,7 @@ const CLI_OPTION_SUGGESTIONS: &[&str] = &[
     "--output-format",
     "--permission-mode",
     "--dangerously-skip-permissions",
+    "--headless",
     "--allowedTools",
     "--allowed-tools",
     "--resume",
@@ -122,6 +123,7 @@ include!("main_parts/cli_parse.rs");
 include!("main_parts/cli_parse_support.rs");
 include!("main_parts/plan_mode_support.rs");
 include!("main_parts/tui_permission_prompt.rs");
+include!("main_parts/ts_tui_launcher.rs");
 
 include!("main_parts/main_entry.rs");
 include!("main_parts/status_basics.rs");

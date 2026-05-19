@@ -71,6 +71,9 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
                 permission_mode = PermissionMode::DangerFullAccess;
                 index += 1;
             }
+            "--headless" => {
+                index += 1;
+            }
             "-p" => {
                 let prompt = args[index + 1..].join(" ");
                 if prompt.trim().is_empty() {

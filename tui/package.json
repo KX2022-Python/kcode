@@ -1,0 +1,20 @@
+{
+  "name": "@kcode/tui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && esbuild src/index.tsx --bundle --platform=node --format=esm --define:process.env.DEV='\"false\"' --banner:js=\"import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" --alias:react-devtools-core=./src/react-devtools-core-shim.ts --outfile=dist/index.js",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ink": "^6.8.0",
+    "react": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/react": "^19.2.0",
+    "esbuild": "^0.27.0",
+    "typescript": "^5.9.0"
+  }
+}

@@ -29,6 +29,11 @@ cd rust && cargo build --release
 |------|---------|---------|
 | `kcode version` | 运行命令 | 输出版本号 |
 | `kcode doctor` | 运行命令 | 显示环境检查结果 |
+| `kcode --help` | 运行命令 | 显示默认 TS TUI、`--headless` 与 `kcode-engine` 入口 |
+| `kcode -p "hello"` | 运行命令 | 走 Rust engine 非交互 prompt 路径 |
+| `kcode` | 交互终端启动 | 默认进入 TS/React/Ink TUI；若设置 `KCODE_TUI=rust` 则进入 Rust TUI fallback |
+| `kcode --headless` | 交互终端启动 | 跳过 TS TUI，直接进入 Rust engine TUI |
+| `kcode-engine --help` | 运行命令 | Rust engine 入口可用，不回跳 TS TUI |
 | `kcode tui` | 交互终端启动 | 进入设置 TUI 并可安全退出 |
 | `kcode configure bridge` | 交互终端启动 | 直接打开 bridge 设置页 |
 | `kcode init` | 运行命令 | 创建配置和目录 |
@@ -37,6 +42,7 @@ cd rust && cargo build --release
 | `kcode resume` | 运行命令 | 显示可恢复会话 |
 | `kcode /help` | 运行后输入 | 显示帮助 |
 | `kcode /memory` | 运行后输入 | 显示 memory 状态 |
+| `kcode /goal` | 运行后输入 | TS TUI 内展示当前 goal；`/goal <objective>` 设置，`/goal done` 完成，`/goal clear` 清空 |
 | `kcode /compact` | 运行后输入 | 触发 compaction |
 | `kcode /mcp` | 运行后输入 | 显示 MCP 状态 |
 | `kcode /tasks` | 运行后输入 | 显示任务帮助 |
@@ -54,6 +60,9 @@ cd rust && cargo build --release
 - [ ] Tab 补全命令名
 - [ ] 输入 `/` 后显示可用命令列表
 - [ ] 未知命令返回友好错误提示
+- [ ] TS TUI 的 permission dialog 路径可打开并可 approve / deny
+- [ ] Agent progress 以可读分组行展示，不泄漏原始后端 JSON
+- [ ] `/goal` 在 TS TUI header 中可见并能切换 active / complete / none
 - [ ] `kcode tui` 能在交互终端进入、导航、保存并退出
 - [ ] 非交互终端调用 `kcode tui` 时返回清晰错误并指向 `kcode config show`
 

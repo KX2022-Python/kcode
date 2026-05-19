@@ -104,8 +104,11 @@ cargo test --workspace
 
 | 文档 | 位置 | 更新时机 |
 |------|------|---------|
-| KCODE.md | `/home/ubuntu/memos/KCODE.md` | 每个 Phase 完成时更新进度 |
-| Phase Spec | `/home/ubuntu/memos/KCODE-*-Spec.md` | Phase 设计阶段创建，完成后归档 |
+| KCODE.md | `KCODE.md` | 目录角色、安装边界或运行态边界变化时更新 |
+| Implementation Plan | `KCODE-Implementation-Plan.md` | 跨 Phase 目标、验收或清理边界变化时更新 |
+| Dev logs | `docs/dev-log/` | 迁移、验收或清理批次完成时追加记录 |
+| TS TUI 迁移说明 | `docs/strategy/ts-tui-migration.md` | TUI/runtime 边界、协议或目录角色变化时更新 |
+| Phase Spec | `docs/tasks/<task>/spec.md` | Phase 设计阶段创建，完成后归档 |
 | 维护手册 | 本文件 | 维护机制变更时更新 |
 | 回归检查单 | `REGRESSION.md` | 新增 Phase 时补充测试项 |
 | 偏差记录 | `DEVIATIONS.md` | 发现与参考源偏差时记录 |
@@ -113,6 +116,7 @@ cargo test --workspace
 额外要求：
 
 - 任何涉及 `kcode tui`、`config.toml` 写回逻辑、`bridge.env` 路径或 bridge 配置入口的改动，必须同步更新 `README.md` 与 `REGRESSION.md`
+- 任何涉及默认交互入口、`kcode-engine`、`--headless`、TS TUI 协议或 `tui/` 代码的改动，必须同步更新 `README.md`、`REGRESSION.md`、`DEVIATIONS.md` 与 `docs/strategy/ts-tui-migration.md`
 - 文档中的命令示例必须和当前 CLI 入口保持一致，至少覆盖 `kcode tui`、`kcode configure`、`kcode config show`
 
 ## 6. 代码质量标准

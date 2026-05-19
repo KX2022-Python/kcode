@@ -159,7 +159,11 @@ fn print_help_to_for_profile(out: &mut impl Write, profile_supports_tools: bool)
     } else {
         writeln!(out, "  {CLI_NAME} [--model MODEL] [--profile PROFILE]")?;
     }
-    writeln!(out, "      Start the interactive REPL")?;
+    writeln!(out, "      Start the default TypeScript/React TUI")?;
+    writeln!(out, "  {CLI_NAME} --headless [ARGS...]")?;
+    writeln!(out, "      Run the Rust engine directly without launching the TS TUI")?;
+    writeln!(out, "  {CLI_NAME}-engine [ARGS...]")?;
+    writeln!(out, "      Installed Rust engine entry point used by the TS TUI")?;
     writeln!(
         out,
         "  {CLI_NAME} [--model MODEL] [--profile PROFILE] [--output-format text|json] prompt TEXT"
@@ -229,6 +233,10 @@ fn print_help_to_for_profile(out: &mut impl Write, profile_supports_tools: bool)
     writeln!(
         out,
         "  --dangerously-skip-permissions  Skip all permission checks"
+    )?;
+    writeln!(
+        out,
+        "  --headless                 Bypass the default TS TUI and run the Rust engine"
     )?;
     if profile_supports_tools {
         writeln!(

@@ -14,6 +14,12 @@ The installation script automatically builds the binary, registers the Systemd s
 ./scripts/install.sh
 ```
 
+The installer builds and installs three runtime artifacts:
+
+- `/usr/local/bin/kcode`: default CLI, launches the TS/React/Ink TUI with no args.
+- `/usr/local/bin/kcode-engine`: Rust engine entry point for automation and the TS TUI.
+- `/usr/local/lib/kcode/tui/dist/index.js`: bundled TypeScript TUI frontend.
+
 ### 2. Configure Secrets
 
 Edit the generated environment file:
@@ -94,3 +100,4 @@ When a user sends a media file, Kcode passes the metadata and placeholder text (
 
 *   **Service fails to start**: Check logs with `journalctl -u kcode-bridge -e`. Ensure `/etc/kcode/bridge.env` has valid syntax (no spaces around `=`).
 *   **Webhook not receiving messages**: Kcode only hosts the local receiver on port `3000`; it does not provide a managed public ingress. Ensure your server's port `3000` is open and, if using a domain, that your reverse proxy (Nginx/Caddy) forwards `/webhook/*` to `http://localhost:3000`. If you cannot provide public HTTPS ingress, remove `KCODE_WEBHOOK_URL` and use Telegram Long Polling instead.
+*   **Need to bypass the TS TUI**: Run `kcode --headless ...`, `kcode-engine ...`, or temporarily set `KCODE_TUI=rust`.
