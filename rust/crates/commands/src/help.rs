@@ -12,7 +12,7 @@ fn slash_command_usage(spec: &SlashCommandSpec) -> String {
     }
 }
 
-fn slash_command_category(name: &str) -> &'static str {
+pub fn slash_command_category(name: &str) -> &'static str {
     match name {
         "help" | "status" | "sandbox" | "model" | "permissions" | "cost" | "resume" | "session"
         | "version" | "login" | "logout" | "usage" | "stats" | "rename" | "privacy-settings" => {
@@ -59,6 +59,19 @@ fn format_command_help_line(descriptor: &CommandDescriptor) -> String {
         "  {usage:<66} {}{alias_suffix}{resume}",
         descriptor.description
     )
+}
+
+pub fn command_descriptor_usage(descriptor: &CommandDescriptor) -> String {
+    match (&descriptor.scope, &descriptor.argument_hint) {
+        (CommandScope::Session, Some(argument_hint)) => {
+            format!("/{} {}", descriptor.name, argument_hint)
+        }
+        (CommandScope::Session, None) => format!("/{}", descriptor.name),
+        (CommandScope::Process, Some(argument_hint)) => {
+            format!("{} {}", descriptor.name, argument_hint)
+        }
+        (CommandScope::Process, None) => descriptor.name.clone(),
+    }
 }
 
 fn slash_command_detail_lines(spec: &SlashCommandSpec) -> Vec<String> {

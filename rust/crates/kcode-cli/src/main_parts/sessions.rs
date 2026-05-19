@@ -30,8 +30,16 @@ fn session_search_dirs() -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
 fn create_managed_session_handle(
     session_id: &str,
 ) -> Result<SessionHandle, Box<dyn std::error::Error>> {
+    create_managed_session_handle_in(&sessions_dir()?, session_id)
+}
+
+fn create_managed_session_handle_in(
+    directory: &Path,
+    session_id: &str,
+) -> Result<SessionHandle, Box<dyn std::error::Error>> {
     let id = session_id.to_string();
-    let path = sessions_dir()?.join(format!("{id}.{PRIMARY_SESSION_EXTENSION}"));
+    fs::create_dir_all(directory)?;
+    let path = directory.join(format!("{id}.{PRIMARY_SESSION_EXTENSION}"));
     Ok(SessionHandle { id, path })
 }
 
@@ -250,4 +258,3 @@ fn session_clear_backup_path(session_path: &Path) -> PathBuf {
         .unwrap_or("session.jsonl");
     session_path.with_file_name(format!("{file_name}.before-clear-{timestamp}.bak"))
 }
-

@@ -25,6 +25,13 @@ pub enum CommandKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandWiring {
+    Executable,
+    Informational,
+    Hidden,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommandScope {
     Process,
     Session,
@@ -51,6 +58,7 @@ pub struct CommandDescriptor {
     pub description: String,
     pub argument_hint: Option<String>,
     pub resume_supported: bool,
+    pub wiring: CommandWiring,
     pub visibility_tags: Vec<String>,
 }
 

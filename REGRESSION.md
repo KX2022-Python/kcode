@@ -42,7 +42,7 @@ cd rust && cargo build --release
 | `kcode resume` | 运行命令 | 显示可恢复会话 |
 | `kcode /help` | 运行后输入 | 显示帮助 |
 | `kcode /memory` | 运行后输入 | 显示 memory 状态 |
-| `kcode /goal` | 运行后输入 | TS TUI 内展示当前 goal；`/goal <objective>` 设置，`/goal done` 完成，`/goal clear` 清空 |
+| `kcode /goal` | 运行后输入 | 当前后端未暴露 goal 命令时，TS TUI 显示 backend `not-reported`，不得伪造本地 goal 状态 |
 | `kcode /compact` | 运行后输入 | 触发 compaction |
 | `kcode /mcp` | 运行后输入 | 显示 MCP 状态 |
 | `kcode /tasks` | 运行后输入 | 显示任务帮助 |
@@ -62,10 +62,10 @@ cd rust && cargo build --release
 - [ ] 未知命令返回友好错误提示
 - [ ] TS TUI 的 permission dialog 路径可打开并可 approve / deny
 - [ ] Agent progress 以可读分组行展示，不泄漏原始后端 JSON
-- [ ] `/goal` 在 TS TUI header 中可见并能切换 active / complete / none
+- [ ] Goal 控制面板展示 backend 状态；当前无 goal 后端时显示 `not-reported`，不得提供本地假切换
 - [ ] TS TUI 输入框支持输入法组合输入、英文、日文、符号和混合 UTF-8 文本
 - [ ] 鼠标滚轮默认滚动终端上下文，不进入输入框选择或菜单状态
-- [ ] 任务运行中按 ESC 可以取消当前 engine 子进程，并回到可输入状态
+- [ ] 任务运行中权限请求可 approve / deny；ESC/Ctrl+C 不得绕过 Rust runtime 权限策略
 - [ ] `kcode tui` 能在交互终端进入、导航、保存并退出
 - [ ] 非交互终端调用 `kcode tui` 时返回清晰错误并指向 `kcode config show`
 

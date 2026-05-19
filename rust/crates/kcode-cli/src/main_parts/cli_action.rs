@@ -37,6 +37,13 @@ enum CliAction {
         model_explicit: bool,
         profile: Option<String>,
     },
+    TuiEngine {
+        model: String,
+        model_explicit: bool,
+        profile: Option<String>,
+        allowed_tools: Option<AllowedToolSet>,
+        permission_mode: PermissionMode,
+    },
     Profile {
         selection: ProfileCommandSelection,
         model: String,

@@ -26,7 +26,17 @@ impl LiveCli {
                 .unwrap_or_else(|| session_state.session_id.clone());
             SessionHandle { id, path }
         } else {
-            create_managed_session_handle(&session_state.session_id)?
+            let setup_context = load_setup_context(
+                SetupMode::Config,
+                model_explicit.then_some(model.as_str()),
+                profile.as_deref(),
+                permission_mode,
+                Some(&session_state.session_id),
+            )?;
+            create_managed_session_handle_in(
+                &setup_context.resolved_config.session_dir,
+                &session_state.session_id,
+            )?
         };
         let runtime = build_runtime(
             session_state.with_persistence_path(session.path.clone()),

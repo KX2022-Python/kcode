@@ -154,6 +154,15 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
     if rest.first().map(String::as_str) == Some("--resume") {
         return parse_resume_args(&rest[1..]);
     }
+    if rest.first().map(String::as_str) == Some("tui-engine") {
+        return Ok(CliAction::TuiEngine {
+            model,
+            model_explicit,
+            profile,
+            allowed_tools,
+            permission_mode,
+        });
+    }
     if let Some(action) = parse_single_word_command_alias(
         &rest,
         &model,

@@ -75,6 +75,6 @@ fn configure_engine_env(command: &mut Command) -> Result<(), Box<dyn std::error:
     }
     let current = env::current_exe()?;
     command.env("KCODE_ENGINE_BIN", current);
-    command.env("KCODE_ENGINE_ARGS", "--headless");
+    command.env("KCODE_ENGINE_ARGS", "--headless tui-engine");
     Ok(())
 }

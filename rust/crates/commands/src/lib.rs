@@ -18,7 +18,7 @@ pub use catalog_handlers::{
     handle_agents_slash_command, handle_mcp_slash_command, handle_plugins_slash_command,
     handle_skills_slash_command,
 };
-pub use help::resume_supported_slash_commands;
+pub use help::{command_descriptor_usage, resume_supported_slash_commands, slash_command_category};
 pub use help::{
     render_slash_command_help, render_slash_command_help_detail,
     render_slash_command_help_for_context, suggest_slash_commands,
@@ -26,8 +26,8 @@ pub use help::{
 pub use model::{
     slash_command_specs, CommandAvailability, CommandDescriptor, CommandKind, CommandManifestEntry,
     CommandRegistry, CommandRegistryContext, CommandRegistrySnapshot, CommandScope, CommandSource,
-    CommandSurface, FilteredCommand, PluginsCommandResult, SlashCommand, SlashCommandParseError,
-    SlashCommandResult, SlashCommandSpec,
+    CommandSurface, CommandWiring, FilteredCommand, PluginsCommandResult, SlashCommand,
+    SlashCommandParseError, SlashCommandResult, SlashCommandSpec,
 };
 pub use parse::validate_slash_command_input;
 pub use registry::{

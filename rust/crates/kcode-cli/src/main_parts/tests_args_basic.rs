@@ -202,6 +202,27 @@
     }
 
     #[test]
+    fn parses_ts_tui_engine_action() {
+        assert_eq!(
+            parse_args(&[
+                "--model".to_string(),
+                "gpt-4.1".to_string(),
+                "--permission-mode=workspace-write".to_string(),
+                "--allowed-tools=bash".to_string(),
+                "tui-engine".to_string(),
+            ])
+            .expect("tui engine args should parse"),
+            CliAction::TuiEngine {
+                model: "gpt-4.1".to_string(),
+                model_explicit: true,
+                profile: None,
+                allowed_tools: Some(["bash"].into_iter().map(str::to_string).collect()),
+                permission_mode: PermissionMode::WorkspaceWrite,
+            }
+        );
+    }
+
+    #[test]
     fn parses_permission_mode_flag() {
         let args = vec!["--permission-mode=read-only".to_string()];
         assert_eq!(

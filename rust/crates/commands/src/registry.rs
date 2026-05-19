@@ -4,7 +4,7 @@ use crate::catalog_discovery::{discover_skill_roots, load_skills_from_roots, Ski
 use crate::model::{
     slash_command_specs, CommandAvailability, CommandDescriptor, CommandKind, CommandManifestEntry,
     CommandRegistryContext, CommandRegistrySnapshot, CommandScope, CommandSource, CommandSurface,
-    FilteredCommand, ProcessCommandSpec, SlashCommandSpec, PROCESS_COMMAND_SPECS,
+    CommandWiring, FilteredCommand, ProcessCommandSpec, SlashCommandSpec, PROCESS_COMMAND_SPECS,
 };
 
 pub(crate) fn find_slash_command_spec(name: &str) -> Option<&'static SlashCommandSpec> {
@@ -34,6 +34,24 @@ fn process_command_kind(name: &str) -> CommandKind {
     }
 }
 
+fn session_command_wiring(name: &str) -> CommandWiring {
+    match name {
+        "powerup" | "login" | "todos" | "feedback" | "desktop" | "schedule" | "loop" => {
+            CommandWiring::Informational
+        }
+        name if !builtin_session_command_enabled(name) => CommandWiring::Hidden,
+        _ => CommandWiring::Executable,
+    }
+}
+
+fn process_command_wiring(name: &str) -> CommandWiring {
+    if process_command_enabled(name) {
+        CommandWiring::Executable
+    } else {
+        CommandWiring::Hidden
+    }
+}
+
 const HIDDEN_SESSION_COMMANDS: &[&str] = &[
     "logout",
     "vim",
@@ -59,6 +77,12 @@ const HIDDEN_SESSION_COMMANDS: &[&str] = &[
     "rewind",
     "ide",
     "tag",
+    "keybindings",
+    "privacy-settings",
+    "theme",
+    "voice",
+    "color",
+    "output-style",
     "add-dir",
 ];
 
@@ -130,6 +154,10 @@ pub(crate) fn session_command_descriptor(spec: &SlashCommandSpec) -> CommandDesc
     if !builtin_session_command_enabled(spec.name) {
         visibility_tags.push("compat-hidden".to_string());
     }
+    let wiring = session_command_wiring(spec.name);
+    if matches!(wiring, CommandWiring::Informational) {
+        visibility_tags.push("informational".to_string());
+    }
     CommandDescriptor {
         id: format!("builtin.session.{}", spec.name),
         name: spec.name.to_string(),
@@ -151,6 +179,7 @@ pub(crate) fn session_command_descriptor(spec: &SlashCommandSpec) -> CommandDesc
         description: spec.summary.to_string(),
         argument_hint: spec.argument_hint.map(ToOwned::to_owned),
         resume_supported: spec.resume_supported,
+        wiring,
         visibility_tags,
     }
 }
@@ -183,6 +212,7 @@ fn process_command_descriptor(spec: &ProcessCommandSpec) -> CommandDescriptor {
         description: spec.summary.to_string(),
         argument_hint: spec.argument_hint.map(ToOwned::to_owned),
         resume_supported: false,
+        wiring: process_command_wiring(spec.name),
         visibility_tags,
     }
 }
@@ -225,6 +255,7 @@ pub fn build_command_registry_snapshot_with_cwd(
             description: summary.description.clone().unwrap_or_default(),
             argument_hint: None,
             resume_supported: false,
+            wiring: CommandWiring::Hidden,
             visibility_tags: vec!["skill".to_string(), summary.origin_label()],
         })
         .collect::<Vec<_>>();

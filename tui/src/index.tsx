@@ -1,24 +1,40 @@
 import React from 'react';
 import { render } from 'ink';
-import { handleSlashCommand } from './commands.js';
-import { App } from './App.js';
+import { RuntimeController } from './runtime/RuntimeController.js';
+import { App } from './App/App.js';
 
 async function main(): Promise<void> {
   if (process.env.KCODE_TS_TUI_SMOKE === '1') {
-    const command = process.env.KCODE_TS_TUI_SMOKE_COMMAND;
-    console.log('Kcode TS TUI ready');
-    console.log('Default frontend: TypeScript/React/Ink');
-    console.log(`Engine: ${process.env.KCODE_ENGINE_BIN ?? 'kcode-engine'}`);
-    if (command) {
-      const result = await handleSlashCommand(command, { status: 'none' });
-      for (const message of result.messages) {
-        console.log(`${message.role}: ${message.text}`);
-      }
-    }
+    await runSmoke();
     return;
   }
-
   render(<App />);
+}
+
+async function runSmoke(): Promise<void> {
+  console.log('Kcode TS TUI ready');
+  console.log('Default frontend: TypeScript/React/Ink');
+  await new Promise<void>(resolve => {
+    const controller = new RuntimeController({
+      onEvent: event => {
+        console.log(JSON.stringify(event));
+        if (event.type === 'bootstrap') {
+          const command = process.env.KCODE_TS_TUI_SMOKE_COMMAND;
+          if (command) {
+            controller.slash(command);
+          } else {
+            controller.dispose();
+            resolve();
+          }
+        }
+        if (event.type === 'done') {
+          controller.dispose();
+          resolve();
+        }
+      },
+      onError: message => console.error(message),
+    });
+  });
 }
 
 main().catch(error => {

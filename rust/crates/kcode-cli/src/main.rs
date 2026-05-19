@@ -18,7 +18,7 @@ mod tui;
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
-use std::io::{self, IsTerminal, Read, Write};
+use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::net::TcpListener;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
@@ -37,8 +37,9 @@ use api::{
 use commands::{
     build_command_registry_snapshot, handle_agents_slash_command, handle_mcp_slash_command,
     handle_plugins_slash_command, handle_skills_slash_command, render_slash_command_help,
-    render_slash_command_help_for_context, resume_supported_slash_commands, slash_command_specs,
-    validate_slash_command_input, CommandDescriptor, CommandRegistryContext, CommandScope,
+    render_slash_command_help_for_context, resume_supported_slash_commands,
+    slash_command_category, slash_command_specs, validate_slash_command_input,
+    command_descriptor_usage, CommandDescriptor, CommandRegistryContext, CommandScope,
     CommandSurface, FilteredCommand, SlashCommand,
 };
 use init::{initialize_repo, initialize_user_config};
@@ -124,6 +125,10 @@ include!("main_parts/cli_parse_support.rs");
 include!("main_parts/plan_mode_support.rs");
 include!("main_parts/tui_permission_prompt.rs");
 include!("main_parts/ts_tui_launcher.rs");
+include!("main_parts/ts_tui_engine_types.rs");
+include!("main_parts/ts_tui_engine_json.rs");
+include!("main_parts/ts_tui_engine_helpers.rs");
+include!("main_parts/ts_tui_permission_prompter.rs");
 
 include!("main_parts/main_entry.rs");
 include!("main_parts/status_basics.rs");
@@ -149,6 +154,7 @@ include!("main_parts/init_diff_utils.rs");
 include!("main_parts/plugin_runtime_state.rs");
 include!("main_parts/runtime_builder.rs");
 include!("main_parts/provider_runtime_client_impl.rs");
+include!("main_parts/ts_tui_engine.rs");
 include!("main_parts/tool_summary_helpers.rs");
 include!("main_parts/tool_formatting.rs");
 include!("main_parts/tool_response.rs");

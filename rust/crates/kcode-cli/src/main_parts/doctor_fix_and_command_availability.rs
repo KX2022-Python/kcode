@@ -201,19 +201,6 @@ fn command_registry_context(
     )
 }
 
-fn command_descriptor_usage(descriptor: &CommandDescriptor) -> String {
-    match (&descriptor.scope, &descriptor.argument_hint) {
-        (CommandScope::Session, Some(argument_hint)) => {
-            format!("/{} {}", descriptor.name, argument_hint)
-        }
-        (CommandScope::Session, None) => format!("/{}", descriptor.name),
-        (CommandScope::Process, Some(argument_hint)) => {
-            format!("{} {}", descriptor.name, argument_hint)
-        }
-        (CommandScope::Process, None) => descriptor.name.clone(),
-    }
-}
-
 fn filtered_command_usage(filtered: &FilteredCommand) -> String {
     let name = filtered
         .id

@@ -76,6 +76,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             model_explicit.then_some(model.as_str()),
             profile.as_deref(),
         )?,
+        CliAction::TuiEngine {
+            model,
+            model_explicit,
+            profile,
+            allowed_tools,
+            permission_mode,
+        } => {
+            let model = if model_explicit {
+                model
+            } else {
+                resolve_effective_model(profile.as_deref())?
+            };
+            run_ts_tui_engine(model, model_explicit, profile, allowed_tools, permission_mode)?
+        }
         CliAction::Profile {
             selection,
             model,

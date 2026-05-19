@@ -21,21 +21,23 @@
 
 ## Implementation Notes
 
-- Added `tui/` as a TypeScript/React/Ink frontend package.
-- Added typed JSONL protocol definitions in `tui/src/protocol.ts`.
-- Added a Rust launcher path so no-arg `kcode` starts the installed TS TUI when available.
-- Added `kcode --headless` and installed `kcode-engine` as Rust engine entry points.
-- Kept `KCODE_TUI=rust` as a temporary ratatui fallback.
+- Replaced the old TS skeleton with a TypeScript/React/Ink frontend under `tui/src/App`, `tui/src/components`, `tui/src/runtime`, `tui/src/state`, and `tui/src/protocol`.
+- Added a Rust JSONL engine entrypoint: `kcode --headless tui-engine` and `kcode-engine --headless tui-engine`.
+- `tui/src/runtime/RuntimeController.ts` spawns the Rust engine, parses JSONL stdout, and sends JSONL control events over stdin.
+- Slash palette entries are now backend-driven through Rust command registry metadata, including safety, source, kind, aliases, resume support, and wiring.
+- Permission approval is wired through Rust runtime policy: Rust emits `permission_request`, TS returns `permission_response`, and Rust blocks tool execution until the decision is received.
+- No-arg `kcode` launches the installed TS TUI bundle when available; `KCODE_TUI=rust` keeps the ratatui fallback.
 
 ## Verification Notes
 
 - `npm --prefix tui run check` passed.
 - `npm --prefix tui run build` produced `tui/dist/index.js`.
-- `cargo check -p kcode-cli` passed.
-- Installed-binary validation is tracked separately in the final delivery notes for this round.
+- `cargo check --workspace` passed.
+- `cargo test --workspace` passed.
+- JSONL engine smoke validated command filtering, backend status controls, and active permission denial flow using a local OpenAI-compatible fake server.
 
 ## Input Fix Follow-up
 
-- Idle TS TUI input now keeps terminal canonical mode so IME composition, non-Chinese text, and scrollback behavior stay under the terminal.
-- Running engine calls can be cancelled from the frontend; ESC/Ctrl+C requests cancellation and the child process receives interrupt/terminate/kill fallback signals.
-- Regression coverage now tracks IME text, mouse-wheel scrollback, and ESC cancellation as required TUI behavior.
+- Idle TS TUI input keeps terminal canonical mode so IME composition and UTF-8 text stay under terminal handling.
+- Running backend turns can show permission prompts and status from backend events rather than local fake state.
+- ESC/Ctrl+C cancellation remains a frontend control path; hard cancellation of an in-flight Rust model request is still limited by the synchronous engine loop.

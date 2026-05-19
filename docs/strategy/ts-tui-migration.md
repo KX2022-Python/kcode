@@ -10,60 +10,59 @@ Updated: 2026-05-19 JST
 - Local runtime state: `~/.kcode`; never commit sessions, memory, env files, caches, or generated bundles.
 - Reference sources: `/home/ubuntu/tools/claude-code-haha` and `/home/ubuntu/tools/claw-code-parity`, both refreshed with `git fetch origin main --prune` on 2026-05-19 without overwriting local changes.
 
-## Current Audit
-
-`tools/kcode` still contains these useful unsynced items:
-
-- `issues-to-be-fixed/14-tui-runtime-feedback-and-mouse-ergonomics.md`: good diagnosis for non-blocking UI execution, runtime phase feedback, mouse wheel, Ctrl-wheel density, and hover scrollbar.
-- `rust/crates/kcode-cli/src/tui/repl/mouse.rs` and `runtime_render.rs`: Rust ratatui-side interaction experiments. They are not copied into the new default frontend because the migration target is TS/React/Ink, but the behavior is captured as product input.
-- Differences in Rust TUI files (`messages.rs`, `mod.rs`, `runtime_loop.rs`, `state.rs`) are legacy ratatui work. They should not be expanded further except as temporary fallback maintenance.
-
-Runtime/development garbage in `tools/kcode`:
-
-- `.kcode/sessions/*`, `rust/.kcode/sessions/*`, `rust/.clawd-agents/*`, and `rust/target/`.
-- These are excluded from sync and require explicit cleanup approval before deletion.
-
-## Reference Refresh Findings
-
-cc-haha latest `origin/main` after fetch: `55d4c80 Center v0.2.8 notes on /goal and Agent readability`.
-
-Kcode should absorb the interaction ideas, not its Anthropic/OAuth bindings:
-
-- `/goal` needs persistent top-level visibility and direct command affordance.
-- Agent progress should render as readable grouped status rather than raw JSON.
-- Structured fallback should show clear system/error messages when a command cannot be handled.
-- Desktop readability maps to tighter headers, concise status lines, and message grouping.
-
-claw-code-parity latest `origin/main` after fetch: `ebef748 docs: add subcommand help fallthrough pinpoint`.
-
-Kcode should absorb:
-
-- Help fallthrough must route unknown or partially supported commands to actionable help.
-- Context-window preflight belongs in Rust engine before model calls.
-- Orphan module audit and dead code cleanup stay as follow-up quality gates.
-- JSON/output contracts should remain strict and testable across the Rust engine and TS TUI boundary.
-
 ## Runtime Boundary
 
-- Rust engine owns runtime, tools, sessions, providers, MCP, memory, bridge, permission policy, and persistence.
-- TS/React/Ink TUI owns interaction, layout, input handling, message rendering, permission dialogs, `/goal` readability, and agent progress readability.
+- Rust engine owns runtime, tools, sessions, providers, MCP, memory, bridge, permission policy, hooks, persistence, headless, and print paths.
+- TS/React/Ink TUI owns interaction, layout, input handling, message rendering, command palette, permission dialog, and status/control presentation.
 - `kcode` with no arguments defaults to the TS TUI when its bundle is installed.
 - `kcode --headless ...` and `/usr/local/bin/kcode-engine ...` run the Rust engine directly.
 - `KCODE_TUI=rust` keeps the ratatui fallback available while migration continues.
-- The TS TUI input path keeps idle typing in terminal canonical mode for IME compatibility and scrollback, while running engine calls expose ESC/Ctrl+C cancellation.
+- The TS TUI input path keeps idle typing in terminal canonical mode for IME compatibility and scrollback, while backend turns route through JSONL.
 
-## JSONL / stdio Protocol Draft
+## Implemented JSONL Protocol
 
-Every event is one JSON object per line with a `type` field:
+Current typed protocol files:
 
-- `session`: session start/resume/complete plus `sessionId`.
-- `assistant_text`: assistant text delta or final text.
-- `thinking`: visible thinking/progress text when available.
-- `tool_call`: `id`, `name`, and structured `input`.
-- `tool_result`: `id`, `name`, `output`, and `isError`.
-- `permission_request`: `id`, `toolName`, `inputSummary`, `requiredMode`.
-- `goal_state`: `none`, `active`, or `complete` plus optional `objective`.
-- `agent_progress`: `agentId`, label, status, and detail.
-- `error`: message plus optional recoverability.
+- `tui/src/protocol/events.ts`
+- `tui/src/protocol/types.ts`
+- `rust/crates/kcode-cli/src/main_parts/ts_tui_engine_types.rs`
+- `rust/crates/kcode-cli/src/main_parts/ts_tui_engine_json.rs`
 
-The current Phase 3 skeleton shells out to the Rust engine and keeps this protocol typed in `tui/src/protocol.ts`; full streaming stdio wiring is the next implementation step.
+Events are one JSON object per line. Implemented event families are:
+
+- `bootstrap`, `commands`, `status`, `progress`, `done`, `cancel`, `error`
+- `user_submit`, `assistant_delta`, `thinking`
+- `tool` call/result events rendered from Rust session messages
+- `permission_request` and `permission` decision status events
+
+The TS runtime controller sends `user_submit`, `slash`, `command_list`, `status`, `cancel`, `permission_response`, and `exit` back to the Rust engine.
+
+## Command Surface
+
+- The command palette is driven by Rust `CommandDescriptor` metadata, not a local TS command list.
+- TS filters only the backend-provided list for search; backend determines visibility, source, kind, aliases, resume support, safety flags, and wiring.
+- Compatibility placeholders and non-wired local settings commands are hidden from the local CLI command surface.
+- Informational commands remain visible with `wiring: informational`; executable commands are tagged `wiring: executable`.
+- Skill/process command discovery remains Rust-side and is intentionally not promoted into the TS palette unless backend metadata exposes it.
+
+## Control State
+
+- Status/control panels are derived from Rust `json_status` only.
+- Model, permission mode, MCP availability, memory counters, Agent tool availability, and Goal status are backend-derived.
+- Goal currently reports `available: false` and `status: not-reported` because this Rust runtime has no goal subsystem wired into the command registry yet. The UI displays that state rather than inventing a local goal.
+
+## Permission Flow
+
+- Runtime authorization remains inside Rust `ConversationRuntime` and `PermissionPolicy`.
+- When Rust requires approval, the JSONL permission prompter emits `permission_request` with active mode, required mode, tool name, input, and reason.
+- TS renders the dialog and sends `permission_response` with `allow_once`, `allow_turn`, `deny_once`, or `deny_turn`.
+- The Rust prompter blocks tool execution until that response arrives, then returns allow/deny to the runtime. This is not a frontend-only preview.
+
+## Legacy Audit Notes
+
+`tools/kcode` still contains useful unsynced product input:
+
+- `issues-to-be-fixed/14-tui-runtime-feedback-and-mouse-ergonomics.md`: diagnosis for non-blocking UI execution, runtime phase feedback, mouse wheel, Ctrl-wheel density, and hover scrollbar.
+- Rust ratatui-side experiments under `rust/crates/kcode-cli/src/tui/repl/`. They are not copied into the new default frontend because the migration target is TS/React/Ink.
+
+Runtime/development garbage in `tools/kcode` remains approval-gated for cleanup: `.kcode/sessions/*`, `rust/.kcode/sessions/*`, `rust/.clawd-agents/*`, and `rust/target/`.

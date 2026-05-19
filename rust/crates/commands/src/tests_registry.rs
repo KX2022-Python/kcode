@@ -1,7 +1,7 @@
 use crate::{
     build_command_registry_snapshot, render_slash_command_help, render_slash_command_help_detail,
     render_slash_command_help_for_context, slash_command_specs, suggest_slash_commands,
-    v1_command_manifest, CommandRegistryContext, CommandSurface,
+    v1_command_manifest, CommandRegistryContext, CommandSurface, CommandWiring,
 };
 
 #[test]
@@ -41,6 +41,36 @@ fn render_slash_command_help_for_context_hides_tool_commands_when_profile_disabl
     ));
     assert!(help.contains("Start here        /doctor, /config, /status, /memory"));
     assert!(!help.contains("/mcp [list|show <server>|help]"));
+}
+
+#[test]
+fn command_registry_hides_unimplemented_local_ui_commands() {
+    let snapshot = build_command_registry_snapshot(&CommandRegistryContext::cli_local(), &[]);
+    let visible = snapshot
+        .session_commands
+        .iter()
+        .map(|descriptor| descriptor.name.as_str())
+        .collect::<Vec<_>>();
+
+    assert!(!visible.contains(&"theme"));
+    assert!(!visible.contains(&"keybindings"));
+    assert!(snapshot
+        .filtered_out_commands
+        .iter()
+        .any(|command| command.id == "builtin.session.theme" && command.reason == "disabled"));
+}
+
+#[test]
+fn command_registry_marks_informational_commands() {
+    let snapshot = build_command_registry_snapshot(&CommandRegistryContext::cli_local(), &[]);
+    let powerup = snapshot
+        .session_commands
+        .iter()
+        .find(|descriptor| descriptor.name == "powerup")
+        .expect("powerup command should remain visible");
+
+    assert_eq!(powerup.wiring, CommandWiring::Informational);
+    assert!(powerup.visibility_tags.iter().any(|tag| tag == "informational"));
 }
 
 #[test]
