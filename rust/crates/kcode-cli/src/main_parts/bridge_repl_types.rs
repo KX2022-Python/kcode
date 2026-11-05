@@ -4,131 +4,11 @@ fn run_bridge(
     profile: Option<String>,
     permission_mode: PermissionMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let _ = adapters::apply_bridge_env_defaults_to_process();
-
-    // Security: Load credentials from environment variables only.
-    let bot_token = std::env::var("KCODE_TELEGRAM_BOT_TOKEN").ok();
-    let whatsapp_phone = std::env::var("KCODE_WHATSAPP_PHONE_ID").ok();
-    let feishu_app_id = std::env::var("KCODE_FEISHU_APP_ID").ok();
-
-    if bot_token.is_none() && whatsapp_phone.is_none() && feishu_app_id.is_none() {
-        eprintln!("⚠ No channel credentials found. Please set KCODE_TELEGRAM_BOT_TOKEN, KCODE_WHATSAPP_PHONE_ID, or KCODE_FEISHU_APP_ID.");
-        return Ok(());
-    }
-
-    // Telegram Config
-    let telegram_config = bot_token.map(|token| adapters::TelegramConfig {
-        bot_token: token,
-        mode: adapters::TelegramMode::Polling { timeout: 30 },
-    });
-
-    // WhatsApp Config
-    let whatsapp_config = whatsapp_phone.map(|phone_id| adapters::WhatsAppConfig {
-        access_token: std::env::var("KCODE_WHATSAPP_TOKEN").expect("KCODE_WHATSAPP_TOKEN required"),
-        phone_number_id: phone_id,
-        app_secret: std::env::var("KCODE_WHATSAPP_APP_SECRET").unwrap_or_default(),
-        webhook_verify_token: std::env::var("KCODE_WEBHOOK_VERIFY_TOKEN").unwrap_or_default(),
-    });
-
-    // Feishu Config
-    let feishu_config = feishu_app_id.map(|app_id| adapters::FeishuConfig {
-        app_id,
-        app_secret: std::env::var("KCODE_FEISHU_APP_SECRET").expect("KCODE_FEISHU_APP_SECRET required"),
-        webhook_verify_token: std::env::var("KCODE_WEBHOOK_VERIFY_TOKEN").unwrap_or_default(),
-    });
-
-    // Setup Session Router for persistence
-    let session_router = std::sync::Arc::new(adapters::SessionRouter::new(
-        std::path::PathBuf::from(".kcode/bridge-sessions")
-    ));
-
-    // Create channel for BridgeCore
-    let (core_tx, core_rx) = std::sync::mpsc::channel::<BridgeMessage>();
-
-    // We create the telegram transport here for the BridgeCore thread
-    let telegram_transport = telegram_config.clone().map(adapters::TelegramTransport::new);
-
-    // If using Webhook mode for Telegram, configure it first
-    if let Some(ref cfg) = telegram_config {
-        if let adapters::TelegramMode::Webhook { url: _, port: _ } = cfg.mode {
-            let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-            let transport = adapters::TelegramTransport::new(cfg.clone());
-            rt.block_on(async {
-                transport.set_webhook().await
-            }).map_err(|e| format!("Failed to set Telegram webhook: {}", e))?;
-        }
-    }
-
-    // Spawn BridgeCore in a dedicated thread
-    std::thread::spawn(move || {
-        if let Some(transport) = telegram_transport {
-            let core = BridgeCore::new(
-                std::path::PathBuf::from(".kcode/bridge-sessions"),
-                transport,
-            );
-            let config = SessionConfig {
-                model,
-                model_explicit,
-                profile,
-                permission_mode,
-            };
-            core.run(core_rx, config);
-        }
-    });
-
-    // Webhook handler that forwards events to BridgeCore
-    let webhook_tx = core_tx.clone();
-    let handler = Box::new(move |event: adapters::BridgeInboundEvent| -> adapters::BridgeOutboundEvent {
-        let (reply_tx, rx) = std::sync::mpsc::channel();
-        if let Err(e) = webhook_tx.send(BridgeMessage { event, reply_tx }) {
-            eprintln!("Failed to send event to BridgeCore: {}", e);
-            return adapters::BridgeOutboundEvent {
-                bridge_event_id: "error".to_string(),
-                session_id: String::new(),
-                channel_capability_hint: String::new(),
-                reply_target: None,
-                render_items: vec![("text".to_string(), "Error: Core unavailable".to_string())],
-                delivery_mode: adapters::DeliveryMode::Single,
-            };
-        }
-
-        match rx.recv() {
-            Ok(outbound) => outbound,
-            Err(_) => adapters::BridgeOutboundEvent {
-                bridge_event_id: "error".to_string(),
-                session_id: String::new(),
-                channel_capability_hint: String::new(),
-                reply_target: None,
-                render_items: vec![("text".to_string(), "Error: Timeout".to_string())],
-                delivery_mode: adapters::DeliveryMode::Single,
-            },
-        }
-    });
-
-    println!("🌐 Kcode Bridge started. Waiting for messages on all active channels...");
-
-    // Run the webhook server
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build()?;
-    rt.block_on(async {
-        adapters::start_webhook_server(
-            "0.0.0.0:3000".parse().unwrap(),
-            session_router,
-            telegram_config,
-            whatsapp_config,
-            feishu_config,
-            handler,
-        ).await.map_err(|e| -> Box<dyn std::error::Error> { 
-            eprintln!("\n❌ Bridge server failed to start: {}", e);
-            eprintln!("💡 Run `kcode doctor --fix` to automatically repair configuration issues.");
-            e 
-        })
-    })?;
-
-    Ok(())
+    run_bridge_service(model, model_explicit, profile, permission_mode)
 }
 
-/// Lightweight pre-flight check to catch obvious issues before starting.
-fn quick_preflight_check() -> Result<(), String> {
+/// Lightweight REPL pre-flight check to catch obvious issues before starting.
+fn quick_repl_preflight_check() -> Result<(), String> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
     let kcode_dir = format!("{}/.kcode", home);
     
@@ -152,7 +32,7 @@ fn run_repl(
     permission_mode: PermissionMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Quick pre-flight check before starting REPL
-    if let Err(e) = quick_preflight_check() {
+    if let Err(e) = quick_repl_preflight_check() {
         eprintln!("⚠ Pre-flight warning: {}", e);
         eprintln!("💡 Run `kcode doctor` to diagnose or `kcode doctor --fix` to repair.\n");
     }

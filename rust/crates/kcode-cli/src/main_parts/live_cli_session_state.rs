@@ -111,7 +111,7 @@ impl LiveCli {
 
         let normalized = normalize_permission_mode(&mode).ok_or_else(|| {
             format!(
-                "unsupported permission mode '{mode}'. Use read-only, workspace-write, or danger-full-access."
+                "unsupported permission mode '{mode}'. Use read-only, plan, workspace-write, or danger-full-access."
             )
         })?;
 
@@ -142,6 +142,32 @@ impl LiveCli {
             format_permissions_switch_report(&previous, normalized)
         );
         Ok(true)
+    }
+
+    fn handle_plan(&mut self, mode: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
+        let cwd = env::current_dir()?;
+        let outcome = run_plan_mode_command(&cwd, mode, self.permission_mode)?;
+        if let Some(next_mode) = outcome.next_permission_mode {
+            if next_mode != self.permission_mode {
+                let session = self.runtime.session().clone();
+                self.permission_mode = next_mode;
+                let runtime = build_runtime(
+                    session,
+                    &self.session.id,
+                    self.model.clone(),
+                    self.model_explicit.then_some(self.model.as_str()),
+                    self.profile_override.as_deref(),
+                    self.system_prompt.clone(),
+                    true,
+                    true,
+                    self.allowed_tools.clone(),
+                    self.permission_mode,
+                    None,
+                )?;
+                self.replace_runtime(runtime)?;
+            }
+        }
+        Ok(outcome.message)
     }
 
     fn clear_session(&mut self, confirm: bool) -> Result<bool, Box<dyn std::error::Error>> {
@@ -245,37 +271,34 @@ impl LiveCli {
         Ok(())
     }
 
+    fn handle_dream(&mut self, mode: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
+        let cwd = env::current_dir()?;
+        let outcome = run_auto_dream_command(&cwd, mode)?;
+        if outcome.changed {
+            self.reload_runtime_features()?;
+        }
+        Ok(outcome.message)
+    }
+
     fn print_tasks(&self, args: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
         match args {
             None | Some("list") => {
-                println!(
-                    "Tasks
-  Background tasks are managed through the Agent tool.
-  Use /help Agent to see how to create and manage tasks.
-
-  To create a task: Use the Agent tool with action=create
-  To list tasks:   Use the Agent tool with action=list
-  To stop a task:  Use the Agent tool with action=stop"
-                );
+                println!("{}", render_todos_report(&env::current_dir()?)?);
             }
             Some("help") => {
                 println!(
-                    "Tasks
-  Background tasks allow running multiple agent sessions in parallel.
-
-  Commands:
-    /tasks              List active tasks
-    /tasks help         Show this help
-
-  Task management is done through the Agent tool:
-    Agent(action=create, description='...')   Create a new task
-    Agent(action=list)                        List all tasks
-    Agent(action=stop, task_id='...')         Stop a running task
-    Agent(action=output, task_id='...')       Get task output"
+                    "Todos
+  Usage            /todos
+  Usage            /todos help
+  Store            .clawd-todos.json
+  Source           TodoWrite tool updates this store during longer tasks"
                 );
             }
             other => {
-                println!("Unknown tasks argument: {}. Use /tasks help for usage.", other.unwrap_or(""));
+                println!(
+                    "Unknown todos argument: {}. Use /todos help for usage.",
+                    other.unwrap_or("")
+                );
             }
         }
         Ok(())

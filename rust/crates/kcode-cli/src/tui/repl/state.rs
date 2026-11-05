@@ -1,4 +1,5 @@
 use std::time::Instant;
+use ratatui::layout::Margin;
 
 /// 会话状态机 — 对齐 CC-Haha QueryGuard + streamMode
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +90,29 @@ pub enum RenderableMessage {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SubmittedCommand {
+    Prompt(String),
+    Slash(String),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BackendResult {
+    pub messages: Vec<RenderableMessage>,
+    pub input_tokens: Option<u64>,
+    pub output_tokens: Option<u64>,
+    pub ui_state: Option<RuntimeUiState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeUiState {
+    pub model: String,
+    pub profile: String,
+    pub session_id: String,
+    pub permission_mode_label: String,
+    pub profile_supports_tools: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolStatus {
     Pending,
     Running,
@@ -119,6 +143,64 @@ pub enum PermissionDecision {
     DenyAlways,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiScale {
+    Compact,
+    Normal,
+    Comfortable,
+}
+
+impl UiScale {
+    pub const fn zoom_in(self) -> Self {
+        match self {
+            Self::Compact => Self::Normal,
+            Self::Normal => Self::Comfortable,
+            Self::Comfortable => Self::Comfortable,
+        }
+    }
+
+    pub const fn zoom_out(self) -> Self {
+        match self {
+            Self::Comfortable => Self::Normal,
+            Self::Normal => Self::Compact,
+            Self::Compact => Self::Compact,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Compact => "紧凑",
+            Self::Normal => "标准",
+            Self::Comfortable => "舒适",
+        }
+    }
+
+    pub const fn content_margin(self) -> Margin {
+        match self {
+            Self::Compact => Margin {
+                horizontal: 0,
+                vertical: 0,
+            },
+            Self::Normal => Margin {
+                horizontal: 1,
+                vertical: 0,
+            },
+            Self::Comfortable => Margin {
+                horizontal: 2,
+                vertical: 1,
+            },
+        }
+    }
+
+    pub const fn prompt_height_bonus(self) -> u16 {
+        match self {
+            Self::Compact => 0,
+            Self::Normal => 0,
+            Self::Comfortable => 1,
+        }
+    }
+}
+
 impl PermissionRequest {
     pub fn new(tool_name: String, input_summary: String) -> Self {
         Self {
@@ -126,5 +208,19 @@ impl PermissionRequest {
             input_summary,
             decision: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::UiScale;
+
+    #[test]
+    fn ui_scale_moves_with_zoom_limits() {
+        assert_eq!(UiScale::Compact.zoom_out(), UiScale::Compact);
+        assert_eq!(UiScale::Compact.zoom_in(), UiScale::Normal);
+        assert_eq!(UiScale::Normal.zoom_in(), UiScale::Comfortable);
+        assert_eq!(UiScale::Comfortable.zoom_in(), UiScale::Comfortable);
+        assert_eq!(UiScale::Comfortable.zoom_out(), UiScale::Normal);
     }
 }

@@ -111,6 +111,7 @@ fn slash_command_completion_candidates_with_sessions(
         "/model haiku",
         "/permissions ",
         "/permissions read-only",
+        "/permissions plan",
         "/permissions workspace-write",
         "/permissions danger-full-access",
         "/plugin list",

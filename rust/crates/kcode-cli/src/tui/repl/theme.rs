@@ -18,6 +18,15 @@ pub enum ThemePreset {
 }
 
 impl ThemePreset {
+    pub const ALL: [ThemePreset; 6] = [
+        ThemePreset::Default,
+        ThemePreset::Amber,
+        ThemePreset::Ocean,
+        ThemePreset::CatppuccinMocha,
+        ThemePreset::DarkHighContrast,
+        ThemePreset::Light,
+    ];
+
     pub fn name(&self) -> &str {
         match self {
             ThemePreset::Default => "default",
@@ -29,117 +38,38 @@ impl ThemePreset {
         }
     }
 
-    pub fn palette(&self) -> ThemePalette {
+    pub fn label(&self) -> &str {
+        self.name()
+    }
+
+    pub fn display_name(&self) -> &str {
         match self {
-            ThemePreset::Default => ThemePalette {
-                accent: Color::Green,
-                accent_soft: Color::Rgb(40, 120, 70),
-                accent_dim: Color::Rgb(30, 80, 50),
-                panel_bg: Color::Rgb(18, 28, 20),
-                input_bg: Color::Rgb(12, 18, 12),
-                text: Color::White,
-                text_muted: Color::Gray,
-                error: Color::Red,
-                warning: Color::Yellow,
-                success: Color::Green,
-                info: Color::Cyan,
-                border: Color::Rgb(60, 80, 60),
-                selection_bg: Color::Rgb(30, 40, 30),
-                dialog_bg: Color::Rgb(12, 16, 12),
-                user_msg_bg: Color::Rgb(25, 35, 25),
-                assistant_msg_bg: Color::Rgb(18, 22, 18),
-            },
-            ThemePreset::Amber => ThemePalette {
-                accent: Color::Yellow,
-                accent_soft: Color::Rgb(210, 160, 30),
-                accent_dim: Color::Rgb(150, 110, 20),
-                panel_bg: Color::Rgb(42, 30, 8),
-                input_bg: Color::Rgb(30, 22, 5),
-                text: Color::White,
-                text_muted: Color::Gray,
-                error: Color::Red,
-                warning: Color::Rgb(255, 165, 0),
-                success: Color::Yellow,
-                info: Color::Rgb(100, 200, 255),
-                border: Color::Rgb(180, 140, 50),
-                selection_bg: Color::Rgb(50, 35, 10),
-                dialog_bg: Color::Rgb(20, 15, 5),
-                user_msg_bg: Color::Rgb(45, 35, 12),
-                assistant_msg_bg: Color::Rgb(35, 28, 10),
-            },
-            ThemePreset::Ocean => ThemePalette {
-                accent: Color::Cyan,
-                accent_soft: Color::Rgb(40, 150, 170),
-                accent_dim: Color::Rgb(25, 100, 120),
-                panel_bg: Color::Rgb(8, 32, 42),
-                input_bg: Color::Rgb(5, 22, 30),
-                text: Color::White,
-                text_muted: Color::Gray,
-                error: Color::Red,
-                warning: Color::Yellow,
-                success: Color::Cyan,
-                info: Color::Rgb(100, 200, 255),
-                border: Color::Rgb(30, 80, 100),
-                selection_bg: Color::Rgb(12, 40, 50),
-                dialog_bg: Color::Rgb(5, 15, 22),
-                user_msg_bg: Color::Rgb(12, 35, 45),
-                assistant_msg_bg: Color::Rgb(8, 28, 35),
-            },
-            ThemePreset::DarkHighContrast => ThemePalette {
-                accent: Color::Rgb(0, 255, 0),
-                accent_soft: Color::Rgb(0, 200, 0),
-                accent_dim: Color::Rgb(0, 150, 0),
-                panel_bg: Color::Black,
-                input_bg: Color::Rgb(5, 5, 5),
-                text: Color::Rgb(255, 255, 255),
-                text_muted: Color::Rgb(200, 200, 200),
-                error: Color::Rgb(255, 80, 80),
-                warning: Color::Rgb(255, 255, 0),
-                success: Color::Rgb(0, 255, 0),
-                info: Color::Rgb(100, 200, 255),
-                border: Color::Rgb(150, 150, 150),
-                selection_bg: Color::Rgb(50, 50, 50),
-                dialog_bg: Color::Black,
-                user_msg_bg: Color::Rgb(30, 30, 30),
-                assistant_msg_bg: Color::Rgb(20, 20, 20),
-            },
-            ThemePreset::CatppuccinMocha => ThemePalette {
-                accent: Color::Rgb(166, 227, 161),
-                accent_soft: Color::Rgb(137, 180, 137),
-                accent_dim: Color::Rgb(100, 140, 100),
-                panel_bg: Color::Rgb(30, 30, 46),
-                input_bg: Color::Rgb(24, 24, 37),
-                text: Color::Rgb(205, 214, 244),
-                text_muted: Color::Rgb(127, 132, 156),
-                error: Color::Rgb(243, 139, 168),
-                warning: Color::Rgb(249, 226, 175),
-                success: Color::Rgb(166, 227, 161),
-                info: Color::Rgb(137, 180, 250),
-                border: Color::Rgb(88, 91, 112),
-                selection_bg: Color::Rgb(58, 58, 82),
-                dialog_bg: Color::Rgb(17, 17, 27),
-                user_msg_bg: Color::Rgb(35, 35, 55),
-                assistant_msg_bg: Color::Rgb(28, 28, 42),
-            },
-            ThemePreset::Light => ThemePalette {
-                accent: Color::Rgb(0, 100, 0),
-                accent_soft: Color::Rgb(0, 130, 0),
-                accent_dim: Color::Rgb(0, 160, 0),
-                panel_bg: Color::Rgb(245, 245, 245),
-                input_bg: Color::Rgb(250, 250, 250),
-                text: Color::Rgb(20, 20, 20),
-                text_muted: Color::Rgb(100, 100, 100),
-                error: Color::Rgb(180, 0, 0),
-                warning: Color::Rgb(180, 140, 0),
-                success: Color::Rgb(0, 120, 0),
-                info: Color::Rgb(0, 100, 180),
-                border: Color::Rgb(200, 200, 200),
-                selection_bg: Color::Rgb(220, 230, 220),
-                dialog_bg: Color::Rgb(240, 240, 240),
-                user_msg_bg: Color::Rgb(235, 240, 235),
-                assistant_msg_bg: Color::Rgb(240, 240, 240),
-            },
+            ThemePreset::Default => "Dark mode",
+            ThemePreset::Amber => "Amber mode",
+            ThemePreset::Ocean => "Ocean mode",
+            ThemePreset::DarkHighContrast => "Dark mode (high contrast)",
+            ThemePreset::CatppuccinMocha => "Catppuccin Mocha",
+            ThemePreset::Light => "Light mode",
         }
+    }
+
+    pub fn helper_text(&self) -> &str {
+        "Codex CLI 风格：跟随终端默认底色，cyan 表示输入/状态/代码，magenta 表示品牌与命令。"
+    }
+
+    pub fn parse(value: &str) -> ThemePreset {
+        match value.trim() {
+            "amber" => ThemePreset::Amber,
+            "ocean" => ThemePreset::Ocean,
+            "dark-hc" => ThemePreset::DarkHighContrast,
+            "catppuccin" => ThemePreset::CatppuccinMocha,
+            "light" => ThemePreset::Light,
+            _ => ThemePreset::Default,
+        }
+    }
+
+    pub fn palette(&self) -> ThemePalette {
+        codex_cli_palette(*self)
     }
 
     pub fn cycle(&self) -> ThemePreset {
@@ -157,12 +87,14 @@ impl ThemePreset {
 /// 主题调色板
 #[derive(Debug, Clone, Copy)]
 pub struct ThemePalette {
+    pub brand: Color,
     pub accent: Color,
     pub accent_soft: Color,
     pub accent_dim: Color,
     pub panel_bg: Color,
     pub input_bg: Color,
     pub text: Color,
+    pub inverse_text: Color,
     pub text_muted: Color,
     pub error: Color,
     pub warning: Color,
@@ -173,6 +105,31 @@ pub struct ThemePalette {
     pub dialog_bg: Color,
     pub user_msg_bg: Color,
     pub assistant_msg_bg: Color,
+    pub prefers_light_code: bool,
+}
+
+fn codex_cli_palette(theme: ThemePreset) -> ThemePalette {
+    ThemePalette {
+        brand: Color::Magenta,
+        accent: Color::Cyan,
+        accent_soft: Color::Cyan,
+        accent_dim: Color::Cyan,
+        panel_bg: Color::Reset,
+        input_bg: Color::Reset,
+        text: Color::Reset,
+        inverse_text: Color::Black,
+        text_muted: Color::DarkGray,
+        error: Color::Red,
+        warning: Color::Cyan,
+        success: Color::Green,
+        info: Color::Cyan,
+        border: Color::Cyan,
+        selection_bg: Color::Reset,
+        dialog_bg: Color::Reset,
+        user_msg_bg: Color::Reset,
+        assistant_msg_bg: Color::Reset,
+        prefers_light_code: matches!(theme, ThemePreset::Light),
+    }
 }
 
 /// 终端类型检测 — 对齐 CC-Haha 终端自适应

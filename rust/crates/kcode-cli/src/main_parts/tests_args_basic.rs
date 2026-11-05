@@ -1,9 +1,9 @@
     #[test]
-    fn defaults_to_repl_when_no_args() {
+    fn defaults_to_repl_tui_when_no_args() {
         let permission_mode = super::default_permission_mode();
         assert_eq!(
             parse_args(&[]).expect("args should parse"),
-            CliAction::Repl {
+            CliAction::ReplTui {
                 model: DEFAULT_MODEL.to_string(),
                 model_explicit: false,
                 profile: None,
@@ -79,6 +79,28 @@
         std::fs::remove_dir_all(root).expect("temp config root should clean up");
 
         assert_eq!(resolved, PermissionMode::ReadOnly);
+    }
+
+    #[test]
+    fn resolve_effective_model_prefers_current_env_when_model_flag_is_absent() {
+        let _guard = env_lock();
+        let cwd = temp_dir();
+        std::fs::create_dir_all(&cwd).expect("cwd should exist");
+
+        let original_model = std::env::var("KCODE_MODEL").ok();
+        std::env::set_var("KCODE_MODEL", "gpt-5.4-mini");
+
+        let resolved = with_current_dir(&cwd, || {
+            super::resolve_effective_model(None).expect("model should resolve")
+        });
+
+        match original_model {
+            Some(value) => std::env::set_var("KCODE_MODEL", value),
+            None => std::env::remove_var("KCODE_MODEL"),
+        }
+        std::fs::remove_dir_all(&cwd).expect("temp cwd should clean up");
+
+        assert_eq!(resolved, "gpt-5.4-mini");
     }
 
     #[test]
@@ -175,7 +197,7 @@
         let args = vec!["--permission-mode=read-only".to_string()];
         assert_eq!(
             parse_args(&args).expect("args should parse"),
-            CliAction::Repl {
+            CliAction::ReplTui {
                 model: DEFAULT_MODEL.to_string(),
                 model_explicit: false,
                 profile: None,
@@ -195,7 +217,7 @@
         ];
         assert_eq!(
             parse_args(&args).expect("args should parse"),
-            CliAction::Repl {
+            CliAction::ReplTui {
                 model: DEFAULT_MODEL.to_string(),
                 model_explicit: false,
                 profile: None,
@@ -251,7 +273,7 @@ supports_streaming = false
             Some(value) => std::env::set_var("KCODE_PROFILE", value),
             None => std::env::remove_var("KCODE_PROFILE"),
         }
-        std::fs::remove_dir_all(root).expect("temp config root should clean up");
+        let _ = std::fs::remove_dir_all(root);
 
         assert!(error.contains("`--allowedTools` is unavailable"));
         assert!(error.contains("active profile `bridge`"));
@@ -308,7 +330,7 @@ supports_streaming = false
 
         assert_eq!(
             action,
-            CliAction::Repl {
+            CliAction::ReplTui {
                 model: DEFAULT_MODEL.to_string(),
                 model_explicit: false,
                 profile: Some("cliproxyapi".to_string()),
@@ -320,6 +342,7 @@ supports_streaming = false
 
     #[test]
     fn rejects_unknown_allowed_tools() {
+        let _guard = env_lock();
         let error = parse_args(&[
             "--profile".to_string(),
             "cliproxyapi".to_string(),

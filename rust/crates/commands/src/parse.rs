@@ -2,6 +2,7 @@ use crate::model::{SlashCommand, SlashCommandParseError};
 use crate::parse_support::{
     command_error, parse_list_or_help_args, parse_skills_args, remainder_after_command, usage_error,
 };
+use crate::registry::{builtin_session_command_enabled, find_slash_command_spec};
 
 impl SlashCommand {
     pub fn parse(input: &str) -> Result<Option<Self>, SlashCommandParseError> {
@@ -29,6 +30,12 @@ pub fn validate_slash_command_input(
     let args = parts.collect::<Vec<_>>();
     let remainder = remainder_after_command(trimmed, command);
 
+    if let Some(spec) = find_slash_command_spec(command) {
+        if !builtin_session_command_enabled(spec.name) {
+            return Ok(Some(SlashCommand::Unknown(command.to_string())));
+        }
+    }
+
     Ok(Some(match command {
         "help" => {
             validate_no_args(command, &args)?;
@@ -46,7 +53,7 @@ pub fn validate_slash_command_input(
             validate_no_args(command, &args)?;
             SlashCommand::Compact
         }
-        "bughunter" => SlashCommand::Bughunter { scope: remainder },
+        "bug" | "bughunter" => SlashCommand::Bughunter { scope: remainder },
         "commit" => {
             validate_no_args(command, &args)?;
             SlashCommand::Commit
@@ -71,7 +78,7 @@ pub fn validate_slash_command_input(
             SlashCommand::Cost
         }
         "resume" => SlashCommand::Resume {
-            session_path: Some(require_remainder(command, remainder, "<session-path>")?),
+            session_path: Some(required_remainder(command, remainder, "<session-path>")?),
         },
         "config" => SlashCommand::Config {
             section: parse_config_section(&args)?,
@@ -81,6 +88,9 @@ pub fn validate_slash_command_input(
             validate_no_args(command, &args)?;
             SlashCommand::Memory
         }
+        "dream" => SlashCommand::Dream {
+            mode: parse_dream_mode(&args)?,
+        },
         "init" => {
             validate_no_args(command, &args)?;
             SlashCommand::Init
@@ -98,6 +108,13 @@ pub fn validate_slash_command_input(
         "plugin" | "plugins" | "marketplace" => parse_plugin_command(&args)?,
         "agents" => SlashCommand::Agents {
             args: parse_list_or_help_args(command, remainder)?,
+        },
+        "powerup" => {
+            validate_no_args(command, &args)?;
+            SlashCommand::Powerup
+        }
+        "btw" => SlashCommand::Btw {
+            question: remainder,
         },
         "skills" => SlashCommand::Skills {
             args: parse_skills_args(remainder.as_deref())?,
@@ -154,6 +171,8 @@ pub fn validate_slash_command_input(
             validate_no_args(command, &args)?;
             SlashCommand::Desktop
         }
+        "schedule" => SlashCommand::Schedule { args: remainder },
+        "loop" => SlashCommand::Loop { args: remainder },
         "brief" => {
             validate_no_args(command, &args)?;
             SlashCommand::Brief
@@ -190,9 +209,11 @@ pub fn validate_slash_command_input(
             validate_no_args(command, &args)?;
             SlashCommand::PrivacySettings
         }
-        "plan" => SlashCommand::Plan { mode: remainder },
+        "plan" => SlashCommand::Plan {
+            mode: parse_plan_mode(&args)?,
+        },
         "review" => SlashCommand::Review { scope: remainder },
-        "tasks" => SlashCommand::Tasks { args: remainder },
+        "todos" | "tasks" => SlashCommand::Tasks { args: remainder },
         "theme" => SlashCommand::Theme { name: remainder },
         "voice" => SlashCommand::Voice { mode: remainder },
         "usage" => SlashCommand::Usage { scope: remainder },
@@ -236,33 +257,70 @@ fn optional_single_arg(
     }
 }
 
-fn require_remainder(
+fn required_remainder(
     command: &str,
     remainder: Option<String>,
     argument_hint: &str,
 ) -> Result<String, SlashCommandParseError> {
-    remainder.ok_or_else(|| usage_error(command, argument_hint))
+    remainder
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| usage_error(command, argument_hint))
 }
 
 fn parse_permissions_mode(args: &[&str]) -> Result<Option<String>, SlashCommandParseError> {
     let mode = optional_single_arg(
         "permissions",
         args,
-        "[read-only|workspace-write|danger-full-access]",
+        "[read-only|plan|workspace-write|danger-full-access]",
     )?;
     if let Some(mode) = mode {
         if matches!(
             mode.as_str(),
-            "read-only" | "workspace-write" | "danger-full-access"
+            "read-only" | "plan" | "workspace-write" | "danger-full-access"
         ) {
             return Ok(Some(mode));
         }
         return Err(command_error(
             &format!(
-                "Unsupported /permissions mode '{mode}'. Use read-only, workspace-write, or danger-full-access."
+                "Unsupported /permissions mode '{mode}'. Use read-only, plan, workspace-write, or danger-full-access."
             ),
             "permissions",
-            "/permissions [read-only|workspace-write|danger-full-access]",
+            "/permissions [read-only|plan|workspace-write|danger-full-access]",
+        ));
+    }
+
+    Ok(None)
+}
+
+fn parse_dream_mode(args: &[&str]) -> Result<Option<String>, SlashCommandParseError> {
+    let mode = optional_single_arg("dream", args, "[on|off|status]")?;
+    if let Some(mode) = mode {
+        if matches!(mode.as_str(), "on" | "off" | "status") {
+            return Ok(Some(mode));
+        }
+
+        return Err(command_error(
+            &format!("Unsupported /dream mode '{mode}'. Use on, off, or status."),
+            "dream",
+            "/dream [on|off|status]",
+        ));
+    }
+
+    Ok(None)
+}
+
+fn parse_plan_mode(args: &[&str]) -> Result<Option<String>, SlashCommandParseError> {
+    let mode = optional_single_arg("plan", args, "[on|off|status]")?;
+    if let Some(mode) = mode {
+        if matches!(mode.as_str(), "on" | "off" | "status") {
+            return Ok(Some(mode));
+        }
+
+        return Err(command_error(
+            &format!("Unsupported /plan mode '{mode}'. Use on, off, or status."),
+            "plan",
+            "/plan [on|off|status]",
         ));
     }
 

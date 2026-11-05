@@ -30,7 +30,7 @@ fn build_runtime(
     build_runtime_with_plugin_state(
         session,
         session_id,
-        model,
+        setup_context.active_profile.model.clone(),
         system_prompt,
         enable_tools,
         emit_output,

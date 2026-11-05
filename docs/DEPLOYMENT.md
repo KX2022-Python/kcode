@@ -93,4 +93,4 @@ When a user sends a media file, Kcode passes the metadata and placeholder text (
 ## Troubleshooting
 
 *   **Service fails to start**: Check logs with `journalctl -u kcode-bridge -e`. Ensure `/etc/kcode/bridge.env` has valid syntax (no spaces around `=`).
-*   **Webhook not receiving messages**: Ensure your server's port 3000 is open and, if using a domain, that your reverse proxy (Nginx/Caddy) forwards `/webhook/*` to `http://localhost:3000`.
+*   **Webhook not receiving messages**: Kcode only hosts the local receiver on port `3000`; it does not provide a managed public ingress. Ensure your server's port `3000` is open and, if using a domain, that your reverse proxy (Nginx/Caddy) forwards `/webhook/*` to `http://localhost:3000`. If you cannot provide public HTTPS ingress, remove `KCODE_WEBHOOK_URL` and use Telegram Long Polling instead.

@@ -7,6 +7,7 @@ use crate::config::RuntimePermissionRuleConfig;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PermissionMode {
     ReadOnly,
+    Plan,
     WorkspaceWrite,
     DangerFullAccess,
     Prompt,
@@ -18,6 +19,7 @@ impl PermissionMode {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ReadOnly => "read-only",
+            Self::Plan => "plan",
             Self::WorkspaceWrite => "workspace-write",
             Self::DangerFullAccess => "danger-full-access",
             Self::Prompt => "prompt",

@@ -2,21 +2,33 @@
 //! Runs in a dedicated background thread to handle !Send LiveCli instances safely.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
+use std::time::{Duration, Instant};
 
 use adapters::{
-    BridgeInboundEvent, BridgeOutboundEvent, DeliveryMode, TelegramConfig, TelegramMode,
-    TelegramTransport,
+    BridgeInboundEvent, BridgeOutboundEvent, ChannelSession, DeliveryMode, SessionRouter,
+    TelegramConfig, TelegramMode,
 };
-use runtime::PermissionMode;
+use runtime::{ConfigLoader, PermissionMode};
 
 use crate::LiveCli;
+
+const BRIDGE_SESSION_DIR_NAME: &str = "bridge-sessions";
+const BRIDGE_SESSION_IDLE_TTL: Duration = Duration::from_secs(30 * 60);
+const BRIDGE_SESSION_CACHE_LIMIT: usize = 128;
+const BRIDGE_HANDLER_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// A message sent from the Webhook Server to the BridgeCore.
 pub struct BridgeMessage {
     pub event: BridgeInboundEvent,
     pub reply_tx: Sender<BridgeOutboundEvent>,
+}
+
+struct ManagedSession {
+    cli: LiveCli,
+    route: ChannelSession,
+    last_used_at: Instant,
 }
 
 /// Configuration for creating new sessions.
@@ -29,100 +41,195 @@ pub struct SessionConfig {
 
 /// Manages the lifecycle of individual LiveCli sessions.
 pub struct SessionManager {
-    sessions: HashMap<String, LiveCli>,
-    session_dir: PathBuf,
+    sessions: HashMap<String, ManagedSession>,
+    session_router: SessionRouter,
 }
 
 impl SessionManager {
     pub fn new(session_dir: PathBuf) -> Self {
         Self {
             sessions: HashMap::new(),
-            session_dir,
+            session_router: SessionRouter::new(session_dir),
         }
     }
 
-    /// Get an existing session or create a new one for the given chat_id.
+    /// Get an existing session or create a new one for the given channel/chat pair.
     /// Implements graceful fallback: if session file is corrupted, creates a new one.
     pub fn get_or_create_session(
         &mut self,
         chat_id: &str,
         channel: &str,
         default_config: &SessionConfig,
-    ) -> Result<&mut LiveCli, String> {
-        if !self.sessions.contains_key(chat_id) {
-            println!("✨ Creating/Loading session for chat_id: {}", chat_id);
+    ) -> Result<(&mut LiveCli, ChannelSession), String> {
+        self.evict_expired_sessions();
+        let session_route = self.session_router.get_or_create_session(channel, chat_id);
+        let session_key = session_route.session_id.clone();
+        let session_path = self.session_router.session_path(channel, chat_id);
+        let session_dir = session_path
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."));
 
-            let session_path = self.session_dir.join(format!("{}.jsonl", chat_id));
+        if !self.sessions.contains_key(&session_key) {
+            println!(
+                "✨ Creating/Loading bridge session for {}:{}",
+                channel, chat_id
+            );
 
-            // Ensure session directory exists
-            if let Err(e) = std::fs::create_dir_all(&self.session_dir) {
-                eprintln!("⚠ Failed to create session directory: {}", e);
+            if let Err(error) = std::fs::create_dir_all(&session_dir) {
+                eprintln!("⚠ Failed to create session directory: {}", error);
             }
 
-            let cli = if session_path.exists() {
-                // Try to load existing session, fallback to new if corrupted
-                match LiveCli::new(
-                    default_config.model.clone(),
-                    default_config.model_explicit,
-                    default_config.profile.clone(),
-                    true,
-                    None,
-                    default_config.permission_mode,
-                    Some(session_path.clone()),
-                ) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        eprintln!(
-                            "⚠ Session file corrupted for {}: {}. Creating new session.",
-                            chat_id, e
-                        );
-                        // Backup corrupted file
-                        let backup_path = session_path.with_extension("jsonl.bak");
-                        let _ = std::fs::rename(&session_path, &backup_path);
+            let cli = match LiveCli::new(
+                default_config.model.clone(),
+                default_config.model_explicit,
+                default_config.profile.clone(),
+                true,
+                None,
+                default_config.permission_mode,
+                Some(session_path.clone()),
+            ) {
+                Ok(cli) => cli,
+                Err(error) if session_path.exists() => {
+                    eprintln!(
+                        "⚠ Session file corrupted for {}:{}: {}. Creating new session.",
+                        channel, chat_id, error
+                    );
+                    let backup_path = session_path.with_extension("jsonl.bak");
+                    let _ = std::fs::rename(&session_path, &backup_path);
 
-                        // Create fresh session
-                        LiveCli::new(
-                            default_config.model.clone(),
-                            default_config.model_explicit,
-                            default_config.profile.clone(),
-                            true,
-                            None,
-                            default_config.permission_mode,
-                            None,
-                        )
-                        .map_err(|e| e.to_string())?
-                    }
+                    LiveCli::new(
+                        default_config.model.clone(),
+                        default_config.model_explicit,
+                        default_config.profile.clone(),
+                        true,
+                        None,
+                        default_config.permission_mode,
+                        Some(session_path.clone()),
+                    )
+                    .map_err(|retry_error| retry_error.to_string())?
                 }
-            } else {
-                LiveCli::new(
-                    default_config.model.clone(),
-                    default_config.model_explicit,
-                    default_config.profile.clone(),
-                    true,
-                    None,
-                    default_config.permission_mode,
-                    None,
-                )
-                .map_err(|e| e.to_string())?
+                Err(error) => return Err(error.to_string()),
             };
 
-            self.sessions.insert(chat_id.to_string(), cli);
+            self.sessions.insert(
+                session_key.clone(),
+                ManagedSession {
+                    cli,
+                    route: session_route.clone(),
+                    last_used_at: Instant::now(),
+                },
+            );
+            self.enforce_cache_limit();
         }
-        Ok(self.sessions.get_mut(chat_id).unwrap())
+
+        let managed = self.sessions.get_mut(&session_key).unwrap();
+        managed.last_used_at = Instant::now();
+        Ok((&mut managed.cli, managed.route.clone()))
     }
+
+    fn evict_expired_sessions(&mut self) {
+        let now = Instant::now();
+        let expired = self
+            .sessions
+            .iter()
+            .filter_map(|(session_id, managed)| {
+                (now.duration_since(managed.last_used_at) >= BRIDGE_SESSION_IDLE_TTL)
+                    .then(|| session_id.clone())
+            })
+            .collect::<Vec<_>>();
+
+        for session_id in expired {
+            self.evict_session(&session_id);
+        }
+    }
+
+    fn enforce_cache_limit(&mut self) {
+        while self.sessions.len() > BRIDGE_SESSION_CACHE_LIMIT {
+            let Some(oldest_session_id) = self
+                .sessions
+                .iter()
+                .min_by_key(|(_, managed)| managed.last_used_at)
+                .map(|(session_id, _)| session_id.clone())
+            else {
+                break;
+            };
+            self.evict_session(&oldest_session_id);
+        }
+    }
+
+    fn evict_session(&mut self, session_id: &str) {
+        if let Some(managed) = self.sessions.remove(session_id) {
+            let session = managed
+                .cli
+                .runtime
+                .session()
+                .clone()
+                .with_persistence_path(managed.cli.session.path.clone());
+            if let Err(error) = session.save_to_path(&managed.cli.session.path) {
+                eprintln!(
+                    "⚠ Failed to persist bridge session {} during eviction: {}",
+                    session_id, error
+                );
+            }
+            self.session_router
+                .remove_session(&managed.route.channel, &managed.route.chat_id);
+        }
+    }
+}
+
+#[cfg(test)]
+impl SessionManager {
+    pub(crate) fn active_session_count(&self) -> usize {
+        self.sessions.len()
+    }
+
+    pub(crate) fn mark_session_idle_for_test(&mut self, session_id: &str, idle_for: Duration) {
+        if let Some(managed) = self.sessions.get_mut(session_id) {
+            managed.last_used_at = Instant::now() - idle_for;
+        }
+    }
+
+    pub(crate) fn evict_expired_sessions_for_test(&mut self) {
+        self.evict_expired_sessions();
+    }
+
+    pub(crate) fn has_active_route(&self, channel: &str, chat_id: &str) -> bool {
+        self.session_router
+            .list_sessions()
+            .into_iter()
+            .any(|session| session.channel == channel && session.chat_id == chat_id)
+    }
+
+    pub(crate) fn route_for_test(&self, channel: &str, chat_id: &str) -> ChannelSession {
+        self.session_router.get_or_create_session(channel, chat_id)
+    }
+}
+
+fn bridge_session_dir_from_config_home(config_home: &Path) -> PathBuf {
+    config_home.join(BRIDGE_SESSION_DIR_NAME)
+}
+
+fn bridge_session_dir() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let cwd = std::env::current_dir()?;
+    Ok(bridge_session_dir_from_config_home(
+        ConfigLoader::default_for(&cwd).config_home(),
+    ))
+}
+
+fn bridge_response_session_id(channel: &str, chat_id: &str) -> String {
+    SessionRouter::session_id_for(channel, chat_id)
 }
 
 /// The core bridge engine running in a background thread.
 pub struct BridgeCore {
     session_manager: SessionManager,
-    _telegram_transport: TelegramTransport, // Kept for potential polling fallback
 }
 
 impl BridgeCore {
-    pub fn new(session_dir: PathBuf, telegram_transport: TelegramTransport) -> Self {
+    pub fn new(session_dir: PathBuf) -> Self {
         Self {
             session_manager: SessionManager::new(session_dir),
-            _telegram_transport: telegram_transport,
         }
     }
 
@@ -153,29 +260,29 @@ impl BridgeCore {
         let chat_id = msg.event.channel_chat_id.clone();
         let channel = msg.event.channel.clone();
 
-        let cli = match self
+        let (cli, session_route) = match self
             .session_manager
             .get_or_create_session(&chat_id, &channel, config)
         {
-            Ok(cli) => cli,
-            Err(e) => {
-                eprintln!("❌ Session creation failed: {}", e);
-                return Some(self.create_error_response(&msg.event, e));
+            Ok(result) => result,
+            Err(error) => {
+                eprintln!("❌ Session creation failed: {}", error);
+                return Some(self.create_error_response(&msg.event, error));
             }
         };
 
         match cli.run_turn_capture(&msg.event.text) {
             Ok(response) => Some(BridgeOutboundEvent {
                 bridge_event_id: msg.event.bridge_event_id.clone(),
-                session_id: chat_id.clone(),
+                session_id: session_route.session_id,
                 channel_capability_hint: channel.clone(),
                 reply_target: Some(chat_id.clone()),
                 render_items: vec![("text".to_string(), response)],
                 delivery_mode: DeliveryMode::Reply { reply_to: chat_id },
             }),
-            Err(e) => {
-                eprintln!("❌ Processing failed for {}: {}", chat_id, e);
-                Some(self.create_error_response(&msg.event, e.to_string()))
+            Err(error) => {
+                eprintln!("❌ Processing failed for {}: {}", chat_id, error);
+                Some(self.create_error_response(&msg.event, error.to_string()))
             }
         }
     }
@@ -187,7 +294,7 @@ impl BridgeCore {
     ) -> BridgeOutboundEvent {
         BridgeOutboundEvent {
             bridge_event_id: event.bridge_event_id.clone(),
-            session_id: event.channel_chat_id.clone(),
+            session_id: bridge_response_session_id(&event.channel, &event.channel_chat_id),
             channel_capability_hint: event.channel.clone(),
             reply_target: Some(event.channel_chat_id.clone()),
             render_items: vec![("text".to_string(), format!("⚠ Error: {}", error))],
@@ -208,28 +315,24 @@ pub fn run_bridge_service(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use adapters::{
         apply_bridge_env_defaults_to_process, print_config_summary, validate_bridge_config,
-        FeishuConfig, SessionRouter, WhatsAppConfig,
+        FeishuConfig, TelegramTransport, WhatsAppConfig,
     };
-    use std::sync::Arc;
     use tokio::runtime::Builder;
 
     let _ = apply_bridge_env_defaults_to_process();
 
-    // Validate configuration before startup
     let errors = validate_bridge_config();
     if !errors.is_empty() {
         eprintln!("❌ Configuration errors found:");
-        for err in &errors {
-            eprintln!("  ⚠ {}: {}", err.var_name, err.message);
+        for error in &errors {
+            eprintln!("  ⚠ {}: {}", error.var_name, error.message);
         }
         eprintln!("\nPlease fix these issues and restart.");
         return Ok(());
     }
 
-    // Print configuration summary
     print_config_summary();
 
-    // 1. Load Credentials
     let bot_token = std::env::var("KCODE_TELEGRAM_BOT_TOKEN").ok();
     let webhook_url = std::env::var("KCODE_WEBHOOK_URL").ok();
     let whatsapp_phone = std::env::var("KCODE_WHATSAPP_PHONE_ID").ok();
@@ -240,7 +343,6 @@ pub fn run_bridge_service(
         return Ok(());
     }
 
-    // 2. Build Configs
     let telegram_config = bot_token.map(|token| TelegramConfig {
         bot_token: token,
         mode: if let Some(url) = webhook_url {
@@ -264,35 +366,51 @@ pub fn run_bridge_service(
         webhook_verify_token: std::env::var("KCODE_WEBHOOK_VERIFY_TOKEN").unwrap_or_default(),
     });
 
-    // 3. Initialize Transports
-    let telegram_transport = telegram_config.clone().map(TelegramTransport::new);
+    let session_dir = bridge_session_dir()?;
+    std::fs::create_dir_all(&session_dir)?;
 
-    // 4. Setup Session Router
-    let session_router = Arc::new(SessionRouter::new(PathBuf::from(".kcode/bridge-sessions")));
+    if let Some(config) = telegram_config.as_ref() {
+        match &config.mode {
+            TelegramMode::Webhook { url, .. } => {
+                println!("🔌 Telegram delivery mode: Webhook");
+                println!("  Public URL       {}", url);
+                println!("  Local receiver   http://0.0.0.0:3000/webhook/telegram");
+                println!(
+                    "  Requirement      Expose port 3000 through a public HTTPS reverse proxy or tunnel"
+                );
+                println!("  Fallback         Unset KCODE_WEBHOOK_URL to use Telegram long polling");
 
-    // 5. Create Communication Channel
-    let (core_tx, core_rx) = std::sync::mpsc::channel::<BridgeMessage>();
-
-    // 6. Spawn BridgeCore
-    if let Some(tg_transport) = telegram_transport {
-        std::thread::spawn(move || {
-            let core = BridgeCore::new(PathBuf::from(".kcode/bridge-sessions"), tg_transport);
-            let config = SessionConfig {
-                model,
-                model_explicit,
-                profile,
-                permission_mode,
-            };
-            core.run(core_rx, config);
-        });
+                let transport = TelegramTransport::new(config.clone());
+                let rt = Builder::new_current_thread().enable_all().build()?;
+                rt.block_on(async { transport.set_webhook().await })
+                    .map_err(|error| {
+                        std::io::Error::other(format!("Failed to set Telegram webhook: {error}"))
+                    })?;
+            }
+            TelegramMode::Polling { .. } => {
+                println!("🔌 Telegram delivery mode: Long Polling");
+            }
+        }
     }
 
-    // 7. Prepare Webhook Handler
+    let (core_tx, core_rx) = std::sync::mpsc::channel::<BridgeMessage>();
+
+    std::thread::spawn(move || {
+        let core = BridgeCore::new(session_dir);
+        let config = SessionConfig {
+            model,
+            model_explicit,
+            profile,
+            permission_mode,
+        };
+        core.run(core_rx, config);
+    });
+
     let webhook_tx = core_tx.clone();
     let handler = Box::new(move |event: BridgeInboundEvent| -> BridgeOutboundEvent {
         let (reply_tx, rx) = std::sync::mpsc::channel();
-        if let Err(e) = webhook_tx.send(BridgeMessage { event, reply_tx }) {
-            eprintln!("Failed to send event to BridgeCore: {}", e);
+        if let Err(error) = webhook_tx.send(BridgeMessage { event, reply_tx }) {
+            eprintln!("Failed to send event to BridgeCore: {}", error);
             return BridgeOutboundEvent {
                 bridge_event_id: "error".to_string(),
                 session_id: String::new(),
@@ -303,8 +421,8 @@ pub fn run_bridge_service(
             };
         }
 
-        match rx.recv() {
-            Ok(res) => res,
+        match rx.recv_timeout(BRIDGE_HANDLER_TIMEOUT) {
+            Ok(response) => response,
             Err(_) => BridgeOutboundEvent {
                 bridge_event_id: "error".to_string(),
                 session_id: String::new(),
@@ -318,19 +436,17 @@ pub fn run_bridge_service(
 
     println!("🌐 Kcode Bridge started. Listening on 0.0.0.0:3000");
 
-    // 8. Run Webhook Server (Async)
     let rt = Builder::new_current_thread().enable_all().build()?;
     rt.block_on(async {
         adapters::start_webhook_server(
             "0.0.0.0:3000".parse().unwrap(),
-            session_router,
             telegram_config,
             whatsapp_config,
             feishu_config,
             handler,
         )
         .await
-        .map_err(|e| -> Box<dyn std::error::Error> { e })
+        .map_err(|error| -> Box<dyn std::error::Error> { error })
     })?;
 
     Ok(())

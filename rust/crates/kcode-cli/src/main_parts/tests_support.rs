@@ -6,7 +6,7 @@
         format_cost_report, format_internal_prompt_progress_line, format_issue_report,
         format_model_report, format_model_switch_report, format_permissions_report,
         format_permissions_switch_report, format_pr_report, format_resume_report,
-        format_status_report, format_tool_call_start, format_tool_result, format_ultraplan_report,
+        format_review_report, format_status_report, format_tool_call_start, format_tool_result, format_ultraplan_report,
         format_unknown_slash_command, format_unknown_slash_command_message,
         normalize_permission_mode, parse_args, parse_git_status_branch,
         parse_git_status_metadata_for, parse_git_workspace_summary, permission_policy,
@@ -14,12 +14,13 @@
         render_config_report, render_diff_report, render_doctor_report_from_setup,
         render_memory_report, render_repl_help, render_repl_help_for_profile,
         render_resume_usage, resolve_model_alias, resolve_session_reference, response_to_events,
-        resume_supported_slash_commands, run_resume_command,
+        resume_supported_slash_commands, run_plan_mode_command, run_resume_command,
         slash_command_completion_candidates_with_sessions, status_context, validate_no_args,
         CliAction, CliOutputFormat, CommandReportSurfaceSelection, GitWorkspaceSummary,
         InternalPromptProgressEvent, InternalPromptProgressState, LiveCli, ProviderRuntimeClient,
         SlashCommand, StatusUsage, DEFAULT_MODEL,
     };
+    use crate::bridge_core::{SessionConfig, SessionManager};
     use api::{MessageResponse, OutputContentBlock, Usage};
     use plugins::{
         PluginManager, PluginManagerConfig, PluginTool, PluginToolDefinition, PluginToolPermission,
@@ -30,6 +31,7 @@
         ResolutionSource, ResolvedProviderProfile, Session,
     };
     use serde_json::json;
+    use std::cell::{Cell, RefCell};
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command;
@@ -39,6 +41,11 @@
     };
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
     use tools::GlobalToolRegistry;
+
+    thread_local! {
+        static ENV_LOCK_DEPTH: Cell<usize> = const { Cell::new(0) };
+        static ENV_LOCK_GUARD: RefCell<Option<MutexGuard<'static, ()>>> = const { RefCell::new(None) };
+    }
 
     fn registry_with_plugin_tool() -> GlobalToolRegistry {
         GlobalToolRegistry::with_plugin_tools(vec![PluginTool::new(
@@ -87,19 +94,70 @@
         );
     }
 
-    fn env_lock() -> MutexGuard<'static, ()> {
+    struct EnvLockGuard;
+
+    fn env_lock() -> EnvLockGuard {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        ENV_LOCK_DEPTH.with(|depth| {
+            if depth.get() == 0 {
+                let guard = LOCK
+                    .get_or_init(|| Mutex::new(()))
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                ENV_LOCK_GUARD.with(|slot| {
+                    *slot.borrow_mut() = Some(guard);
+                });
+            }
+            depth.set(depth.get() + 1);
+        });
+
+        EnvLockGuard
+    }
+
+    impl Drop for EnvLockGuard {
+        fn drop(&mut self) {
+            ENV_LOCK_DEPTH.with(|depth| {
+                let next = depth.get().saturating_sub(1);
+                depth.set(next);
+                if next == 0 {
+                    ENV_LOCK_GUARD.with(|slot| {
+                        slot.borrow_mut().take();
+                    });
+                }
+            });
+        }
     }
 
     fn with_current_dir<T>(cwd: &Path, f: impl FnOnce() -> T) -> T {
-        let previous = std::env::current_dir().expect("cwd should load");
+        let _guard = env_lock();
+        let previous = std::env::current_dir().unwrap_or_else(|_| fallback_cwd());
         std::env::set_current_dir(cwd).expect("cwd should change");
+        let restore = CurrentDirRestore { previous };
         let result = f();
-        std::env::set_current_dir(previous).expect("cwd should restore");
+        drop(restore);
         result
+    }
+
+    fn fallback_cwd() -> PathBuf {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .filter(|path| path.is_dir())
+            .unwrap_or_else(|| PathBuf::from("/"))
+    }
+
+    struct CurrentDirRestore {
+        previous: PathBuf,
+    }
+
+    impl Drop for CurrentDirRestore {
+        fn drop(&mut self) {
+            let target = if self.previous.is_dir() {
+                self.previous.as_path()
+            } else {
+                Path::new("/")
+            };
+            std::env::set_current_dir(target).expect("cwd should restore");
+        }
     }
 
     fn test_setup_context(workspace: &Path) -> runtime::SetupContext {

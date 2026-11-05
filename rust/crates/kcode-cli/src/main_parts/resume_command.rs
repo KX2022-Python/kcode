@@ -138,15 +138,26 @@ fn run_resume_command(
             session: session.clone(),
             message: Some(render_memory_report()?),
         }),
+        SlashCommand::Dream { mode } => {
+            let cwd = env::current_dir()?;
+            let outcome = run_auto_dream_command(&cwd, mode.as_deref())?;
+            Ok(ResumeCommandOutcome {
+                session: session.clone(),
+                message: Some(outcome.message),
+            })
+        }
         SlashCommand::Tasks { args } => {
             let summary = match args.as_deref() {
-                None | Some("list") => {
-                    "Tasks\n  Background tasks are managed through the Agent tool.\n  Use /help Agent to see how to create and manage tasks.".to_string()
-                }
+                None | Some("list") => render_todos_report(
+                    session_path.parent().unwrap_or_else(|| Path::new(".")),
+                )?,
                 Some("help") => {
-                    "Tasks\n  Background tasks allow running multiple agent sessions in parallel.\n\n  Commands:\n    /tasks              List active tasks\n    /tasks help         Show this help\n\n  Task management is done through the Agent tool:\n    Agent(action=create, description='...')   Create a new task\n    Agent(action=list)                        List all tasks\n    Agent(action=stop, task_id='...')         Stop a running task\n    Agent(action=output, task_id='...')       Get task output".to_string()
+                    "Todos\n  Usage            /todos\n  Usage            /todos help\n  Store            .clawd-todos.json\n  Source           TodoWrite tool updates this store during longer tasks".to_string()
                 }
-                other => format!("Unknown tasks argument: {}. Use /tasks help for usage.", other.unwrap_or("")),
+                other => format!(
+                    "Unknown todos argument: {}. Use /todos help for usage.",
+                    other.unwrap_or("")
+                ),
             };
             Ok(ResumeCommandOutcome {
                 session: session.clone(),
@@ -204,6 +215,8 @@ fn run_resume_command(
         | SlashCommand::Permissions { .. }
         | SlashCommand::Session { .. }
         | SlashCommand::Plugins { .. }
+        | SlashCommand::Powerup
+        | SlashCommand::Btw { .. }
         | SlashCommand::Login
         | SlashCommand::Logout
         | SlashCommand::Vim
@@ -237,6 +250,8 @@ fn run_resume_command(
         | SlashCommand::Color { .. }
         | SlashCommand::Effort { .. }
         | SlashCommand::Branch { .. }
+        | SlashCommand::Schedule { .. }
+        | SlashCommand::Loop { .. }
         | SlashCommand::Rewind { .. }
         | SlashCommand::Ide { .. }
         | SlashCommand::Tag { .. }

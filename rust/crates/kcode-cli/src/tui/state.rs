@@ -81,10 +81,20 @@ pub enum ThemePreset {
     Default,
     Amber,
     Ocean,
+    DarkHighContrast,
+    CatppuccinMocha,
+    Light,
 }
 
 impl ThemePreset {
-    pub const ALL: [Self; 3] = [Self::Default, Self::Amber, Self::Ocean];
+    pub const ALL: [Self; 6] = [
+        Self::Default,
+        Self::Amber,
+        Self::Ocean,
+        Self::CatppuccinMocha,
+        Self::DarkHighContrast,
+        Self::Light,
+    ];
 
     #[must_use]
     pub const fn label(self) -> &'static str {
@@ -92,6 +102,9 @@ impl ThemePreset {
             Self::Default => "default",
             Self::Amber => "amber",
             Self::Ocean => "ocean",
+            Self::DarkHighContrast => "dark-hc",
+            Self::CatppuccinMocha => "catppuccin",
+            Self::Light => "light",
         }
     }
 
@@ -100,6 +113,9 @@ impl ThemePreset {
         match value {
             "amber" => Self::Amber,
             "ocean" => Self::Ocean,
+            "dark-hc" => Self::DarkHighContrast,
+            "catppuccin" => Self::CatppuccinMocha,
+            "light" => Self::Light,
             _ => Self::Default,
         }
     }
@@ -109,7 +125,10 @@ impl ThemePreset {
         match self {
             Self::Default => Self::Amber,
             Self::Amber => Self::Ocean,
-            Self::Ocean => Self::Default,
+            Self::Ocean => Self::CatppuccinMocha,
+            Self::CatppuccinMocha => Self::DarkHighContrast,
+            Self::DarkHighContrast => Self::Light,
+            Self::Light => Self::Default,
         }
     }
 }

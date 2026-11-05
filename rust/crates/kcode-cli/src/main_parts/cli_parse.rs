@@ -140,7 +140,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
     let allowed_tools = normalize_allowed_tools(&allowed_tool_values, profile.as_deref())?;
 
     if rest.is_empty() {
-        return Ok(CliAction::Repl {
+        return Ok(CliAction::ReplTui {
             model,
             model_explicit,
             profile,

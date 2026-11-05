@@ -54,4 +54,9 @@ impl LiveCli {
         println!("{}", format_issue_report(context));
         Ok(())
     }
+
+    fn run_review(&self, scope: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+        println!("{}", format_review_report(&env::current_dir()?, scope)?);
+        Ok(())
+    }
 }

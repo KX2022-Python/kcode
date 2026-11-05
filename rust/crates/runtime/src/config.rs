@@ -28,6 +28,7 @@ pub enum ConfigSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolvedPermissionMode {
     ReadOnly,
+    Plan,
     WorkspaceWrite,
     DangerFullAccess,
 }
@@ -60,6 +61,7 @@ pub struct RuntimeFeatureConfig {
     plugins: RuntimePluginConfig,
     mcp: McpConfigCollection,
     oauth: Option<OAuthConfig>,
+    auto_dream_enabled: Option<bool>,
     model: Option<String>,
     permission_mode: Option<ResolvedPermissionMode>,
     permission_rules: RuntimePermissionRuleConfig,
@@ -315,6 +317,7 @@ impl ConfigLoader {
                 servers: mcp_servers,
             },
             oauth: parse_optional_oauth_config(&merged_value, "merged settings.oauth")?,
+            auto_dream_enabled: parse_optional_auto_dream_enabled(&merged_value)?,
             model: parse_optional_model(&merged_value),
             permission_mode: resolved_permission_mode,
             permission_rules: parse_optional_permission_rules(&merged_value)?,
@@ -407,6 +410,11 @@ impl RuntimeConfig {
     }
 
     #[must_use]
+    pub fn auto_dream_enabled(&self) -> bool {
+        self.feature_config.auto_dream_enabled()
+    }
+
+    #[must_use]
     pub fn permission_mode(&self) -> Option<ResolvedPermissionMode> {
         self.feature_config.permission_mode
     }
@@ -458,6 +466,17 @@ impl RuntimeFeatureConfig {
     #[must_use]
     pub fn model(&self) -> Option<&str> {
         self.model.as_deref()
+    }
+
+    #[must_use]
+    pub fn with_auto_dream_enabled(mut self, enabled: bool) -> Self {
+        self.auto_dream_enabled = Some(enabled);
+        self
+    }
+
+    #[must_use]
+    pub fn auto_dream_enabled(&self) -> bool {
+        self.auto_dream_enabled.unwrap_or(true)
     }
 
     #[must_use]
@@ -756,6 +775,17 @@ fn parse_optional_model(root: &JsonValue) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+fn parse_optional_auto_dream_enabled(root: &JsonValue) -> Result<Option<bool>, ConfigError> {
+    let Some(object) = root.as_object() else {
+        return Ok(None);
+    };
+    optional_bool(
+        object,
+        "autoDreamEnabled",
+        "merged settings.autoDreamEnabled",
+    )
+}
+
 fn parse_optional_hooks_config(root: &JsonValue) -> Result<RuntimeHookConfig, ConfigError> {
     let Some(object) = root.as_object() else {
         return Ok(RuntimeHookConfig::default());
@@ -861,7 +891,8 @@ fn parse_permission_mode_label(
     context: &str,
 ) -> Result<ResolvedPermissionMode, ConfigError> {
     match mode {
-        "default" | "plan" | "read-only" => Ok(ResolvedPermissionMode::ReadOnly),
+        "default" | "read-only" => Ok(ResolvedPermissionMode::ReadOnly),
+        "plan" => Ok(ResolvedPermissionMode::Plan),
         "acceptEdits" | "auto" | "workspace-write" => Ok(ResolvedPermissionMode::WorkspaceWrite),
         "dontAsk" | "danger-full-access" => Ok(ResolvedPermissionMode::DangerFullAccess),
         other => Err(ConfigError::Parse(format!(
@@ -1279,6 +1310,7 @@ mod tests {
             Some(&JsonValue::String("opus".to_string()))
         );
         assert_eq!(loaded.model(), Some("opus"));
+        assert!(loaded.auto_dream_enabled());
         assert_eq!(
             loaded.permission_mode(),
             Some(ResolvedPermissionMode::WorkspaceWrite)
@@ -1444,6 +1476,29 @@ mod tests {
         assert_eq!(oauth.client_id, "runtime-client");
         assert_eq!(oauth.callback_port, Some(54_545));
         assert_eq!(oauth.scopes, vec!["org:read", "user:write"]);
+
+        fs::remove_dir_all(root).expect("cleanup temp dir");
+    }
+
+    #[test]
+    fn parses_auto_dream_enabled_from_local_settings() {
+        let root = temp_dir();
+        let cwd = root.join("project");
+        let home = root.join("home").join(".claw");
+        fs::create_dir_all(cwd.join(".claw")).expect("project config dir");
+        fs::create_dir_all(&home).expect("home config dir");
+
+        fs::write(
+            cwd.join(".claw").join("settings.local.json"),
+            r#"{"autoDreamEnabled":false}"#,
+        )
+        .expect("write local settings");
+
+        let loaded = ConfigLoader::new(&cwd, &home)
+            .load()
+            .expect("config should load");
+
+        assert!(!loaded.auto_dream_enabled());
 
         fs::remove_dir_all(root).expect("cleanup temp dir");
     }
@@ -1628,6 +1683,7 @@ default_mode = "read-only"
 
         // then
         assert_eq!(loaded.loaded_entries().len(), 1);
+        assert!(loaded.auto_dream_enabled());
         assert_eq!(loaded.permission_mode(), None);
         assert_eq!(loaded.plugins().enabled_plugins().len(), 0);
 
@@ -1671,7 +1727,7 @@ default_mode = "read-only"
         // given / when / then
         assert_eq!(
             parse_permission_mode_label("plan", "test").expect("plan should resolve"),
-            ResolvedPermissionMode::ReadOnly
+            ResolvedPermissionMode::Plan
         );
         assert_eq!(
             parse_permission_mode_label("acceptEdits", "test").expect("acceptEdits should resolve"),

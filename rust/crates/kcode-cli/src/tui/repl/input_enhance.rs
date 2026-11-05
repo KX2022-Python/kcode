@@ -1,5 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use super::text_cursor::{clamp_cursor_to_boundary, next_char_boundary, previous_char_boundary};
+
 /// 历史搜索状态 — 对齐 CC-Haha HistorySearchDialog
 #[derive(Debug, Clone)]
 pub struct HistorySearch {
@@ -56,6 +58,7 @@ impl HistorySearch {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent, history: &[String]) -> HistorySearchAction {
+        self.cursor = clamp_cursor_to_boundary(&self.query, self.cursor);
         match key.code {
             KeyCode::Esc => {
                 self.deactivate();
@@ -91,28 +94,25 @@ impl HistorySearch {
             }
             KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => {
                 self.query.insert(self.cursor, c);
-                self.cursor += 1;
+                self.cursor += c.len_utf8();
                 self.search(history);
                 HistorySearchAction::Updated
             }
             KeyCode::Backspace => {
                 if self.cursor > 0 {
-                    self.query.remove(self.cursor - 1);
-                    self.cursor -= 1;
+                    let previous = previous_char_boundary(&self.query, self.cursor);
+                    self.query.drain(previous..self.cursor);
+                    self.cursor = previous;
                     self.search(history);
                 }
                 HistorySearchAction::Updated
             }
             KeyCode::Left => {
-                if self.cursor > 0 {
-                    self.cursor -= 1;
-                }
+                self.cursor = previous_char_boundary(&self.query, self.cursor);
                 HistorySearchAction::None
             }
             KeyCode::Right => {
-                if self.cursor < self.query.len() {
-                    self.cursor += 1;
-                }
+                self.cursor = next_char_boundary(&self.query, self.cursor);
                 HistorySearchAction::None
             }
             _ => HistorySearchAction::None,
@@ -208,4 +208,33 @@ pub fn highlight_input(text: &str) -> Vec<(String, InputHighlightType)> {
 pub enum InputHighlightType {
     Normal,
     SlashCommand,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HistorySearch, HistorySearchAction};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn history_search_cursor_stays_on_utf8_boundaries() {
+        let mut search = HistorySearch::new();
+        search.activate();
+
+        assert!(matches!(
+            search.handle_key(KeyEvent::new(KeyCode::Char('你'), KeyModifiers::NONE), &[]),
+            HistorySearchAction::Updated
+        ));
+        assert_eq!(search.query, "你");
+        assert_eq!(search.cursor, "你".len());
+
+        search.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE), &[]);
+        assert_eq!(search.cursor, 0);
+
+        search.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE), &[]);
+        assert_eq!(search.cursor, "你".len());
+
+        search.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE), &[]);
+        assert!(search.query.is_empty());
+        assert_eq!(search.cursor, 0);
+    }
 }

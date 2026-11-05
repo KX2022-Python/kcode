@@ -9,6 +9,7 @@ use super::state::{Section, ThemePreset};
 
 #[derive(Debug, Clone, Copy)]
 struct Palette {
+    brand: Color,
     accent: Color,
     accent_soft: Color,
     panel: Color,
@@ -136,7 +137,7 @@ fn header(app: &TuiApp, palette: Palette) -> Paragraph<'static> {
         Span::styled(
             "Kcode Configure",
             Style::default()
-                .fg(palette.accent)
+                .fg(palette.brand)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
@@ -186,7 +187,7 @@ fn render_editor(frame: &mut Frame<'_>, editor: &EditorState, palette: Palette) 
         Line::from(vec![Span::styled(
             editor.title.clone(),
             Style::default()
-                .fg(palette.accent)
+                .fg(palette.brand)
                 .add_modifier(Modifier::BOLD),
         )]),
         Line::from(""),
@@ -249,27 +250,13 @@ fn line_with_cursor(value: &str, cursor: usize) -> Line<'static> {
 }
 
 fn palette(theme: ThemePreset) -> Palette {
-    match theme {
-        ThemePreset::Amber => Palette {
-            accent: Color::Yellow,
-            accent_soft: Color::Rgb(210, 160, 30),
-            panel: Color::Rgb(42, 30, 8),
-            muted: Color::Gray,
-            text: Color::White,
-        },
-        ThemePreset::Ocean => Palette {
-            accent: Color::Cyan,
-            accent_soft: Color::Rgb(40, 150, 170),
-            panel: Color::Rgb(8, 32, 42),
-            muted: Color::Gray,
-            text: Color::White,
-        },
-        ThemePreset::Default => Palette {
-            accent: Color::Green,
-            accent_soft: Color::Rgb(40, 120, 70),
-            panel: Color::Rgb(18, 28, 20),
-            muted: Color::Gray,
-            text: Color::White,
-        },
+    let _ = theme;
+    Palette {
+        brand: Color::Magenta,
+        accent: Color::Cyan,
+        accent_soft: Color::Cyan,
+        panel: Color::Reset,
+        muted: Color::DarkGray,
+        text: Color::Reset,
     }
 }

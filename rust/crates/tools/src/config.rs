@@ -175,35 +175,16 @@ fn supported_config_setting(setting: &str) -> Option<ConfigSettingSpec> {
             Some(&["default", "vim", "emacs"]),
         ),
         "verbose" => boolean_setting(ConfigScope::Global, &["verbose"]),
-        "preferredNotifChannel" => {
-            string_setting(ConfigScope::Global, &["preferredNotifChannel"], None)
-        }
         "autoCompactEnabled" => boolean_setting(ConfigScope::Global, &["autoCompactEnabled"]),
-        "autoMemoryEnabled" => boolean_setting(ConfigScope::Settings, &["autoMemoryEnabled"]),
         "autoDreamEnabled" => boolean_setting(ConfigScope::Settings, &["autoDreamEnabled"]),
-        "fileCheckpointingEnabled" => {
-            boolean_setting(ConfigScope::Global, &["fileCheckpointingEnabled"])
-        }
         "showTurnDuration" => boolean_setting(ConfigScope::Global, &["showTurnDuration"]),
-        "terminalProgressBarEnabled" => {
-            boolean_setting(ConfigScope::Global, &["terminalProgressBarEnabled"])
-        }
-        "todoFeatureEnabled" => boolean_setting(ConfigScope::Global, &["todoFeatureEnabled"]),
         "model" => string_setting(ConfigScope::Settings, &["model"], None),
-        "alwaysThinkingEnabled" => {
-            boolean_setting(ConfigScope::Settings, &["alwaysThinkingEnabled"])
-        }
         "permissions.defaultMode" => string_setting(
             ConfigScope::Settings,
             PERMISSION_DEFAULT_MODE_PATH,
             Some(&["default", "plan", "acceptEdits", "dontAsk", "auto"]),
         ),
         "language" => string_setting(ConfigScope::Settings, &["language"], None),
-        "teammateMode" => string_setting(
-            ConfigScope::Global,
-            &["teammateMode"],
-            Some(&["tmux", "in-process", "auto"]),
-        ),
         _ => return None,
     })
 }

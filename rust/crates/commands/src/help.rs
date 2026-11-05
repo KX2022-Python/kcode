@@ -1,6 +1,5 @@
 use crate::model::{
-    slash_command_specs, CommandDescriptor, CommandKind, CommandRegistryContext, CommandScope,
-    SlashCommandSpec,
+    CommandDescriptor, CommandKind, CommandRegistryContext, CommandScope, SlashCommandSpec,
 };
 use crate::registry::{
     build_command_registry_snapshot, find_slash_command_spec, session_command_descriptor,
@@ -19,19 +18,16 @@ fn slash_command_category(name: &str) -> &'static str {
         | "version" | "login" | "logout" | "usage" | "stats" | "rename" | "privacy-settings" => {
             "Session & visibility"
         }
-        "compact" | "clear" | "config" | "memory" | "init" | "diff" | "commit" | "pr" | "issue"
-        | "export" | "plugin" | "branch" | "add-dir" | "files" | "hooks" | "release-notes" => {
-            "Workspace & git"
-        }
-        "agents" | "skills" | "debug-tool-call" | "mcp" | "context" | "tasks" | "doctor"
-        | "ide" | "desktop" => "Discovery & debugging",
-        "bughunter" | "review" | "security-review" | "advisor" | "insights" => {
-            "Analysis & automation"
-        }
+        "compact" | "clear" | "config" | "memory" | "dream" | "init" | "diff" | "commit" | "pr"
+        | "issue" | "export" | "plugin" | "branch" | "add-dir" | "files" | "hooks" | "plan"
+        | "release-notes" => "Workspace & git",
+        "agents" | "skills" | "debug-tool-call" | "mcp" | "context" | "todos" | "doctor"
+        | "ide" | "desktop" | "powerup" | "schedule" | "loop" => "Discovery & debugging",
+        "review" | "security-review" | "advisor" | "insights" => "Analysis & automation",
         "theme" | "vim" | "voice" | "color" | "effort" | "fast" | "brief" | "output-style"
         | "keybindings" | "stickers" => "Appearance & input",
-        "copy" | "share" | "feedback" | "summary" | "tag" | "thinkback" | "plan" | "exit"
-        | "upgrade" | "rewind" => "Communication & control",
+        "copy" | "share" | "feedback" | "summary" | "tag" | "thinkback" | "exit" | "upgrade"
+        | "rewind" | "btw" | "bug" => "Communication & control",
         _ => "Other",
     }
 }
@@ -175,11 +171,13 @@ pub fn suggest_slash_commands(input: &str, limit: usize) -> Vec<String> {
         return Vec::new();
     }
 
-    let mut suggestions = slash_command_specs()
+    let snapshot = build_command_registry_snapshot(&CommandRegistryContext::cli_local(), &[]);
+    let mut suggestions = snapshot
+        .session_commands
         .iter()
-        .filter_map(|spec| {
-            let best = std::iter::once(spec.name)
-                .chain(spec.aliases.iter().copied())
+        .filter_map(|descriptor| {
+            let best = std::iter::once(descriptor.name.as_str())
+                .chain(descriptor.aliases.iter().map(String::as_str))
                 .map(str::to_ascii_lowercase)
                 .map(|candidate| {
                     let prefix_rank =
@@ -197,7 +195,12 @@ pub fn suggest_slash_commands(input: &str, limit: usize) -> Vec<String> {
 
             best.and_then(|(prefix_rank, distance)| {
                 if prefix_rank <= 1 || distance <= 2 {
-                    Some((prefix_rank, distance, spec.name.len(), spec.name))
+                    Some((
+                        prefix_rank,
+                        distance,
+                        descriptor.name.len(),
+                        descriptor.name.as_str(),
+                    ))
                 } else {
                     None
                 }
@@ -255,6 +258,7 @@ pub fn render_slash_command_help_for_context(context: &CommandRegistryContext) -
         "Session & visibility",
         "Workspace & git",
         "Discovery & debugging",
+        "Analysis & automation",
     ];
     for category in categories {
         lines.push(category.to_string());

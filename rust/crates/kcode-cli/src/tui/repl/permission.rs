@@ -7,6 +7,7 @@ use ratatui::Frame;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::state::PermissionRequest;
+use super::theme::ThemePalette;
 
 /// 权限弹窗渲染 — 对齐 CC-Haha PermissionDialog
 pub fn render_permission_dialog(
@@ -14,33 +15,36 @@ pub fn render_permission_dialog(
     request: &PermissionRequest,
     area: Rect,
     focused_button: usize,
+    palette: ThemePalette,
 ) {
     let lines = vec![
-        Line::from(vec![
-            Span::styled(
-                " ⚠ Permission Required",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
+        Line::from(vec![Span::styled(
+            " ⚠ Permission Required",
+            Style::default()
+                .fg(palette.error)
+                .add_modifier(Modifier::BOLD),
+        )]),
         Line::from(""),
         Line::from(vec![
             Span::styled(
                 "Tool: ",
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(palette.info)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 &request.tool_name,
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(palette.success)
                     .add_modifier(Modifier::BOLD),
             ),
         ]),
         Line::from(""),
         Line::from(vec![Span::styled(
             "Input:",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(palette.info)
+                .add_modifier(Modifier::BOLD),
         )]),
     ];
 
@@ -52,7 +56,7 @@ pub fn render_permission_dialog(
         .map(|l| {
             Line::from(vec![
                 Span::raw("  "),
-                Span::styled(l.to_string(), Style::default().fg(Color::Gray)),
+                Span::styled(l.to_string(), Style::default().fg(palette.text_muted)),
             ])
         })
         .collect();
@@ -63,7 +67,7 @@ pub fn render_permission_dialog(
     if request.input_summary.lines().count() > 4 {
         all_lines.push(Line::from(vec![Span::styled(
             "  ...",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(palette.text_muted),
         )]));
     }
 
@@ -83,16 +87,14 @@ pub fn render_permission_dialog(
             .flat_map(|(label, idx)| {
                 let style = if *idx == focused_button {
                     Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::Green)
+                        .fg(palette.accent)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::Gray)
+                    Style::default()
+                        .fg(palette.text_muted)
+                        .add_modifier(Modifier::DIM)
                 };
-                vec![
-                    Span::styled(label.to_string(), style),
-                    Span::raw("  "),
-                ]
+                vec![Span::styled(label.to_string(), style), Span::raw("  ")]
             })
             .collect::<Vec<_>>(),
     );
@@ -100,13 +102,13 @@ pub fn render_permission_dialog(
 
     all_lines.push(Line::from(vec![Span::styled(
         "  Tab/←→切换 · Enter确认",
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(palette.text_muted),
     )]));
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow))
-        .style(Style::default().bg(Color::Rgb(25, 20, 8)));
+        .border_style(Style::default().fg(palette.warning))
+        .style(Style::default().bg(palette.dialog_bg));
 
     let dialog_area = centered_rect(60, 18, area);
     let paragraph = Paragraph::new(all_lines).block(block);

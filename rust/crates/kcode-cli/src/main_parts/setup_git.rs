@@ -65,6 +65,17 @@ fn load_setup_context(
     })
 }
 
+fn resolve_effective_model(
+    profile_override: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let cwd = env::current_dir()?;
+    let loader = ConfigLoader::default_for(&cwd);
+    let runtime_config = loader.load()?;
+    let active_profile = ProfileResolver::resolve(&runtime_config, profile_override, None)
+        .map_err(|error| std::io::Error::other(error.to_string()))?;
+    Ok(active_profile.model)
+}
+
 fn current_stdio_mode() -> StdioMode {
     if io::stdin().is_terminal() && io::stdout().is_terminal() {
         StdioMode::Interactive
@@ -323,4 +334,3 @@ fn parse_git_status_metadata_for(
     let project_root = find_git_root_in(cwd).ok();
     (project_root, branch)
 }
-

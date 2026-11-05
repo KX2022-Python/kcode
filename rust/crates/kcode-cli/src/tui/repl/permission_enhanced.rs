@@ -1,5 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use super::text_cursor::{clamp_cursor_to_boundary, next_char_boundary, previous_char_boundary};
+
 /// 权限模式 — 对齐 CC-Haha 权限模式轮播
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionMode {
@@ -112,6 +114,8 @@ impl EnhancedPermissionRequest {
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<EnhancedPermissionAction> {
         // 如果正在输入反馈
         if self.show_feedback_input {
+            self.feedback_cursor =
+                clamp_cursor_to_boundary(&self.feedback_text, self.feedback_cursor);
             match key.code {
                 KeyCode::Esc => {
                     self.show_feedback_input = false;
@@ -123,26 +127,26 @@ impl EnhancedPermissionRequest {
                 }
                 KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => {
                     self.feedback_text.insert(self.feedback_cursor, c);
-                    self.feedback_cursor += 1;
+                    self.feedback_cursor += c.len_utf8();
                     return None;
                 }
                 KeyCode::Backspace => {
                     if self.feedback_cursor > 0 {
-                        self.feedback_text.remove(self.feedback_cursor - 1);
-                        self.feedback_cursor -= 1;
+                        let previous =
+                            previous_char_boundary(&self.feedback_text, self.feedback_cursor);
+                        self.feedback_text.drain(previous..self.feedback_cursor);
+                        self.feedback_cursor = previous;
                     }
                     return None;
                 }
                 KeyCode::Left => {
-                    if self.feedback_cursor > 0 {
-                        self.feedback_cursor -= 1;
-                    }
+                    self.feedback_cursor =
+                        previous_char_boundary(&self.feedback_text, self.feedback_cursor);
                     return None;
                 }
                 KeyCode::Right => {
-                    if self.feedback_cursor < self.feedback_text.len() {
-                        self.feedback_cursor += 1;
-                    }
+                    self.feedback_cursor =
+                        next_char_boundary(&self.feedback_text, self.feedback_cursor);
                     return None;
                 }
                 _ => return None,

@@ -1,351 +1,14 @@
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::Position;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
+use unicode_width::UnicodeWidthStr;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
-/// 斜杠命令条目
-#[derive(Debug, Clone)]
-pub struct SlashCommandEntry {
-    pub name: String,
-    pub alias: Option<String>,
-    pub description: String,
-    pub category: SlashCommandCategory,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SlashCommandCategory {
-    Core,
-    Session,
-    Tools,
-    Config,
-    Debug,
-}
-
-/// 默认斜杠命令列表 — 对齐 CC-Haha 命令体系
-pub fn default_slash_commands() -> Vec<SlashCommandEntry> {
-    vec![
-        SlashCommandEntry {
-            name: "help".into(),
-            alias: Some("h".into()),
-            description: "显示命令帮助".into(),
-            category: SlashCommandCategory::Core,
-        },
-        SlashCommandEntry {
-            name: "clear".into(),
-            alias: None,
-            description: "清空当前会话".into(),
-            category: SlashCommandCategory::Session,
-        },
-        SlashCommandEntry {
-            name: "compact".into(),
-            alias: None,
-            description: "压缩上下文".into(),
-            category: SlashCommandCategory::Session,
-        },
-        SlashCommandEntry {
-            name: "resume".into(),
-            alias: None,
-            description: "恢复会话 /resume [path|latest]".into(),
-            category: SlashCommandCategory::Session,
-        },
-        SlashCommandEntry {
-            name: "model".into(),
-            alias: None,
-            description: "切换模型 /model <name>".into(),
-            category: SlashCommandCategory::Config,
-        },
-        SlashCommandEntry {
-            name: "permissions".into(),
-            alias: None,
-            description: "权限模式 /permissions <mode>".into(),
-            category: SlashCommandCategory::Config,
-        },
-        SlashCommandEntry {
-            name: "config".into(),
-            alias: None,
-            description: "查看配置 /config [section]".into(),
-            category: SlashCommandCategory::Config,
-        },
-        SlashCommandEntry {
-            name: "status".into(),
-            alias: None,
-            description: "会话状态".into(),
-            category: SlashCommandCategory::Core,
-        },
-        SlashCommandEntry {
-            name: "cost".into(),
-            alias: None,
-            description: "费用统计".into(),
-            category: SlashCommandCategory::Core,
-        },
-        SlashCommandEntry {
-            name: "diff".into(),
-            alias: None,
-            description: "工作区 diff".into(),
-            category: SlashCommandCategory::Tools,
-        },
-        SlashCommandEntry {
-            name: "mcp".into(),
-            alias: None,
-            description: "MCP 管理 /mcp [action] [target]".into(),
-            category: SlashCommandCategory::Tools,
-        },
-        SlashCommandEntry {
-            name: "memory".into(),
-            alias: None,
-            description: "记忆系统".into(),
-            category: SlashCommandCategory::Tools,
-        },
-        SlashCommandEntry {
-            name: "doctor".into(),
-            alias: None,
-            description: "健康诊断".into(),
-            category: SlashCommandCategory::Debug,
-        },
-        SlashCommandEntry {
-            name: "bughunter".into(),
-            alias: None,
-            description: "Bug 扫描 /bughunter [scope]".into(),
-            category: SlashCommandCategory::Debug,
-        },
-        SlashCommandEntry {
-            name: "init".into(),
-            alias: None,
-            description: "初始化 KCODE.md".into(),
-            category: SlashCommandCategory::Core,
-        },
-        SlashCommandEntry {
-            name: "version".into(),
-            alias: None,
-            description: "版本信息".into(),
-            category: SlashCommandCategory::Core,
-        },
-        SlashCommandEntry {
-            name: "export".into(),
-            alias: None,
-            description: "导出会话 /export [path]".into(),
-            category: SlashCommandCategory::Session,
-        },
-        SlashCommandEntry {
-            name: "agents".into(),
-            alias: None,
-            description: "代理管理".into(),
-            category: SlashCommandCategory::Tools,
-        },
-        SlashCommandEntry {
-            name: "skills".into(),
-            alias: None,
-            description: "技能管理".into(),
-            category: SlashCommandCategory::Tools,
-        },
-        SlashCommandEntry {
-            name: "plugins".into(),
-            alias: None,
-            description: "插件管理".into(),
-            category: SlashCommandCategory::Tools,
-        },
-    ]
-}
-
-/// 斜杠命令选择框状态
-#[derive(Debug, Clone)]
-pub struct SlashCommandPicker {
-    pub visible: bool,
-    pub filter: String,
-    pub cursor: usize,
-    pub selected: usize,
-    pub commands: Vec<SlashCommandEntry>,
-}
-
-impl SlashCommandPicker {
-    pub fn new() -> Self {
-        Self {
-            visible: false,
-            filter: String::new(),
-            cursor: 0,
-            selected: 0,
-            commands: default_slash_commands(),
-        }
-    }
-
-    pub fn show(&mut self) {
-        self.visible = true;
-        self.filter.clear();
-        self.cursor = 0;
-        self.selected = 0;
-    }
-
-    pub fn hide(&mut self) {
-        self.visible = false;
-    }
-
-    pub fn filtered(&self) -> Vec<&SlashCommandEntry> {
-        if self.filter.is_empty() {
-            self.commands.iter().collect()
-        } else {
-            let f = self.filter.to_lowercase();
-            self.commands
-                .iter()
-                .filter(|cmd| {
-                    cmd.name.contains(&f)
-                        || cmd.alias.as_ref().is_some_and(|a| a.contains(&f))
-                        || cmd.description.to_lowercase().contains(&f)
-                })
-                .collect()
-        }
-    }
-
-    pub fn handle_key(&mut self, key: KeyEvent) -> SlashPickerAction {
-        match key.code {
-            KeyCode::Esc => {
-                self.hide();
-                SlashPickerAction::Cancel
-            }
-            KeyCode::Enter => {
-                let filtered = self.filtered();
-                if !filtered.is_empty() && self.selected < filtered.len() {
-                    let cmd = filtered[self.selected].name.clone();
-                    self.hide();
-                    SlashPickerAction::Select(cmd)
-                } else {
-                    SlashPickerAction::None
-                }
-            }
-            KeyCode::Up => {
-                if self.selected > 0 {
-                    self.selected -= 1;
-                }
-                SlashPickerAction::None
-            }
-            KeyCode::Down => {
-                let filtered = self.filtered();
-                if self.selected + 1 < filtered.len() {
-                    self.selected += 1;
-                }
-                SlashPickerAction::None
-            }
-            KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => {
-                self.filter.insert(self.cursor, c);
-                self.cursor += 1;
-                self.selected = 0;
-                SlashPickerAction::None
-            }
-            KeyCode::Backspace => {
-                if self.cursor > 0 {
-                    self.filter.remove(self.cursor - 1);
-                    self.cursor -= 1;
-                    self.selected = 0;
-                }
-                SlashPickerAction::None
-            }
-            KeyCode::Delete => {
-                if self.cursor < self.filter.len() {
-                    self.filter.remove(self.cursor);
-                    self.selected = 0;
-                }
-                SlashPickerAction::None
-            }
-            KeyCode::Left => {
-                if self.cursor > 0 {
-                    self.cursor -= 1;
-                }
-                SlashPickerAction::None
-            }
-            KeyCode::Right => {
-                if self.cursor < self.filter.len() {
-                    self.cursor += 1;
-                }
-                SlashPickerAction::None
-            }
-            KeyCode::Tab => {
-                let filtered = self.filtered();
-                if !filtered.is_empty() && self.selected < filtered.len() {
-                    let cmd = filtered[self.selected].name.clone();
-                    self.hide();
-                    SlashPickerAction::Select(cmd)
-                } else {
-                    SlashPickerAction::None
-                }
-            }
-            _ => SlashPickerAction::None,
-        }
-    }
-}
-
-pub enum SlashPickerAction {
-    Select(String),
-    Cancel,
-    None,
-}
-
-/// 渲染斜杠命令选择框
-pub fn render_slash_command_picker(
-    frame: &mut Frame<'_>,
-    picker: &SlashCommandPicker,
-    area: Rect,
-) {
-    if !picker.visible {
-        return;
-    }
-
-    let filtered = picker.filtered();
-    let max_height = 12.min(filtered.len() as u16 + 2);
-
-    let picker_area = Rect {
-        x: area.width.saturating_sub(52),
-        y: area.height.saturating_sub(max_height + 3),
-        width: 50.min(area.width),
-        height: max_height,
-    };
-
-    let mut lines: Vec<Line> = vec![Line::from(vec![
-        Span::styled(
-            " 🔍 Commands",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(format!("  (filter: {})", picker.filter)),
-    ])];
-
-    let max_display = (max_height as usize).saturating_sub(2);
-    for (i, cmd) in filtered.iter().enumerate().take(max_display) {
-        let is_selected = i == picker.selected;
-        let prefix = if is_selected { "▸ " } else { "  " };
-        let name_style = if is_selected {
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Cyan)
-                .add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(Color::Green)
-        };
-        let desc_style = if is_selected {
-            Style::default()
-                .fg(Color::Rgb(200, 255, 200))
-                .bg(Color::Cyan)
-        } else {
-            Style::default().fg(Color::Gray)
-        };
-        lines.push(Line::from(vec![
-            Span::raw(prefix),
-            Span::styled(format!("/{}", cmd.name), name_style),
-            Span::raw("  "),
-            Span::styled(&cmd.description, desc_style),
-        ]));
-    }
-
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
-        .style(Style::default().bg(Color::Rgb(15, 20, 15)));
-
-    let paragraph = Paragraph::new(lines).block(block);
-    frame.render_widget(paragraph, picker_area);
-}
+use super::text_cursor::{clamp_cursor_to_boundary, next_char_boundary, previous_char_boundary};
+use super::text_layout::{display_line_count, wrap_display_text};
+use super::theme::ThemePalette;
 
 /// Prompt 输入框状态
 #[derive(Debug, Clone)]
@@ -355,7 +18,6 @@ pub struct PromptInput {
     pub mode: InputMode,
     pub history: Vec<String>,
     pub history_index: Option<usize>,
-    pub scroll_offset: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -372,56 +34,65 @@ impl PromptInput {
             mode: InputMode::Normal,
             history: Vec::new(),
             history_index: None,
-            scroll_offset: 0,
         }
     }
 
     pub fn submit(&mut self) -> Option<String> {
-        let text = self.text.trim().to_string();
-        if text.is_empty() {
+        let submitted = self.text.trim().to_string();
+        if submitted.is_empty() {
             return None;
         }
-        self.history.push(text.clone());
+
+        self.history.push(submitted.clone());
         self.history_index = None;
-        let result = Some(text);
         self.text.clear();
         self.cursor = 0;
-        result
+        Some(submitted)
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> PromptAction {
+        self.cursor = clamp_cursor_to_boundary(&self.text, self.cursor);
         match key.code {
-            KeyCode::Enter if key.modifiers.is_empty() => {
-                PromptAction::Submit
+            KeyCode::Enter if key.modifiers.is_empty() => PromptAction::Submit,
+            KeyCode::Enter
+                if key.modifiers.contains(KeyModifiers::SHIFT)
+                    || key.modifiers.contains(KeyModifiers::CONTROL) =>
+            {
+                self.text.insert(self.cursor, '\n');
+                self.cursor += '\n'.len_utf8();
+                PromptAction::Edited
+            }
+            KeyCode::Char('j') if key.modifiers == KeyModifiers::CONTROL => {
+                self.text.insert(self.cursor, '\n');
+                self.cursor += '\n'.len_utf8();
+                PromptAction::Edited
             }
             KeyCode::Char(c) if key.modifiers == KeyModifiers::NONE => {
                 self.text.insert(self.cursor, c);
-                self.cursor += 1;
+                self.cursor += c.len_utf8();
                 PromptAction::Edited
             }
             KeyCode::Backspace => {
                 if self.cursor > 0 {
-                    self.text.remove(self.cursor - 1);
-                    self.cursor -= 1;
+                    let previous = previous_char_boundary(&self.text, self.cursor);
+                    self.text.drain(previous..self.cursor);
+                    self.cursor = previous;
                 }
                 PromptAction::Edited
             }
             KeyCode::Delete => {
                 if self.cursor < self.text.len() {
-                    self.text.remove(self.cursor);
+                    let next = next_char_boundary(&self.text, self.cursor);
+                    self.text.drain(self.cursor..next);
                 }
                 PromptAction::Edited
             }
             KeyCode::Left if key.modifiers == KeyModifiers::NONE => {
-                if self.cursor > 0 {
-                    self.cursor -= 1;
-                }
+                self.cursor = previous_char_boundary(&self.text, self.cursor);
                 PromptAction::Moved
             }
             KeyCode::Right if key.modifiers == KeyModifiers::NONE => {
-                if self.cursor < self.text.len() {
-                    self.cursor += 1;
-                }
+                self.cursor = next_char_boundary(&self.text, self.cursor);
                 PromptAction::Moved
             }
             KeyCode::Home => {
@@ -439,11 +110,11 @@ impl PromptInput {
                 match self.history_index {
                     None => {
                         self.history_index = Some(self.history.len() - 1);
-                        self.text = self.history.last().unwrap().clone();
+                        self.text = self.history.last().cloned().unwrap_or_default();
                     }
-                    Some(idx) if idx > 0 => {
-                        self.history_index = Some(idx - 1);
-                        self.text = self.history[idx - 1].clone();
+                    Some(index) if index > 0 => {
+                        self.history_index = Some(index - 1);
+                        self.text = self.history[index - 1].clone();
                     }
                     Some(_) => {}
                 }
@@ -452,9 +123,9 @@ impl PromptInput {
             }
             KeyCode::Down if key.modifiers == KeyModifiers::NONE => {
                 match self.history_index {
-                    Some(idx) if idx + 1 < self.history.len() => {
-                        self.history_index = Some(idx + 1);
-                        self.text = self.history[idx + 1].clone();
+                    Some(index) if index + 1 < self.history.len() => {
+                        self.history_index = Some(index + 1);
+                        self.text = self.history[index + 1].clone();
                     }
                     Some(_) => {
                         self.history_index = None;
@@ -472,18 +143,6 @@ impl PromptInput {
             }
             KeyCode::Char('r') if key.modifiers == KeyModifiers::CONTROL => {
                 PromptAction::HistorySearch
-            }
-            KeyCode::Char('b') if key.modifiers == KeyModifiers::CONTROL => {
-                if self.cursor > 0 {
-                    self.cursor -= 1;
-                }
-                PromptAction::Moved
-            }
-            KeyCode::Char('f') if key.modifiers == KeyModifiers::CONTROL => {
-                if self.cursor < self.text.len() {
-                    self.cursor += 1;
-                }
-                PromptAction::Moved
             }
             KeyCode::Char('u') if key.modifiers == KeyModifiers::CONTROL => {
                 self.text.clear();
@@ -508,85 +167,250 @@ pub enum PromptAction {
     None,
 }
 
+pub fn prompt_height(input: &PromptInput, available_width: u16) -> u16 {
+    let content_width = prompt_content_width(available_width);
+    let visible_text = if input.text.is_empty() {
+        "给 Kcode 下达任务，或输入 / 查看命令..."
+    } else {
+        &input.text
+    };
+    let line_count = display_line_count(
+        &format!("{}{visible_text}", prompt_prefix(&input.mode)),
+        content_width,
+    );
+    (line_count as u16 + 2).clamp(3, 8)
+}
+
 /// 渲染 Prompt 输入框
 pub fn render_prompt_input(
     frame: &mut Frame<'_>,
     input: &PromptInput,
-    area: Rect,
+    area: ratatui::layout::Rect,
     is_active: bool,
+    palette: ThemePalette,
 ) {
-    let mode_label = match input.mode {
-        InputMode::Normal => "PROMPT",
-        InputMode::Bash => "BASH",
+    let (prompt_prefix, active_color) = match input.mode {
+        InputMode::Normal => (prompt_prefix(&input.mode), palette.accent),
+        InputMode::Bash => (prompt_prefix(&input.mode), palette.warning),
     };
-    let mode_color = match input.mode {
-        InputMode::Normal => Color::Green,
-        InputMode::Bash => Color::Yellow,
-    };
-
-    // 构建带光标的文本
-    let cursor = input.cursor.min(input.text.len());
-    let (before, after) = input.text.split_at(cursor);
-    let cursor_char = if after.is_empty() {
-        "█"
-    } else {
-        &after.chars().next().unwrap_or(' ').to_string()
-    };
-    let after_cursor = if after.is_empty() {
-        ""
-    } else {
-        &after[1.min(after.len())..]
+    let border_color = match (is_active, input.mode.clone()) {
+        (true, InputMode::Normal) => palette.accent,
+        (true, InputMode::Bash) => palette.warning,
+        (false, _) => palette.border,
     };
 
-    let mut spans = vec![
-        Span::styled(
-            format!(" {} ", mode_label),
-            Style::default()
-                .fg(mode_color)
-                .bg(Color::Rgb(30, 30, 30))
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(if is_active { "› " } else { "  " }),
-        Span::raw(before.to_string()),
-    ];
-
-    if is_active {
-        spans.push(Span::styled(
-            cursor_char.to_string(),
-            Style::default()
-                .bg(Color::Green)
-                .fg(Color::Black)
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
-
-    spans.push(Span::raw(after_cursor.to_string()));
-
-    if !is_active && input.text.is_empty() {
-        spans.push(Span::styled(
-            "输入消息，或 / 查看命令...",
-            Style::default().fg(Color::DarkGray),
-        ));
-    }
-
-    let prompt_style = if is_active {
-        Style::default().fg(Color::White)
-    } else {
-        Style::default().fg(Color::Gray)
-    };
+    let visible_rows = area.height.saturating_sub(2).max(1) as usize;
+    let content_width = prompt_content_width(area.width);
+    let (lines, cursor_y) = prompt_visible_lines(input, prompt_prefix, content_width, visible_rows);
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(if is_active {
-            Color::Green
-        } else {
-            Color::DarkGray
-        }))
-        .style(Style::default().bg(Color::Rgb(12, 18, 12)));
-
-    let paragraph = ratatui::widgets::Paragraph::new(vec![Line::from(spans)])
+        .border_style(Style::default().fg(border_color))
+        .style(Style::default().bg(palette.input_bg));
+    let paragraph = Paragraph::new(lines)
         .block(block)
-        .style(prompt_style);
+        .wrap(Wrap { trim: false })
+        .style(Style::default().fg(if is_active {
+            palette.text
+        } else {
+            palette.text_muted
+        }));
 
     frame.render_widget(paragraph, area);
+    if is_active {
+        let (cursor_x, _) = prompt_cursor_offset(input, prompt_prefix, content_width);
+        let max_x = area.width.saturating_sub(2);
+        let max_y = area.height.saturating_sub(3);
+        frame.set_cursor_position(Position::new(
+            area.x + 1 + cursor_x.min(max_x),
+            area.y + 1 + cursor_y.min(max_y),
+        ));
+    }
+}
+
+fn prompt_content_width(available_width: u16) -> usize {
+    available_width.saturating_sub(2).max(1) as usize
+}
+
+fn prompt_prefix(mode: &InputMode) -> &'static str {
+    match mode {
+        InputMode::Normal => "> ",
+        InputMode::Bash => "! ",
+    }
+}
+
+fn prompt_wrapped_lines(
+    input: &PromptInput,
+    prompt_prefix: &str,
+    content_width: usize,
+) -> Vec<String> {
+    let visible_text = if input.text.is_empty() {
+        "给 Kcode 下达任务，或输入 / 查看命令…"
+    } else {
+        &input.text
+    };
+    wrap_display_text(&format!("{prompt_prefix}{visible_text}"), content_width)
+}
+
+fn prompt_visible_lines(
+    input: &PromptInput,
+    prompt_prefix: &str,
+    content_width: usize,
+    visible_rows: usize,
+) -> (Vec<Line<'static>>, u16) {
+    let wrapped = prompt_wrapped_lines(input, prompt_prefix, content_width);
+    let (_, cursor_y) = prompt_cursor_offset(input, prompt_prefix, content_width);
+    let start = usize::from(cursor_y)
+        .saturating_add(1)
+        .saturating_sub(visible_rows.max(1));
+    let lines = wrapped
+        .into_iter()
+        .skip(start)
+        .take(visible_rows.max(1))
+        .map(|line| Line::from(vec![Span::raw(line)]))
+        .collect::<Vec<_>>();
+    let visible_cursor_y = cursor_y.saturating_sub(start as u16);
+    (lines, visible_cursor_y)
+}
+
+fn prompt_cursor_offset(
+    input: &PromptInput,
+    prompt_prefix: &str,
+    content_width: usize,
+) -> (u16, u16) {
+    let cursor = clamp_cursor_to_boundary(&input.text, input.cursor);
+    let before_cursor = format!("{prompt_prefix}{}", &input.text[..cursor]);
+    let wrapped = wrap_display_text(&before_cursor, content_width);
+    let mut y = wrapped.len().saturating_sub(1) as u16;
+    let mut x = wrapped
+        .last()
+        .map(|line| UnicodeWidthStr::width(line.as_str()) as u16)
+        .unwrap_or(0);
+    if x >= content_width as u16 {
+        x = 0;
+        y += 1;
+    }
+    (x, y)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        prompt_cursor_offset, prompt_height, prompt_visible_lines, prompt_wrapped_lines,
+        PromptAction, PromptInput,
+    };
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    #[test]
+    fn prompt_height_grows_for_multiline_content() {
+        let mut input = PromptInput::new();
+        input.text = "0123456789abcdefghij0123456789".to_string();
+        input.cursor = input.text.len();
+
+        assert!(prompt_height(&input, 20) > prompt_height(&input, 80));
+    }
+
+    #[test]
+    fn prompt_height_accounts_for_wide_characters() {
+        let mut input = PromptInput::new();
+        input.text = "你好世界你好世界".to_string();
+        input.cursor = input.text.len();
+
+        assert!(prompt_height(&input, 12) > prompt_height(&input, 24));
+    }
+
+    #[test]
+    fn prompt_height_counts_the_prefix_when_wrapping() {
+        let mut input = PromptInput::new();
+        input.text = "1234".to_string();
+        input.cursor = input.text.len();
+
+        assert_eq!(prompt_height(&input, 7), 4);
+    }
+
+    #[test]
+    fn shift_enter_inserts_a_newline_instead_of_submitting() {
+        let mut input = PromptInput::new();
+        let action = input.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT));
+
+        assert!(matches!(action, PromptAction::Edited));
+        assert_eq!(input.text, "\n");
+    }
+
+    #[test]
+    fn ctrl_j_inserts_a_newline_instead_of_submitting() {
+        let mut input = PromptInput::new();
+        let action = input.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL));
+
+        assert!(matches!(action, PromptAction::Edited));
+        assert_eq!(input.text, "\n");
+    }
+
+    #[test]
+    fn plain_enter_submits() {
+        let mut input = PromptInput::new();
+        input.text = "hello".to_string();
+        input.cursor = input.text.len();
+
+        let action = input.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        assert!(matches!(action, PromptAction::Submit));
+    }
+
+    #[test]
+    fn prompt_cursor_wraps_to_the_next_visual_line_at_the_boundary() {
+        let mut input = PromptInput::new();
+        input.text = "123".to_string();
+        input.cursor = input.text.len();
+
+        assert_eq!(prompt_cursor_offset(&input, "> ", 5), (0, 1));
+    }
+
+    #[test]
+    fn prompt_visible_lines_follow_the_latest_input_when_prompt_overflows() {
+        let mut input = PromptInput::new();
+        input.text = "abcdefghijklmnopqrstuvwxyz".to_string();
+        input.cursor = input.text.len();
+
+        let wrapped = prompt_wrapped_lines(&input, "> ", 6);
+        let (visible, cursor_y) = prompt_visible_lines(&input, "> ", 6, 3);
+        let visible_text = visible
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
+
+        assert_eq!(visible_text, wrapped[wrapped.len() - 3..].to_vec());
+        assert_eq!(cursor_y, 2);
+    }
+
+    #[test]
+    fn utf8_input_uses_char_boundaries_for_cursor_movement_and_delete() {
+        let mut input = PromptInput::new();
+
+        assert!(matches!(
+            input.handle_key(KeyEvent::new(KeyCode::Char('你'), KeyModifiers::NONE)),
+            PromptAction::Edited
+        ));
+        assert_eq!(input.text, "你");
+        assert_eq!(input.cursor, "你".len());
+
+        assert!(matches!(
+            input.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)),
+            PromptAction::Moved
+        ));
+        assert_eq!(input.cursor, 0);
+
+        assert!(matches!(
+            input.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)),
+            PromptAction::Moved
+        ));
+        assert_eq!(input.cursor, "你".len());
+
+        assert!(matches!(
+            input.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE)),
+            PromptAction::Edited
+        ));
+        assert!(input.text.is_empty());
+        assert_eq!(input.cursor, 0);
+    }
 }

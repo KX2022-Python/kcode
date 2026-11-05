@@ -88,6 +88,23 @@ pub(crate) fn execute_exit_plan_mode(_input: ExitPlanModeInput) -> Result<PlanMo
         matches!(current_local_mode.as_ref(), Some(Value::String(value)) if value == "plan");
 
     let Some(state) = read_plan_mode_state(&state_path)? else {
+        if current_is_plan {
+            remove_nested_value(&mut document, permission_default_mode_path());
+            write_json_object(&settings_path, &document)?;
+            return Ok(PlanModeOutput {
+                success: true,
+                operation: String::from("exit"),
+                changed: true,
+                active: false,
+                managed: false,
+                message: String::from("Cleared unmanaged worktree-local plan mode override."),
+                settings_path: settings_path.display().to_string(),
+                state_path: state_path.display().to_string(),
+                previous_local_mode: None,
+                current_local_mode: get_nested_value(&document, permission_default_mode_path())
+                    .cloned(),
+            });
+        }
         return Ok(PlanModeOutput {
             success: true,
             operation: String::from("exit"),

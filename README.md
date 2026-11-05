@@ -128,11 +128,13 @@ Kcode supports running as a bot on multiple platforms simultaneously.
 | **Feishu** | Text, Images, Files, Cards | `KCODE_FEISHU_APP_ID`, `KCODE_FEISHU_APP_SECRET` |
 
 ### Webhook Configuration
-To use Webhook mode (recommended for high concurrency), set:
+To use Telegram Webhook mode, set a public HTTPS URL that ends with `/webhook/telegram`:
 ```bash
 export KCODE_WEBHOOK_URL="https://your-domain.com/webhook/telegram"
 ```
-Kcode will automatically configure the Telegram API and listen on port `3000` for all active channels.
+Kcode will automatically configure the Telegram Bot API and listen on local port `3000` for all active channels.
+Kcode only hosts the local receiver. You still need to expose `http://localhost:3000/webhook/*` through your own public HTTPS reverse proxy, tunnel, or load balancer.
+If you do not have public HTTPS ingress, leave `KCODE_WEBHOOK_URL` unset and Kcode will use Telegram Long Polling instead.
 
 For local CLI management, you can edit the same bridge settings through:
 

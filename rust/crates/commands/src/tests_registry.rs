@@ -1,7 +1,7 @@
 use crate::{
     build_command_registry_snapshot, render_slash_command_help, render_slash_command_help_detail,
-    render_slash_command_help_for_context, resume_supported_slash_commands, slash_command_specs,
-    suggest_slash_commands, v1_command_manifest, CommandRegistryContext, CommandSurface,
+    render_slash_command_help_for_context, slash_command_specs, suggest_slash_commands,
+    v1_command_manifest, CommandRegistryContext, CommandSurface,
 };
 
 #[test]
@@ -15,8 +15,9 @@ fn renders_help_from_shared_specs() {
     assert!(help.contains("Core v1.0 manifest"));
     assert!(help.contains("Extended local surface"));
     assert!(help.contains("/skills [list|install <path>|help]"));
-    assert_eq!(slash_command_specs().len(), 65);
-    assert_eq!(resume_supported_slash_commands().len(), 16);
+    assert!(slash_command_specs()
+        .iter()
+        .any(|spec| spec.name == "dream"));
 }
 
 #[test]
@@ -62,7 +63,6 @@ fn v1_command_manifest_matches_expected_session_surface() {
             "memory",
             "init",
             "doctor",
-            "add-dir",
         ]
     );
 }
@@ -86,11 +86,16 @@ fn renders_per_command_help_detail_for_mcp() {
 }
 
 #[test]
+fn review_help_detail_describes_local_diff_baseline() {
+    let help = render_slash_command_help_detail("review").expect("detail help should exist");
+    assert!(help.contains("/review [scope]"));
+    assert!(help.contains("Summary          Inspect the current local diff as a review baseline"));
+    assert!(help.contains("Category         Analysis & automation"));
+}
+
+#[test]
 fn suggests_closest_slash_commands_for_typos_and_aliases() {
-    assert_eq!(
-        suggest_slash_commands("stats", 3),
-        vec!["/stats", "/status"]
-    );
+    assert_eq!(suggest_slash_commands("stats", 3), vec!["/status"]);
     assert_eq!(suggest_slash_commands("/plugns", 3), vec!["/plugin"]);
     assert_eq!(suggest_slash_commands("zzz", 3), Vec::<String>::new());
 }

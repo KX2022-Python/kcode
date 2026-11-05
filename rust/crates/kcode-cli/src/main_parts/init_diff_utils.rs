@@ -13,6 +13,7 @@ fn run_init() -> Result<(), Box<dyn std::error::Error>> {
 fn normalize_permission_mode(mode: &str) -> Option<&'static str> {
     match mode.trim() {
         "read-only" => Some("read-only"),
+        "plan" => Some("plan"),
         "workspace-write" => Some("workspace-write"),
         "danger-full-access" => Some("danger-full-access"),
         _ => None,
@@ -21,6 +22,25 @@ fn normalize_permission_mode(mode: &str) -> Option<&'static str> {
 
 fn render_diff_report() -> Result<String, Box<dyn std::error::Error>> {
     render_diff_report_for(&env::current_dir()?)
+}
+
+fn format_review_report(cwd: &Path, scope: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
+    let status = run_git_diff_command_in(cwd, &["status", "--short", "--branch"])?;
+    let branch = parse_git_status_branch(Some(&status)).unwrap_or_else(|| "unknown".to_string());
+    let summary = parse_git_workspace_summary(Some(&status));
+    let diff = render_diff_report_for(cwd)?;
+
+    let mut lines = vec![
+        "Review".to_string(),
+        format!("  Scope            {}", scope.unwrap_or("current workspace")),
+        format!("  Branch           {branch}"),
+        format!("  Git state        {}", summary.headline()),
+        "  Action           inspect the current staged and unstaged diff locally".to_string(),
+        "  Next step        use this summary as the review baseline before commit or export".to_string(),
+    ];
+    lines.push(String::new());
+    lines.push(diff);
+    Ok(lines.join("\n"))
 }
 
 fn render_diff_report_for(cwd: &Path) -> Result<String, Box<dyn std::error::Error>> {

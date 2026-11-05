@@ -1023,6 +1023,7 @@ dependencies = [
  "plugins",
  "pulldown-cmark",
  "ratatui",
+ "reqwest",
  "runtime",
  "rustyline",
  "serde_json",
@@ -1030,6 +1031,7 @@ dependencies = [
  "tokio",
  "toml",
  "tools",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]

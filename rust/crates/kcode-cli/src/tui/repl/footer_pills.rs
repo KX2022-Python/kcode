@@ -2,7 +2,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-/// Footer Pills — 对齐 CC-Haha PromptInputFooter 状态指示器系统
+use super::theme::ThemePalette;
+
 pub struct FooterPills {
     pub model: String,
     pub permission_mode: String,
@@ -20,11 +21,7 @@ pub struct TokenUsage {
 }
 
 impl FooterPills {
-    pub fn new(
-        model: String,
-        permission_mode: String,
-        session_id: String,
-    ) -> Self {
+    pub fn new(model: String, permission_mode: String, session_id: String) -> Self {
         Self {
             model,
             permission_mode,
@@ -36,91 +33,73 @@ impl FooterPills {
         }
     }
 
-    pub fn render(&self) -> Paragraph<'static> {
-        let mut spans: Vec<Span<'static>> = Vec::new();
+    pub fn render(&self, width: u16, palette: ThemePalette) -> Paragraph<'static> {
+        let mut spans = vec![hint("Enter", "send", palette.text_muted)];
+        spans.push(separator(palette));
+        spans.push(hint("Shift+Enter/Ctrl+J", "newline", palette.text_muted));
 
-        // Model pill
-        spans.push(Span::styled(
-            format!(" 🤖 {} ", self.model),
-            Style::default()
-                .fg(Color::Cyan)
-                .bg(Color::Rgb(15, 25, 30)),
-        ));
-
-        spans.push(Span::raw(" "));
-
-        // Permission mode pill
-        let perm_color = match self.permission_mode.as_str() {
-            "allow" | "Allow" => Color::Green,
-            "prompt" | "Prompt" => Color::Yellow,
-            "danger" => Color::Red,
-            _ => Color::Gray,
-        };
-        spans.push(Span::styled(
-            format!(" 🔒 {} ", self.permission_mode),
-            Style::default()
-                .fg(perm_color)
-                .bg(Color::Rgb(25, 22, 8)),
-        ));
-
-        spans.push(Span::raw(" "));
-
-        // Session pill
-        spans.push(Span::styled(
-            format!(" 📋 {} ", self.session_id.chars().take(12).collect::<String>()),
-            Style::default()
-                .fg(Color::Gray)
-                .bg(Color::Rgb(20, 20, 20)),
-        ));
-
-        // Token usage pill (if available)
-        if let Some(ref usage) = self.token_usage {
-            spans.push(Span::raw(" "));
-            spans.push(Span::styled(
-                format!(
-                    " ⚡ {}in/{}out ",
-                    usage.input_tokens, usage.output_tokens
-                ),
-                Style::default()
-                    .fg(Color::Yellow)
-                    .bg(Color::Rgb(25, 22, 8)),
-            ));
+        if width >= 84 {
+            spans.push(separator(palette));
+            spans.push(hint("/", "commands", palette.info));
         }
 
-        // Active query indicator
+        if width >= 114 {
+            spans.push(separator(palette));
+            spans.push(hint("Ctrl+R", "history", palette.text_muted));
+        }
+
+        if width >= 142 {
+            spans.push(separator(palette));
+            spans.push(hint("PgUp/PgDn/Ctrl+↑↓", "scroll", palette.text_muted));
+        }
+
+        if width >= 166 {
+            spans.push(separator(palette));
+            spans.push(hint("Ctrl+D", "exit", palette.text_muted));
+        }
+
         if self.has_active_query {
-            spans.push(Span::raw(" "));
+            spans.push(separator(palette));
             spans.push(Span::styled(
-                " ● processing ",
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
+                "processing",
+                Style::default().fg(palette.accent),
             ));
         }
 
-        // Permission pending indicator
         if self.has_pending_permission {
-            spans.push(Span::raw(" "));
+            spans.push(separator(palette));
             spans.push(Span::styled(
-                " ⚠ permission ",
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                "waiting permission",
+                Style::default().fg(palette.warning),
             ));
         }
-
-        // Notification indicator
         if self.has_notifications {
-            spans.push(Span::raw(" "));
-            spans.push(Span::styled(
-                " 🔔 ",
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
-            ));
+            spans.push(separator(palette));
+            spans.push(Span::styled("notice", Style::default().fg(palette.error)));
         }
 
-        Paragraph::new(vec![Line::from(spans)])
-            .style(Style::default().bg(Color::Rgb(18, 28, 20)))
+        if let Some(usage) = &self.token_usage {
+            if width >= 170 {
+                spans.push(separator(palette));
+                spans.push(hint(
+                    "tokens",
+                    &format!("{} in / {} out", usage.input_tokens, usage.output_tokens),
+                    palette.text_muted,
+                ));
+            }
+        }
+
+        Paragraph::new(vec![Line::from(spans)]).style(Style::default().bg(palette.panel_bg))
     }
+}
+
+fn hint(label: &str, value: &str, color: Color) -> Span<'static> {
+    Span::styled(
+        format!("{label} {value}"),
+        Style::default().fg(color).add_modifier(Modifier::DIM),
+    )
+}
+
+fn separator(palette: ThemePalette) -> Span<'static> {
+    Span::styled("  ·  ", Style::default().fg(palette.text_muted))
 }

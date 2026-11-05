@@ -31,6 +31,10 @@ impl LiveCli {
                 self.run_issue(context.as_deref())?;
                 false
             }
+            SlashCommand::Review { scope } => {
+                self.run_review(scope.as_deref())?;
+                false
+            }
             SlashCommand::DebugToolCall => {
                 self.run_debug_tool_call(None)?;
                 false
@@ -45,6 +49,18 @@ impl LiveCli {
             }
             SlashCommand::Tasks { args } => {
                 self.print_tasks(args.as_deref())?;
+                false
+            }
+            SlashCommand::Powerup => {
+                println!("{}", format_powerup_report());
+                false
+            }
+            SlashCommand::Btw { question } => {
+                let Some(question) = question.as_deref().map(str::trim).filter(|value| !value.is_empty()) else {
+                    println!("{}", render_btw_usage());
+                    return Ok(false);
+                };
+                println!("{}", self.run_internal_prompt_text(question, false)?);
                 false
             }
             SlashCommand::Model { model } => self.set_model(model)?,
@@ -77,6 +93,14 @@ impl LiveCli {
             }
             SlashCommand::Memory => {
                 Self::print_memory()?;
+                false
+            }
+            SlashCommand::Dream { mode } => {
+                println!("{}", self.handle_dream(mode.as_deref())?);
+                false
+            }
+            SlashCommand::Plan { mode } => {
+                println!("{}", self.handle_plan(mode.as_deref())?);
                 false
             }
             SlashCommand::Doctor => {
@@ -119,6 +143,29 @@ impl LiveCli {
                 Self::print_skills(args.as_deref())?;
                 false
             }
+            SlashCommand::Login => {
+                println!(
+                    "{}",
+                    format_login_report(&self.active_profile.profile_name, &self.model)
+                );
+                false
+            }
+            SlashCommand::Feedback => {
+                println!("{}", format_feedback_report(None));
+                false
+            }
+            SlashCommand::Desktop => {
+                println!("{}", format_desktop_report());
+                false
+            }
+            SlashCommand::Schedule { args } => {
+                println!("{}", format_schedule_report(args.as_deref()));
+                false
+            }
+            SlashCommand::Loop { args } => {
+                println!("{}", format_loop_report(args.as_deref()));
+                false
+            }
             SlashCommand::Keybindings
             | SlashCommand::PrivacySettings
             | SlashCommand::Theme { .. }
@@ -129,21 +176,18 @@ impl LiveCli {
                 false
             }
             SlashCommand::Hooks { .. } => {
-                eprintln!("Run `kcode tui extensions` to manage hooks and plugins.");
+                self.print_config(Some("hooks"))?;
                 false
             }
-            SlashCommand::Login
-            | SlashCommand::Logout
+            SlashCommand::Logout
             | SlashCommand::Vim
             | SlashCommand::Upgrade
             | SlashCommand::Stats
             | SlashCommand::Share
-            | SlashCommand::Feedback
             | SlashCommand::Files
             | SlashCommand::Fast
             | SlashCommand::Exit
             | SlashCommand::Summary
-            | SlashCommand::Desktop
             | SlashCommand::Brief
             | SlashCommand::Advisor
             | SlashCommand::Stickers
@@ -151,20 +195,20 @@ impl LiveCli {
             | SlashCommand::Thinkback
             | SlashCommand::ReleaseNotes
             | SlashCommand::SecurityReview
-            | SlashCommand::Plan { .. }
-            | SlashCommand::Review { .. }
             | SlashCommand::Usage { .. }
             | SlashCommand::Rename { .. }
             | SlashCommand::Copy { .. }
             | SlashCommand::Context { .. }
             | SlashCommand::Effort { .. }
-            | SlashCommand::Branch { .. }
             | SlashCommand::Rewind { .. }
             | SlashCommand::Ide { .. }
             | SlashCommand::Tag { .. }
             | SlashCommand::AddDir { .. } => {
                 eprintln!("Command registered but not yet implemented.");
                 false
+            }
+            SlashCommand::Branch { name } => {
+                self.handle_session_command(Some("fork"), name.as_deref())?
             }
             SlashCommand::Unknown(name) => {
                 eprintln!("{}", format_unknown_slash_command(&name));
